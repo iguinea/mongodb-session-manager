@@ -1,0 +1,15 @@
+*.swp
+package-lock.json
+__pycache__
+.pytest_cache
+.venv
+*.egg-info
+
+# Environment variables
+.env
+.DS_Store
+
+
+# Logs
+logs
+*.log
