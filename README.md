@@ -434,57 +434,52 @@ See `examples/example_stream_async.py` for complete streaming implementation.
 
 ## 🏗️ MongoDB Schema
 
-Sessions are stored as optimized documents:
+Sessions are stored as nested documents with agents and messages:
 
 ```json
 {
-    "_id": "user-maria-chat-001",
-    "session_id": "user-maria-chat-001", 
-    "created_at": "2024-01-15T09:00:00Z",
-    "updated_at": "2024-01-22T14:30:00Z",
+    "_id": "session-id",
+    "session_id": "session-id",
+    "session_type": "default",
+    "created_at": ISODate("2024-01-15T09:00:00Z"),
+    "updated_at": ISODate("2024-01-22T14:30:00Z"),
     "agents": {
-        "traductor-principal": {
+        "agent-id": {
             "agent_data": {
-                "agent_id": "traductor-principal",
+                "agent_id": "agent-id",
                 "state": {
-                    "user_preferences": "formal_tone",
-                    "translation_count": 42
+                    "key": "value"
                 },
-                "conversation_manager_state": {
-                    "__name__": "SlidingWindowConversationManager",
-                    "removed_message_count": 0
-                },
+                "conversation_manager_state": {},
                 "created_at": "2024-01-15T09:00:00Z",
                 "updated_at": "2024-01-22T14:30:00Z"
             },
-            "metadata": {
-                "model": "eu.anthropic.claude-3-sonnet-20240229-v1:0",
-                "system_prompt": "Eres un traductor especializado...",
-                "name": "Traductor Principal",
-                "description": "Traductor especializado en euskera-castellano",
-                "metrics": {
-                    "total_input_tokens": 245,
-                    "total_output_tokens": 380, 
-                    "total_tokens": 625
-                }
-            },
-            "created_at": "2024-01-15T09:00:00Z",
-            "updated_at": "2024-01-22T14:30:00Z",
+            "created_at": ISODate("2024-01-15T09:00:00Z"),
+            "updated_at": ISODate("2024-01-22T14:30:00Z"),
             "messages": [
                 {
                     "message_id": 1,
                     "role": "user",
-                    "content": "Kaixo...",
-                    "created_at": "2024-01-15T09:00:00Z"
+                    "content": "Hello",
+                    "created_at": ISODate("2024-01-15T09:00:00Z"),
+                    "updated_at": ISODate("2024-01-15T09:00:00Z")
                 },
                 {
                     "message_id": 2,
-                    "role": "assistant", 
-                    "content": "Hola...",
-                    "input_tokens": 20,
-                    "output_tokens": 45,
-                    "latency_ms": 1250,
-                    "created_at": "2024-01-15T09:00:02Z"
+                    "role": "assistant",
+                    "content": "Hi there!",
+                    "created_at": ISODate("2024-01-15T09:00:02Z"),
+                    "updated_at": ISODate("2024-01-15T09:00:02Z"),
+                    "event_loop_metrics": {
+                        "accumulated_metrics": {
+                            "latencyMs": 250
+                        },
+                        "accumulated_usage": {
+                            "inputTokens": 10,
+                            "outputTokens": 20,
+                            "totalTokens": 30
+                        }
+                    }
                 }
             ]
         }
@@ -564,7 +559,7 @@ class ItzulbiraService:
 #### MongoDBSessionRepository
 MongoDB implementation of the `SessionRepository` interface from Strands SDK.
 
-**Methods:**
+**Implemented Methods:**
 - `create_session(session, **kwargs)`: Create a new session in MongoDB
 - `read_session(session_id, **kwargs)`: Read a session from MongoDB
 - `create_agent(session_id, session_agent, **kwargs)`: Create an agent in a session
@@ -576,41 +571,73 @@ MongoDB implementation of the `SessionRepository` interface from Strands SDK.
 - `list_messages(session_id, agent_id, limit, offset, **kwargs)`: List messages with pagination
 - `close()`: Close the MongoDB connection (if owned)
 
+**Key Features:**
+- Smart connection management (owns vs borrows client)
+- Automatic index creation on timestamps
+- Filters out `event_loop_metrics` when returning messages
+- Preserves original timestamps during updates
+
 #### MongoDBSessionManager
-Main session management class with automatic metrics tracking.
+Main session management class extending RepositorySessionManager from Strands SDK.
 
-**Methods:**
-- `append_message(message, agent)`: Store message in session (inherited from base class)
+**Implemented Methods:**
+- `__init__()`: Initialize with MongoDB connection options
+- `append_message(message, agent)`: Store message in session
+- `redact_latest_message(redact_message, agent)`: Redact the latest message
 - `sync_agent(agent)`: Sync agent data and capture event loop metrics
+- `initialize(agent)`: Initialize an agent with the session
 - `close()`: Close database connections
 
-**Note**: Methods like `check_session_exists()`, `get_metrics_summary()`, `set_token_counts()`, and `start_timing()` are not implemented in the base manager. Use the factory pattern with caching enabled to get `check_session_exists()` functionality.
-- `set_token_counts(input_tokens, output_tokens)`: Manual token setting (optional - usually automatic)
-- `start_timing()`: Manual timing start (optional - usually automatic)
-- `close()`: Close database connections
+**Automatic Features:**
+- Captures metrics from `agent.event_loop_metrics` during `sync_agent()`
+- Updates last message with token counts and latency
+- Handles MongoDB connection lifecycle intelligently
 
 #### MongoDBSessionManagerFactory
 Factory for creating session managers with connection pooling.
 
-**Methods:**
-- `create_session_manager(session_id, ...)`: Create manager with pooled connection
+**Implemented Methods:**
+- `__init__(connection_string, database_name, collection_name, client, **kwargs)`: Initialize factory
+- `create_session_manager(session_id, database_name, collection_name, **kwargs)`: Create manager with pooled connection
 - `get_connection_stats()`: Get MongoDB connection pool statistics
 - `close()`: Clean up factory resources
+
+**Global Factory Functions:**
+- `initialize_global_factory(...)`: Set up singleton factory for application
+- `get_global_factory()`: Access the global factory instance
+- `close_global_factory()`: Clean up global resources
 
 #### MongoDBConnectionPool
 Singleton connection pool for MongoDB client reuse.
 
-**Methods:**
-- `initialize(connection_string, **kwargs)`: Initialize the pool
+**Implemented Methods:**
+- `initialize(connection_string, **kwargs)`: Initialize the pool with smart defaults
 - `get_client()`: Get the shared MongoDB client
 - `get_pool_stats()`: Get connection pool statistics
 - `close()`: Close all connections
 
+**Default Configuration:**
+- `maxPoolSize`: 100
+- `minPoolSize`: 10
+- `maxIdleTimeMS`: 30000 (30 seconds)
+- `waitQueueTimeoutMS`: 5000 (5 seconds)
+- `retryWrites`: True
+- `retryReads`: True
+
 ### Helper Functions
-- `create_mongodb_session_manager()`: Convenient factory function with defaults
-- `initialize_global_factory()`: Initialize global factory for FastAPI
-- `get_global_factory()`: Get the global factory instance
-- `close_global_factory()`: Clean up global resources
+
+#### create_mongodb_session_manager
+```python
+create_mongodb_session_manager(
+    session_id: str,
+    connection_string: Optional[str] = None,
+    database_name: str = "database_name",
+    collection_name: str = "collection_name",
+    client: Optional[MongoClient] = None,
+    **kwargs
+) -> MongoDBSessionManager
+```
+Convenience function to create a session manager with default settings.
 
 ## 🔗 Integration Examples
 
