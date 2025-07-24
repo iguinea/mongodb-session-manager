@@ -272,14 +272,6 @@ help_response = support("How do I configure API keys?")  # Auto-metrics for supp
 - **Thread-safe operations**: Designed for concurrent use
 - **Smart connection handling**: Supports both owned and borrowed MongoDB clients
 
-### ❌ Not Implemented
-- **get_metrics_summary()**: Method referenced in docs but not implemented
-- **check_session_exists()**: Method referenced in docs but not implemented
-- **set_token_counts()**: Manual token setting not implemented
-- **start_timing()**: Manual timing not implemented
-- **TTL support**: Session expiration not implemented
-- **Caching layer**: SessionMetadataCache referenced but not implemented
-
 ## 🧪 Testing
 
 Run tests with UV:
