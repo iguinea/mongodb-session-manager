@@ -1,6 +1,6 @@
 """Example FastAPI integration with optimized MongoDB Session Manager.
 
-This example demonstrates how to use the connection pooling and caching features
+This example demonstrates how to use the connection pooling
 for high-performance stateless API endpoints.
 """
 
@@ -15,14 +15,15 @@ from strands import Agent
 
 import sys
 from pathlib import Path
+
 # Add parent directory to path to access src module
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src import (
+from mongodb_session_manager import (
     initialize_global_factory,
     get_global_factory,
     close_global_factory,
-    MongoDBConnectionPool
+    MongoDBConnectionPool,
 )
 
 # Configure logging
@@ -48,42 +49,42 @@ async def lifespan(app: FastAPI):
     """Handle application startup and shutdown."""
     # Startup
     logger.info("Starting FastAPI application...")
-    
+
     # Initialize the global factory with connection pooling
     factory = initialize_global_factory(
-        connection_string="mongodb://mongodb:mongodb@genai-mrg-mongodb:27017/",
+        connection_string="mongodb://mongodb:mongodb@mongodb_session_manager-mongodb:27017/",
         database_name="example_fastapi",
         collection_name="example_fastapi",
         # Connection pool settings optimized for high concurrency
         maxPoolSize=100,
         minPoolSize=10,
         maxIdleTimeMS=30000,
-        # Enable caching for better performance
-        enable_cache=True,
-        cache_max_size=1000,
-        cache_ttl_seconds=300
     )
-    
+
     # Store factory in app state for access in endpoints
+    # Note: You can access the factory in two ways:
+    # 1. From app state: request.app.state.session_factory (used in this example)
+    # 2. From global: get_global_factory() (simpler but less flexible)
     app.state.session_factory = factory
-    
-    logger.info("MongoDB session factory initialized with connection pooling and caching")
-    
+
+    logger.info(
+        "MongoDB session factory initialized with connection pooling"
+    )
+
     yield  # Application runs
-    
+
     # Shutdown
     logger.info("Shutting down FastAPI application...")
-    
+
     # Close the global factory and connection pool
     close_global_factory()
-    
+
     logger.info("Cleanup complete")
 
 
 # Create FastAPI app with lifespan handler
 app = FastAPI(
-    title="Virtual Agent API with Optimized Session Management",
-    lifespan=lifespan
+    title="Virtual Agent API with Optimized Session Management", lifespan=lifespan
 )
 
 
@@ -91,132 +92,101 @@ app = FastAPI(
 async def chat(
     request: Request,
     chat_request: ChatRequest,
-    session_id: str = Header(description="Session identifier")
+    session_id: str = Header(description="Session identifier"),
 ) -> ChatResponse:
     """Process a chat message with optimized session management.
-    
+
     This endpoint demonstrates:
     1. Reusing MongoDB connections via the factory
-    2. Automatic session caching for metadata lookups
-    3. Proper metrics tracking
+    2. Proper metrics tracking
     """
     try:
         # Get factory from app state (no new connection created)
-        factory = get_global_factory()
-        
+        factory = request.app.state.session_factory
+
         # Create session manager (reuses existing MongoDB connection)
-        # The factory automatically wraps it with caching if enabled
         session_manager = factory.create_session_manager(session_id)
-        
-        # Check if session exists (uses cache for repeated checks)
-        session_info = session_manager.check_session_exists()
-        logger.info(f"Session {session_id} exists: {session_info['exists']}")
-        
+
         # Create a mock agent for demonstration
         # In real usage, you would configure your actual agent here
         agent = Agent(
             name="VirtualAgent",
-            model="gpt-4",  # Replace with your model
+            model="eu.anthropic.claude-sonnet-4-20250514-v1:0",
             system_prompt="You are a helpful assistant.",
-            **chat_request.agent_config
+            **chat_request.agent_config,
         )
-        
+
         # Configure agent with session manager
         agent.session_manager = session_manager
-        
+
         # Process the message
         # The session manager automatically tracks timing and metrics
-        response = await agent.run_async(chat_request.prompt)
-        
+        # Agent uses __call__ method, which is synchronous
+        response = agent(chat_request.prompt)
+
         # Get metrics summary
         metrics = session_manager.get_metrics_summary(agent.agent_id)
-        
+
         return ChatResponse(
             response=response,
             session_id=session_id,
             metrics={
                 "total_tokens": metrics.get("total_tokens", 0),
                 "average_latency_ms": metrics.get("average_latency_ms", 0),
-                "total_messages": metrics.get("total_messages", 0)
-            }
+                "total_messages": metrics.get("total_messages", 0),
+            },
         )
-        
+
     except Exception as e:
         logger.error(f"Error processing chat request: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/health")
-async def health_check():
+async def health_check(request: Request):
     """Health check endpoint with connection pool status."""
     try:
         # Get connection pool statistics
         pool_stats = MongoDBConnectionPool.get_pool_stats()
-        
-        # Get cache statistics if available
-        factory = get_global_factory()
-        cache_stats = factory.get_cache_stats()
-        
+
         return {
             "status": "healthy",
             "connection_pool": pool_stats,
-            "cache": cache_stats or {"status": "disabled"}
         }
     except Exception as e:
-        return {
-            "status": "unhealthy",
-            "error": str(e)
-        }
+        return {"status": "unhealthy", "error": str(e)}
 
 
 @app.get("/metrics")
-async def get_metrics():
-    """Get system metrics including cache performance."""
+async def get_metrics(request: Request):
+    """Get system metrics."""
     try:
-        factory = get_global_factory()
-        
-        # Get cache statistics
-        cache_stats = factory.get_cache_stats()
-        
+        factory = request.app.state.session_factory
+
         # Get connection pool statistics
         pool_stats = factory.get_connection_stats()
-        
-        return {
-            "cache_metrics": cache_stats,
-            "connection_pool": pool_stats
-        }
+
+        return {"connection_pool": pool_stats}
     except Exception as e:
         logger.error(f"Error getting metrics: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/sessions/{session_id}/invalidate-cache")
-async def invalidate_session_cache(session_id: str):
-    """Manually invalidate cache for a specific session.
-    
-    Useful after bulk updates or when cache coherency is critical.
-    """
-    try:
-        factory = get_global_factory()
-        
-        # Create a temporary session manager to invalidate its cache
-        session_manager = factory.create_session_manager(session_id)
-        
-        if hasattr(session_manager, 'invalidate_cache'):
-            session_manager.invalidate_cache()
-            return {"status": "success", "message": f"Cache invalidated for session {session_id}"}
-        else:
-            return {"status": "info", "message": "Caching not enabled"}
-            
-    except Exception as e:
-        logger.error(f"Error invalidating cache: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
 
 # Example of how to run the application
 if __name__ == "__main__":
     import uvicorn
-    
+    from fastapi.middleware.cors import CORSMiddleware
+
+    # CORS middleware for cross-origin requests
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],  # In production, restrict to specific origins
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
     # Run with optimized settings for production
     uvicorn.run(
         app,
@@ -224,5 +194,5 @@ if __name__ == "__main__":
         port=8000,
         workers=1,  # Single worker for shared connection pool
         loop="uvloop",  # Faster event loop
-        log_level="info"
+        log_level="info",
     )

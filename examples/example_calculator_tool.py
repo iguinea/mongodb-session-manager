@@ -14,7 +14,7 @@ from strands_tools.calculator import calculator
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Import our MongoDBSessionManager
-from src import create_mongodb_session_manager
+from mongodb_session_manager import create_mongodb_session_manager
 
 
 async def main():
@@ -29,7 +29,7 @@ async def main():
     # Create session manager
     session_manager = create_mongodb_session_manager(
         session_id="calculator-test-session",
-        connection_string="mongodb://mongodb:mongodb@genai-mrg-mongodb:27017/",
+        connection_string="mongodb://mongodb:mongodb@mongodb_session_manager-mongodb:27017/",
         database_name="itzulbira_test",
         collection_name="calculator_sessions"
     )

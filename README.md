@@ -1,37 +1,32 @@
-# MongoDB Session Manager - Production Ready
+# MongoDB Session Manager
 
-A production-ready MongoDB session manager for Strands Agents with comprehensive metrics tracking and optimized performance for stateless environments.
+A MongoDB session manager for Strands Agents that provides persistent storage for agent conversations and state, with connection pooling optimized for stateless environments.
 
 ## 🚀 Features
 
 ### Core Session Management
 - **MongoDB Persistence**: Complete session data stored in MongoDB documents
-- **Automatic Session Resumption**: Continue conversations across days, weeks, or months
+- **Session Resumption**: Continue conversations across sessions
 - **Multiple Agents per Session**: Support for multiple agents in the same session
 - **Connection Pooling**: Built-in MongoDB connection pooling for high performance
-- **Automatic Indexing**: Optimized indexes for fast queries
+- **Automatic Indexing**: Optimized indexes for timestamp queries
 - **Thread-safe**: Designed for concurrent operations
 
-### Advanced Metrics Tracking
-- **Fully Automatic Token Tracking**: Tokens extracted automatically from model responses
-- **Zero-Configuration Latency Measurement**: Response time tracking with no setup needed
-- **Model & Configuration Storage**: Automatic capture of model and system prompt
-- **Persistent Metrics**: All metrics stored and persist across session resumption  
-- **Production Monitoring**: Real-time metrics for operational visibility
+### Metrics Support
+- **Event Loop Metrics**: Captures metrics from agent's event_loop_metrics during sync
+- **Agent State Persistence**: Stores and retrieves agent state across sessions
+- **Message History**: Complete conversation history with timestamps
 
-### Production Ready
+### Production Features
 - **Error Handling**: Comprehensive error handling and logging
-- **Performance Optimized**: Efficient queries and minimal overhead  
-- **Clean API**: Simple, intuitive interface
-- **Unified Implementation**: Single class combining all functionality
-- **Connection Management**: Built-in connection pooling and lifecycle management
+- **Connection Management**: Smart connection lifecycle management (owned vs borrowed)
+- **Clean API**: Simple, intuitive interface compatible with Strands SDK
 
 ### Performance Optimization
 - **Connection Pool Singleton**: Reuse MongoDB connections across requests
 - **Factory Pattern**: Efficient session manager creation without connection overhead
-- **LRU Metadata Cache**: In-memory caching for frequently accessed sessions
 - **Stateless-Ready**: Optimized for FastAPI and other stateless frameworks
-- **5-10x Performance Improvement**: Compared to creating connections per request
+- **Reduced Connection Overhead**: Significant performance improvement over per-request connections
 
 ## 📦 Installation
 
@@ -49,13 +44,12 @@ pip install pymongo strands-agents
 from strands import Agent
 from mongodb_session_manager import create_mongodb_session_manager
 
-# Create session manager with all features enabled
+# Create session manager
 session_manager = create_mongodb_session_manager(
     session_id="customer-12345",
     connection_string="mongodb://user:pass@host:27017/",
-    database_name="itzulbira",
-    collection_name="agent_sessions",
-    # ttl_hours=24  # Note: TTL not implemented yet
+    database_name="my_database",
+    collection_name="agent_sessions"
 )
 
 # Create agent with session persistence
@@ -63,61 +57,48 @@ agent = Agent(
     model="eu.anthropic.claude-3-sonnet-20240229-v1:0",
     agent_id="support-agent",
     session_manager=session_manager,
-    system_prompt="Eres un asistente de soporte para Itzulbira."
+    system_prompt="You are a helpful assistant."
 )
 
-# Use with fully automatic metrics tracking!
-response = agent("¿Puedes ayudarme con la configuración?")  # Everything automatic!
+# Use the agent - conversation is automatically persisted
+response = agent("Hello, can you help me?")
 
-# Get comprehensive metrics
-metrics = session_manager.get_metrics_summary("support-agent")
-print(f"Model: {metrics['model']}")
-print(f"Total tokens: {metrics['total_tokens']}")
-print(f"Average latency: {metrics['average_latency_ms']}ms")
+# Sync agent to persist state and metrics
+session_manager.sync_agent(agent)
 
 # Clean up
 session_manager.close()
 ```
 
-## 📊 Metrics Tracking
+## 📊 Event Loop Metrics
 
-### Fully Automatic Token Tracking
+### Automatic Metrics Capture
+The session manager automatically captures metrics from the agent's event loop during sync operations:
+
 ```python
-# Tokens are automatically extracted and tracked - no manual setup needed!
-response = agent("Hola")  # Tokens detected and stored automatically
+# Use the agent
+response = agent("Hello")
 
-# View accumulated metrics
-metrics = session_manager.get_metrics_summary("agent-id")
-print(f"Total input tokens: {metrics['total_input_tokens']}")
-print(f"Total output tokens: {metrics['total_output_tokens']}")
-print(f"Total tokens: {metrics['total_tokens']}")
+# Sync agent - this captures and stores event loop metrics
+session_manager.sync_agent(agent)
+
+# Metrics are automatically stored with the last message in MongoDB:
+# - latencyMs: Response latency from agent's event loop
+# - inputTokens: Input token count from agent
+# - outputTokens: Output token count from agent  
+# - totalTokens: Total tokens used
 ```
 
-### Automatic Latency Measurement
-```python
-# Timing starts automatically when user message is sent!
-# No need to call start_timing() manually
-response = agent("¿Qué tiempo hace?")
+### How It Works
+1. When you call `sync_agent()`, the manager reads metrics from `agent.event_loop_metrics`
+2. If latency > 0, it updates the last message in MongoDB with these metrics
+3. Metrics are stored in the `event_loop_metrics` field of the message document
 
-# Latency automatically calculated and stored
-metrics = session_manager.get_metrics_summary("agent-id")
-print(f"Average response time: {metrics['average_latency_ms']}ms")
-```
-
-### Model and Configuration Tracking
-```python
-# Model and system prompt automatically captured
-agent = Agent(
-    model="eu.anthropic.claude-3-sonnet-20240229-v1:0",
-    system_prompt="Eres un traductor especializado en euskera.",
-    session_manager=session_manager
-)
-
-# Configuration and state available in metrics
-metrics = session_manager.get_metrics_summary("agent-id")
-print(f"Model: {metrics['model']}")
-print(f"System: {metrics['system_prompt']}")
-print(f"Agent State: {metrics['state']}")  # Agent's key-value state
+### Accessing Metrics
+Since metrics are stored in MongoDB, you can:
+- Query the database directly to retrieve message metrics
+- Use MongoDB aggregation pipelines for analytics
+- Build custom reporting on top of the stored data
 ```
 
 ### Agent State Persistence
@@ -133,49 +114,50 @@ agent.state.set("preferences", {"tone": "formal", "dialect": "bizkaiera"})
 # State is automatically saved to MongoDB in agent_data.state
 # and restored when the session is resumed
 
-# View current agent state:
-metrics = session_manager.get_metrics_summary("agent-id")
-print(f"Current state: {metrics['state']}")
+# Agent state is persisted automatically during sync_agent()
+# To view state, you need to query MongoDB directly or
+# use the agent's state object:
+print(f"Current state: {agent.state.to_dict()}")
 # Output: {'user_language': 'euskera', 'translation_count': 42, ...}
 ```
 
-### Session Verification and Metadata Recovery
+### Session Persistence Example
 ```python
-# Check if session exists before creating agents
+# First session - create and use agent
 session_manager = create_mongodb_session_manager(
-    session_id="calculator-test-session",
+    session_id="user-session-001",
     connection_string="mongodb://...",
     database_name="my_database"
 )
 
-# Check session and get metadata
-session_info = session_manager.check_session_exists()
-if session_info['exists']:
-    print(f"✅ Existing session from {session_info['created_at']}")
-    
-    # Check specific agent
-    agent_info = session_manager.check_session_exists("calculator-agent")
-    if "calculator-agent" in agent_info['agents']:
-        metadata = agent_info['agents']['calculator-agent']
-        print(f"Model: {metadata['model']}")
-        print(f"System Prompt: {metadata['system_prompt']}")
-        print(f"Messages: {metadata['message_count']}")
-        
-        # Recreate agent with existing configuration
-        agent = Agent(
-            agent_id="calculator-agent",
-            model=metadata['model'],
-            system_prompt=metadata['system_prompt'],
-            session_manager=session_manager
-        )
-else:
-    print("❌ New session - creating fresh agent")
-    agent = Agent(
-        agent_id="calculator-agent",
-        model="default-model",
-        system_prompt="You are a helpful assistant",
-        session_manager=session_manager
-    )
+agent = Agent(
+    agent_id="assistant",
+    model="claude-3-sonnet",
+    system_prompt="You are a helpful assistant",
+    session_manager=session_manager
+)
+
+response = agent("Remember my name is Alice")
+session_manager.sync_agent(agent)
+session_manager.close()
+
+# Later session - resume conversation
+session_manager = create_mongodb_session_manager(
+    session_id="user-session-001",  # Same session ID
+    connection_string="mongodb://...",
+    database_name="my_database"
+)
+
+# Recreate agent with same ID
+agent = Agent(
+    agent_id="assistant",  # Same agent ID
+    model="claude-3-sonnet",
+    session_manager=session_manager
+)
+
+# Agent has access to previous conversation
+response = agent("What's my name?")
+# Agent will remember "Alice" from previous session
 ```
 
 ## 🔄 Session Persistence
@@ -220,9 +202,8 @@ agent = Agent(
 response = agent("Gogoratzen duzu zer galdetu nuen lehenengo aldiz?")
 # Agent can reference previous conversation from day 1
 
-# Metrics are accumulated across sessions
-metrics = session_manager.get_metrics_summary("traductor-principal")
-print(f"Total tokens used across all sessions: {metrics['total_tokens']}")
+# Metrics from event loop are stored with messages in MongoDB
+# Access them via database queries or use factory pattern with caching
 ```
 
 ## 🔧 Production Configuration
@@ -275,32 +256,29 @@ support = Agent(
 translation = translator("Translate: 'Kaixo mundua'")  # Auto-metrics for translator
 help_response = support("How do I configure API keys?")  # Auto-metrics for support
 
-# Each agent has separate metrics
-translator_metrics = session_manager.get_metrics_summary("euskera-translator")
-support_metrics = session_manager.get_metrics_summary("tech-support")
+# Each agent's messages and event loop metrics are stored separately in MongoDB
 ```
 
-## 📈 Session Statistics
+## 🔍 Current Implementation Status
 
-### Comprehensive Analytics
-```python
-# Get session-wide statistics
-stats = session_manager.get_session_stats()
-print(f"Session ID: {stats['session_id']}")
-print(f"Total agents: {stats['total_agents']}")
-print(f"Total messages: {stats['total_messages']}")
-print(f"Created: {stats['created_at']}")
-print(f"Last updated: {stats['updated_at']}")
+### ✅ Working Features
+- **Full session persistence**: Messages, agents, and state stored in MongoDB
+- **Connection pooling**: Singleton pattern for connection reuse
+- **Factory pattern**: Efficient session manager creation
+- **Automatic metrics capture**: Tokens and latency from agent's event loop
+- **Message management**: Full CRUD operations for messages
+- **Agent management**: Multiple agents per session with separate histories
+- **Timestamp preservation**: Original creation times maintained
+- **Thread-safe operations**: Designed for concurrent use
+- **Smart connection handling**: Supports both owned and borrowed MongoDB clients
 
-# Per-agent breakdown
-for agent_info in stats['agents']:
-    agent_id = agent_info['agent_id']
-    metrics = agent_info['metrics']
-    print(f"\nAgent {agent_id}:")
-    print(f"  Messages: {agent_info['message_count']}")
-    print(f"  Tokens: {metrics['total_tokens']}")
-    print(f"  Avg Latency: {metrics['average_latency_ms']}ms")
-```
+### ❌ Not Implemented
+- **get_metrics_summary()**: Method referenced in docs but not implemented
+- **check_session_exists()**: Method referenced in docs but not implemented
+- **set_token_counts()**: Manual token setting not implemented
+- **start_timing()**: Manual timing not implemented
+- **TTL support**: Session expiration not implemented
+- **Caching layer**: SessionMetadataCache referenced but not implemented
 
 ## 🧪 Testing
 
@@ -309,6 +287,9 @@ Run tests with UV:
 ```bash
 # Run examples
 uv run python examples/example_calculator_tool.py
+uv run python examples/example_fastapi.py
+uv run python examples/example_performance.py
+uv run python examples/example_stream_async.py
 
 # Run tests (when test suite is created)
 uv run pytest tests/
@@ -342,9 +323,9 @@ This leads to:
 
 #### 1. Using the Factory Pattern (Recommended)
 ```python
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from contextlib import asynccontextmanager
-from mongodb_session_manager import initialize_global_factory, get_global_factory
+from mongodb_session_manager import initialize_global_factory, get_global_factory, close_global_factory
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -354,10 +335,11 @@ async def lifespan(app: FastAPI):
         database_name="virtualagents",
         maxPoolSize=100,        # Connection pool size
         minPoolSize=10,         # Keep minimum connections ready
-        enable_cache=True,      # Enable metadata caching
-        cache_max_size=1000,    # Cache up to 1000 sessions
-        cache_ttl_seconds=300   # 5-minute cache TTL
     )
+    
+    # Store factory in app state (recommended approach)
+    app.state.session_factory = factory
+    
     yield
     # Shutdown: Clean up connections
     close_global_factory()
@@ -365,22 +347,20 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 @app.post("/chat")
-async def chat(session_id: str):
-    # Get factory (no new connection)
-    factory = get_global_factory()
+async def chat(request: Request, session_id: str):
+    # Method 1: Get factory from app state (recommended - more explicit)
+    factory = request.app.state.session_factory
+    
+    # Method 2: Get global factory (alternative - simpler but less flexible)
+    # factory = get_global_factory()
     
     # Create session manager (reuses pooled connection)
     manager = factory.create_session_manager(session_id)
-    
-    # Operations use cached metadata after first access
-    session_info = manager.check_session_exists()  # First: DB query
-    session_info = manager.check_session_exists()  # Second: From cache!
 ```
 
 #### 2. Performance Benefits
-- **5-10x faster**: Connection reuse eliminates overhead
+- **Faster**: Connection reuse eliminates overhead
 - **Higher throughput**: Handle more concurrent requests
-- **Lower latency**: Cache reduces database queries
 - **Resource efficient**: Controlled connection pool
 
 #### 3. Monitoring Performance
@@ -392,17 +372,8 @@ async def get_metrics():
     # Connection pool statistics
     pool_stats = factory.get_connection_stats()
     
-    # Cache performance metrics
-    cache_stats = factory.get_cache_stats()
-    
     return {
-        "pool": pool_stats,
-        "cache": {
-            "hit_rate": cache_stats["hit_rate"],
-            "size": cache_stats["size"],
-            "hits": cache_stats["hits"],
-            "misses": cache_stats["misses"]
-        }
+        "pool": pool_stats
     }
 ```
 
@@ -416,35 +387,50 @@ factory = MongoDBSessionManagerFactory(
     maxPoolSize=200,
     minPoolSize=50,
     maxIdleTimeMS=30000,
-    waitQueueTimeoutMS=5000,
-    # Aggressive caching for read-heavy workloads
-    enable_cache=True,
-    cache_max_size=5000,
-    cache_ttl_seconds=600  # 10 minutes
+    waitQueueTimeoutMS=5000
 )
 ```
 
-#### Cache Management
-```python
-# Invalidate cache after updates
-@app.post("/sessions/{session_id}/update")
-async def update_session(session_id: str):
-    factory = get_global_factory()
-    manager = factory.create_session_manager(session_id)
-    
-    # Perform updates...
-    
-    # Invalidate cache to ensure consistency
-    if hasattr(manager, 'invalidate_cache'):
-        manager.invalidate_cache()
-```
 
 ### Performance Comparison
 
 See `examples/example_performance.py` for benchmarks showing:
-- **Sequential operations**: 5-10x speedup
-- **Concurrent requests**: 10-20x throughput improvement
-- **Cache hit rates**: 80-95% for typical workloads
+- **Sequential operations**: Significant speedup
+- **Concurrent requests**: Higher throughput with connection pooling
+
+## 🌊 Async Streaming Support
+
+### Real-time Streaming Responses
+The session manager fully supports async streaming responses with automatic metrics tracking:
+
+```python
+# Create streaming-capable agent
+async def stream_handler(session_manager, agent, prompt):
+    # Start timing automatically
+    session_manager.append_message({"role": "user", "content": prompt}, agent)
+    
+    response_chunks = []
+    
+    # Stream response tokens
+    async for event in agent.stream_async(prompt):
+        if "data" in event:
+            response_chunks.append(event["data"])
+            yield event["data"]  # Real-time streaming
+    
+    # Save complete response with metrics
+    full_response = "".join(response_chunks)
+    session_manager.append_message({"role": "assistant", "content": full_response}, agent)
+    session_manager.sync_agent(agent)
+```
+
+### Features
+- **Token-by-token streaming**: Process responses as they arrive
+- **Automatic metrics**: Latency and tokens tracked during streaming
+- **Concurrent streams**: Handle multiple streaming sessions simultaneously
+- **Error recovery**: Graceful handling of streaming errors
+- **Session persistence**: Resume streaming conversations
+
+See `examples/example_stream_async.py` for complete streaming implementation.
 
 ## 🏗️ MongoDB Schema
 
@@ -594,10 +580,11 @@ MongoDB implementation of the `SessionRepository` interface from Strands SDK.
 Main session management class with automatic metrics tracking.
 
 **Methods:**
-- `check_session_exists(agent_id=None)`: Check if session exists and retrieve agent metadata
-- `get_metrics_summary(agent_id)`: Get comprehensive metrics for an agent  
-- `append_message(message, agent)`: Store message with automatic timing and token extraction
-- `sync_agent(agent)`: Sync agent data and capture configuration
+- `append_message(message, agent)`: Store message in session (inherited from base class)
+- `sync_agent(agent)`: Sync agent data and capture event loop metrics
+- `close()`: Close database connections
+
+**Note**: Methods like `check_session_exists()`, `get_metrics_summary()`, `set_token_counts()`, and `start_timing()` are not implemented in the base manager. Use the factory pattern with caching enabled to get `check_session_exists()` functionality.
 - `set_token_counts(input_tokens, output_tokens)`: Manual token setting (optional - usually automatic)
 - `start_timing()`: Manual timing start (optional - usually automatic)
 - `close()`: Close database connections
@@ -608,7 +595,6 @@ Factory for creating session managers with connection pooling.
 **Methods:**
 - `create_session_manager(session_id, ...)`: Create manager with pooled connection
 - `get_connection_stats()`: Get MongoDB connection pool statistics
-- `get_cache_stats()`: Get metadata cache performance metrics
 - `close()`: Clean up factory resources
 
 #### MongoDBConnectionPool
@@ -632,12 +618,77 @@ Singleton connection pool for MongoDB client reuse.
 - `examples/example_calculator_tool.py`: Complete agent with tools demonstration
 - `examples/example_fastapi.py`: FastAPI integration with connection pooling
 - `examples/example_performance.py`: Performance benchmarks and comparisons
+- `examples/example_stream_async.py`: Async streaming responses with real-time metrics
+- `examples/example_fastapi_streaming.py`: FastAPI with streaming responses and proper factory usage
 
 Each example includes:
 - Basic usage demonstration
 - Factory function usage
 - Production configuration patterns
 - Performance optimization techniques
+
+## 🎮 Interactive Chat Playground
+
+### Overview
+The project includes an interactive web-based chat interface to test the MongoDB session manager with a real-time streaming FastAPI backend. This playground demonstrates session persistence, real-time token streaming, and metadata tracking.
+
+### Quick Start
+The playground uses a Makefile for easy startup:
+
+```bash
+# Terminal 1: Start the FastAPI backend (port 8880)
+cd playground/chat
+make backend-fastapi-streaming
+
+# Terminal 2: Start the frontend web server (port 8881)
+cd playground/chat
+make frontend
+```
+
+Then open your browser to: http://localhost:8881/chat.html
+
+### Architecture
+- **Frontend** (port 8881): Static HTML/JS chat interface with real-time streaming support
+- **Backend** (port 8880): FastAPI server with MongoDB session management and streaming responses
+- **CORS**: Enabled to allow cross-origin requests between frontend and backend
+
+### Features
+- **Real-time Streaming**: Watch responses appear token-by-token as they're generated
+- **Session Persistence**: Each chat session is uniquely identified and stored in MongoDB
+- **Metadata View**: Toggle to see session information, metrics, and statistics
+- **Responsive UI**: Modern chat interface with Tailwind CSS styling
+- **Automatic Metrics**: Token usage and latency tracked automatically
+
+### How It Works
+1. The frontend generates a unique session ID for each browser session
+2. Messages are sent to the FastAPI backend with the session ID in headers
+3. The backend uses MongoDB session manager to persist conversations
+4. Responses are streamed back in real-time using Server-Sent Events
+5. All metrics (tokens, latency) are automatically tracked and stored
+
+### Backend Configuration
+The example FastAPI server (`examples/example_fastapi_streaming.py`) demonstrates:
+- Global factory initialization with connection pooling
+- Session manager creation per request (reusing connections)
+- Streaming responses with automatic metrics tracking
+- Agent with custom tools for state management
+- Health and metrics endpoints for monitoring
+
+### Frontend Features
+The chat interface (`playground/chat/chat.html`) includes:
+- Floating action button (FAB) to open chat
+- Slide-out chat panel with message history
+- Real-time message streaming with typewriter effect
+- Metadata panel showing session details and statistics
+- Markdown rendering for formatted responses
+- Auto-scrolling to latest messages
+
+### Customization
+You can customize the chat behavior by modifying:
+- **System Prompt**: Edit `_AGENT_PROMPT` in `example_fastapi_streaming.py`
+- **Model**: Change the model in the Agent initialization
+- **Tools**: Add or modify tools available to the agent
+- **UI**: Modify `chat.html` and `chat-widget.js` for UI changes
 
 ## 📄 License
 
