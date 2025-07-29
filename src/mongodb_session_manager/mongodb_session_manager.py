@@ -11,6 +11,7 @@ from strands import Agent
 from strands.session.repository_session_manager import RepositorySessionManager
 from strands.types.content import Message
 from strands import tool
+from strands.types.tools import JSONSchema
 
 from .mongodb_session_repository import MongoDBSessionRepository
 
@@ -164,30 +165,44 @@ class MongoDBSessionManager(RepositorySessionManager):
 
     def get_metadata_tool(self):
         """Get a tool for managing session metadata.
-        
+
         Returns:
             A Strands tool that can be used by agents to manage session metadata.
         """
         session_manager = self  # Capture reference for closure
-        
-        @tool
+
+        @tool(
+            name="manage_metadata",
+            description="Manage session metadata with get, set/update, or delete operations.",
+            inputSchema=JSONSchema(
+                {
+                    "type": "object",
+                    "properties": {
+                        "action": {"type": "string"},
+                        "metadata": {"type": "object"},
+                        "keys": {"type": "array"},
+                    },
+                    "required": ["action"],
+                }
+            ),
+        )
         def manage_metadata(
             action: str,
             metadata: Optional[Dict[str, Any]] = None,
-            keys: Optional[List[str]] = None
+            keys: Optional[List[str]] = None,
         ) -> str:
             """
             Manage session metadata with get, set/update, or delete operations.
-            
+
             Args:
                 action: The action to perform - "get", "set", "update", or "delete"
                 metadata: For set/update actions, a dictionary of key-value pairs to set
                 keys: For get action, optional list of specific keys to retrieve.
                       For delete action, list of keys to remove.
-                      
+
             Returns:
                 A string describing the result of the operation
-                
+
             Examples:
                 - Get all metadata: manage_metadata("get")
                 - Get specific keys: manage_metadata("get", keys=["priority", "status"])
@@ -196,16 +211,21 @@ class MongoDBSessionManager(RepositorySessionManager):
             """
             try:
                 action = action.lower()
-                
+
                 if action == "get":
                     # Retrieve metadata
                     all_metadata = session_manager.get_metadata()
-                    if all_metadata and "metadata" in all_metadata:
-                        metadata_dict = all_metadata["metadata"]
-                        
+                    # if all_metadata and "metadata" in all_metadata:
+                    #     metadata_dict = all_metadata["metadata"]
+                    if all_metadata:
+                        metadata_dict = all_metadata
                         if keys:
                             # Return only requested keys
-                            filtered = {k: metadata_dict.get(k) for k in keys if k in metadata_dict}
+                            filtered = {
+                                k: metadata_dict.get(k)
+                                for k in keys
+                                if k in metadata_dict
+                            }
                             if filtered:
                                 return f"Metadata retrieved: {json.dumps(filtered, default=str)}"
                             else:
@@ -218,31 +238,33 @@ class MongoDBSessionManager(RepositorySessionManager):
                                 return "No metadata stored in session"
                     else:
                         return "No metadata found for this session"
-                        
+
                 elif action in ["set", "update"]:
                     # Update metadata
                     if not metadata:
-                        return "Error: metadata dictionary required for set/update action"
-                    
+                        return (
+                            "Error: metadata dictionary required for set/update action"
+                        )
+
                     session_manager.update_metadata(metadata)
                     updated_keys = list(metadata.keys())
                     return f"Successfully updated metadata fields: {updated_keys}"
-                    
+
                 elif action == "delete":
                     # Delete metadata keys
                     if not keys:
                         return "Error: keys list required for delete action"
-                    
+
                     session_manager.delete_metadata(keys)
                     return f"Successfully deleted metadata fields: {keys}"
-                    
+
                 else:
                     return f"Error: Unknown action '{action}'. Use 'get', 'set', 'update', or 'delete'"
-                    
+
             except Exception as e:
                 logger.error(f"Error in manage_metadata tool: {e}")
                 return f"Error managing metadata: {str(e)}"
-        
+
         return manage_metadata
 
 
