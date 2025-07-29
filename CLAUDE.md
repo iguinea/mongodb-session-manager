@@ -21,6 +21,8 @@ uv run python examples/example_calculator_tool.py
 uv run python examples/example_fastapi.py
 uv run python examples/example_performance.py
 uv run python examples/example_stream_async.py
+uv run python examples/example_metadata_tool.py
+uv run python examples/example_metadata_tool_direct.py
 
 # Run tests (when test suite is created)
 uv run pytest tests/
@@ -86,6 +88,8 @@ mongodb-session-manager/
    - Provides high-level session management interface
    - Integrates with Strands Agent lifecycle hooks
    - **Event Loop Metrics**: Captures metrics from agent's event_loop_metrics during sync_agent()
+   - **Metadata Management**: Direct methods for update, get, delete operations
+   - **Metadata Tool**: Provides get_metadata_tool() for agent integration
    - **Simplified Implementation**: Many automatic features have been commented out or removed
    - **Note**: Methods like check_session_exists() and get_metrics_summary() are not implemented in base class
 
@@ -240,16 +244,37 @@ async def handle_streaming(session_manager, agent, prompt):
 ### Metadata Management Pattern
 ```python
 # Partial metadata updates preserve existing fields
-session_manager.repository.update_metadata(session_id, {
+session_manager.update_metadata({
     "priority": "high",
     "assigned_to": "agent-123"
 })  # Other metadata fields remain unchanged
 
 # Delete specific metadata fields
-session_manager.repository.delete_metadata(session_id, ["sensitive_field1", "sensitive_field2"])
+session_manager.delete_metadata(["sensitive_field1", "sensitive_field2"])
 
 # Get all metadata
-metadata = session_manager.repository.get_metadata(session_id)
+metadata = session_manager.get_metadata()
+```
+
+### Metadata Tool Pattern
+```python
+# Get metadata tool for agent integration
+metadata_tool = session_manager.get_metadata_tool()
+
+# Create agent with metadata capabilities
+agent = Agent(
+    model="claude-3-sonnet",
+    tools=[metadata_tool],
+    session_manager=session_manager
+)
+
+# Agent can manage metadata autonomously
+response = agent("Store my preference for notifications as enabled")
+
+# Direct tool usage
+result = metadata_tool(action="get")  # Get all metadata
+result = metadata_tool(action="set", metadata={"key": "value"})  # Update
+result = metadata_tool(action="delete", keys=["key1", "key2"])  # Delete
 ```
 
 ### Interactive Chat Playground
@@ -283,6 +308,8 @@ The playground demonstrates:
 - ✅ Async streaming support
 - ✅ Partial metadata updates preserving existing fields
 - ✅ Metadata field deletion for data cleanup
+- ✅ Metadata tool for agent integration (get_metadata_tool)
+- ✅ Agents can autonomously manage session metadata
 
 ### Implementation Notes
 - The codebase implements core session persistence with automatic metrics capture
@@ -303,3 +330,5 @@ The playground demonstrates:
 - **NEW**: Enhanced metadata update to preserve existing fields when updating
 - **NEW**: Added metadata deletion capability for specific fields
 - **NEW**: Fixed syntax error in delete_metadata method
+- **NEW**: Implemented get_metadata_tool() for agent metadata management
+- **NEW**: Created examples demonstrating metadata tool usage
