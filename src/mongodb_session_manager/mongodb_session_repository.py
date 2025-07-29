@@ -89,9 +89,10 @@ class MongoDBSessionRepository(SessionRepository):
             "agents": {},
             "metadata": {},
         }
+
         if self.metadata_fields:
             for field in self.metadata_fields:
-                session_doc["metadata"][field.split(".")[1]] = ""
+                session_doc["metadata"][field] = ""
 
         try:
             self.collection.insert_one(session_doc)

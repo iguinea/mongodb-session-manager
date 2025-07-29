@@ -22,6 +22,7 @@ A MongoDB session manager for Strands Agents that provides persistent storage fo
 - **Connection Management**: Smart connection lifecycle management (owned vs borrowed)
 - **Clean API**: Simple, intuitive interface compatible with Strands SDK
 - **Metadata Management**: Partial updates preserve existing fields, field-level deletion
+- **Agent Tools**: Built-in metadata tool allows agents to manage session context
 
 ### Performance Optimization
 - **Connection Pool Singleton**: Reuse MongoDB connections across requests
@@ -274,6 +275,7 @@ help_response = support("How do I configure API keys?")  # Auto-metrics for supp
 - **Smart connection handling**: Supports both owned and borrowed MongoDB clients
 - **Partial metadata updates**: Update specific fields without overwriting others
 - **Metadata field deletion**: Remove specific metadata fields for data cleanup
+- **Metadata tool for agents**: Agents can autonomously manage session metadata
 
 ## 🧪 Testing
 
@@ -434,32 +436,79 @@ The session manager now supports partial metadata updates that preserve existing
 
 ```python
 # Initial metadata
-session_manager.repository.update_metadata(session_id, {
+session_manager.update_metadata({
     "user_id": "user-123",
     "priority": "high",
     "department": "sales"
 })
 
 # Update only specific fields (preserves user_id and department)
-session_manager.repository.update_metadata(session_id, {
+session_manager.update_metadata({
     "priority": "medium",
     "assigned_to": "agent-456"
 })
 
 # Delete sensitive fields before archival
-session_manager.repository.delete_metadata(session_id, ["user_email", "phone_number"])
+session_manager.delete_metadata(["user_email", "phone_number"])
 
 # Get current metadata
-metadata = session_manager.repository.get_metadata(session_id)
+metadata = session_manager.get_metadata()
+```
+
+### Metadata Tool for Agents
+Agents can now dynamically manage session metadata using the built-in metadata tool:
+
+```python
+# Get the metadata tool from session manager
+metadata_tool = session_manager.get_metadata_tool()
+
+# Create agent with metadata tool
+agent = Agent(
+    model="claude-3-sonnet",
+    agent_id="assistant",
+    session_manager=session_manager,
+    tools=[metadata_tool],  # Agent can now manage metadata
+    system_prompt="You are a helpful assistant with metadata access."
+)
+
+# Agent can use the tool autonomously
+response = agent("Please store my name as John and my preference for dark theme")
+# Agent will use manage_metadata("set", {"user_name": "John", "theme": "dark"})
+```
+
+### Metadata Tool Operations
+The `manage_metadata` tool supports three actions:
+
+```python
+# Direct tool usage examples
+metadata_tool = session_manager.get_metadata_tool()
+
+# Get all metadata
+result = metadata_tool(action="get")
+
+# Get specific fields
+result = metadata_tool(action="get", keys=["user_name", "preferences"])
+
+# Set/update metadata (preserves existing fields)
+result = metadata_tool(action="set", metadata={"status": "active", "level": 5})
+
+# Delete specific fields
+result = metadata_tool(action="delete", keys=["temp_data", "old_field"])
 ```
 
 ### Use Cases
 - **Progressive Information Gathering**: Build metadata throughout conversation
+- **Dynamic Context Management**: Agents can store and retrieve context as needed
+- **User Preferences**: Store and update user preferences during chat
 - **Status Updates**: Update session status without losing other metadata
 - **Data Privacy**: Remove sensitive fields before long-term storage
 - **Audit Trail**: Add timestamps and interaction counts incrementally
 
-See `examples/example_metadata_update.py` and `examples/example_metadata_production.py` for complete examples.
+See examples:
+- `examples/example_metadata_update.py`: Basic metadata operations
+- `examples/example_metadata_production.py`: Production customer support scenario
+- `examples/example_metadata_tool.py`: Agent using metadata tool autonomously
+- `examples/example_metadata_tool_direct.py`: Direct tool usage patterns
 
 ## 🏗️ MongoDB Schema
 
@@ -618,6 +667,10 @@ Main session management class extending RepositorySessionManager from Strands SD
 - `redact_latest_message(redact_message, agent)`: Redact the latest message
 - `sync_agent(agent)`: Sync agent data and capture event loop metrics
 - `initialize(agent)`: Initialize an agent with the session
+- `update_metadata(metadata)`: Update session metadata (preserves existing fields)
+- `get_metadata()`: Retrieve session metadata
+- `delete_metadata(metadata_keys)`: Delete specific metadata fields
+- `get_metadata_tool()`: Get a Strands tool for agent metadata management
 - `close()`: Close database connections
 
 **Automatic Features:**
@@ -681,6 +734,8 @@ Convenience function to create a session manager with default settings.
 - `examples/example_fastapi_streaming.py`: FastAPI with streaming responses and proper factory usage
 - `examples/example_metadata_update.py`: Demonstrates partial metadata updates and deletion
 - `examples/example_metadata_production.py`: Production use case for customer support with metadata
+- `examples/example_metadata_tool.py`: Agent autonomously managing metadata with built-in tool
+- `examples/example_metadata_tool_direct.py`: Direct usage of the metadata tool
 
 Each example includes:
 - Basic usage demonstration
