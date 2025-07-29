@@ -28,6 +28,7 @@ class MongoDBSessionManager(RepositorySessionManager):
         database_name: str = "database_name",
         collection_name: str = "collection_name",
         client: Optional[MongoClient] = None,
+        metadata_fields: Optional[List[str]] = None,
         **kwargs: Any,
     ) -> None:
         """Initialize Itzulbira Session Manager.
@@ -76,6 +77,7 @@ class MongoDBSessionManager(RepositorySessionManager):
             database_name=database_name,
             collection_name=collection_name,
             client=client,
+            metadata_fields=metadata_fields,
             **mongo_kwargs,
         )
 
@@ -215,10 +217,8 @@ class MongoDBSessionManager(RepositorySessionManager):
                 if action == "get":
                     # Retrieve metadata
                     all_metadata = session_manager.get_metadata()
-                    # if all_metadata and "metadata" in all_metadata:
-                    #     metadata_dict = all_metadata["metadata"]
-                    if all_metadata:
-                        metadata_dict = all_metadata
+                    if all_metadata and "metadata" in all_metadata:
+                        metadata_dict = all_metadata["metadata"]
                         if keys:
                             # Return only requested keys
                             filtered = {

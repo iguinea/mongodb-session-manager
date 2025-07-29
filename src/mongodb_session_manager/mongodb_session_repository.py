@@ -72,7 +72,7 @@ class MongoDBSessionRepository(SessionRepository):
             # Messages are nested arrays, so we rely on the _id index for document lookup
             if self.metadata_fields:
                 for field in self.metadata_fields:
-                    self.collection.create_index(field)
+                    self.collection.create_index("metadata." + field)
 
             logger.info("MongoDB indexes created successfully")
         except PyMongoError as e:
