@@ -15,3 +15,9 @@ logs
 *.log
 
 uv.lock
+
+
+.devcontainer
+.claude/
+# CLAUDE.md
+CLAUDE.local.md

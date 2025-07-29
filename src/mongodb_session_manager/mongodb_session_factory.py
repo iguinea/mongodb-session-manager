@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from pymongo import MongoClient
 
@@ -26,6 +26,7 @@ class MongoDBSessionManagerFactory:
         database_name: str = "database_name",
         collection_name: str = "collection_name",
         client: Optional[MongoClient] = None,
+        metadata_fields: Optional[List[str]] = None,
         **client_kwargs: Any,
     ) -> None:
         """Initialize the session manager factory.
@@ -35,13 +36,12 @@ class MongoDBSessionManagerFactory:
             database_name: Default database name for sessions
             collection_name: Default collection name for sessions
             client: Pre-configured MongoClient (takes precedence over connection_string)
-            enable_cache: Whether to enable metadata caching
-            cache_max_size: Maximum number of sessions to cache
-            cache_ttl_seconds: Cache TTL in seconds
+            metadata_fields: List of fields to include in metadata
             **client_kwargs: Additional arguments for MongoClient configuration
         """
         self.database_name = database_name
         self.collection_name = collection_name
+        self.metadata_fields = metadata_fields
 
         if client is not None:
             # Use provided client
@@ -66,6 +66,7 @@ class MongoDBSessionManagerFactory:
         session_id: str,
         database_name: Optional[str] = None,
         collection_name: Optional[str] = None,
+        metadata_fields: Optional[List[str]] = None,
         **kwargs: Any,
     ) -> MongoDBSessionManager:
         """Create a new session manager instance.
@@ -88,6 +89,7 @@ class MongoDBSessionManagerFactory:
             database_name=db_name,
             collection_name=coll_name,
             client=self._client,
+            metadata_fields=metadata_fields,
             **kwargs,
         )
 
@@ -124,6 +126,7 @@ def initialize_global_factory(
     connection_string: str,
     database_name: str = "database_name",
     collection_name: str = "virtualagent_sessions",
+    metadata_fields: Optional[List[str]] = None,
     **client_kwargs: Any,
 ) -> MongoDBSessionManagerFactory:
     """Initialize the global factory instance.
@@ -149,6 +152,7 @@ def initialize_global_factory(
         connection_string=connection_string,
         database_name=database_name,
         collection_name=collection_name,
+        metadata_fields=metadata_fields,
         **client_kwargs,
     )
 

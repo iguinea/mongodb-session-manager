@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional
 
 from pymongo import MongoClient
 from strands import Agent
@@ -146,6 +146,19 @@ class MongoDBSessionManager(RepositorySessionManager):
             self.session_repository, "close"
         ):
             self.session_repository.close()
+
+    # CUSTOM METHODS
+    def update_metadata(self, metadata: Dict[str, Any]) -> None:
+        """Update the metadata for the session."""
+        self.session_repository.update_metadata(self.session_id, metadata)
+
+    def get_metadata(self) -> Dict[str, Any]:
+        """Get the metadata for the session."""
+        return self.session_repository.get_metadata(self.session_id)
+
+    def delete_metadata(self, metadata_keys: List[str]) -> None:
+        """Delete metadata keys for the session."""
+        self.session_repository.delete_metadata(self.session_id, metadata_keys)
 
 
 # Convenience factory function

@@ -21,6 +21,7 @@ A MongoDB session manager for Strands Agents that provides persistent storage fo
 - **Error Handling**: Comprehensive error handling and logging
 - **Connection Management**: Smart connection lifecycle management (owned vs borrowed)
 - **Clean API**: Simple, intuitive interface compatible with Strands SDK
+- **Metadata Management**: Partial updates preserve existing fields, field-level deletion
 
 ### Performance Optimization
 - **Connection Pool Singleton**: Reuse MongoDB connections across requests
@@ -271,6 +272,8 @@ help_response = support("How do I configure API keys?")  # Auto-metrics for supp
 - **Timestamp preservation**: Original creation times maintained
 - **Thread-safe operations**: Designed for concurrent use
 - **Smart connection handling**: Supports both owned and borrowed MongoDB clients
+- **Partial metadata updates**: Update specific fields without overwriting others
+- **Metadata field deletion**: Remove specific metadata fields for data cleanup
 
 ## 🧪 Testing
 
@@ -424,6 +427,40 @@ async def stream_handler(session_manager, agent, prompt):
 
 See `examples/example_stream_async.py` for complete streaming implementation.
 
+## 📊 Metadata Management
+
+### Enhanced Metadata Operations
+The session manager now supports partial metadata updates that preserve existing fields:
+
+```python
+# Initial metadata
+session_manager.repository.update_metadata(session_id, {
+    "user_id": "user-123",
+    "priority": "high",
+    "department": "sales"
+})
+
+# Update only specific fields (preserves user_id and department)
+session_manager.repository.update_metadata(session_id, {
+    "priority": "medium",
+    "assigned_to": "agent-456"
+})
+
+# Delete sensitive fields before archival
+session_manager.repository.delete_metadata(session_id, ["user_email", "phone_number"])
+
+# Get current metadata
+metadata = session_manager.repository.get_metadata(session_id)
+```
+
+### Use Cases
+- **Progressive Information Gathering**: Build metadata throughout conversation
+- **Status Updates**: Update session status without losing other metadata
+- **Data Privacy**: Remove sensitive fields before long-term storage
+- **Audit Trail**: Add timestamps and interaction counts incrementally
+
+See `examples/example_metadata_update.py` and `examples/example_metadata_production.py` for complete examples.
+
 ## 🏗️ MongoDB Schema
 
 Sessions are stored as nested documents with agents and messages:
@@ -561,6 +598,9 @@ MongoDB implementation of the `SessionRepository` interface from Strands SDK.
 - `read_message(session_id, agent_id, message_id, **kwargs)`: Read a specific message
 - `update_message(session_id, agent_id, session_message, **kwargs)`: Update a message (for redaction)
 - `list_messages(session_id, agent_id, limit, offset, **kwargs)`: List messages with pagination
+- `update_metadata(session_id, metadata)`: Update session metadata (preserves existing fields)
+- `get_metadata(session_id)`: Retrieve session metadata
+- `delete_metadata(session_id, metadata_keys)`: Delete specific metadata fields
 - `close()`: Close the MongoDB connection (if owned)
 
 **Key Features:**
@@ -639,6 +679,8 @@ Convenience function to create a session manager with default settings.
 - `examples/example_performance.py`: Performance benchmarks and comparisons
 - `examples/example_stream_async.py`: Async streaming responses with real-time metrics
 - `examples/example_fastapi_streaming.py`: FastAPI with streaming responses and proper factory usage
+- `examples/example_metadata_update.py`: Demonstrates partial metadata updates and deletion
+- `examples/example_metadata_production.py`: Production use case for customer support with metadata
 
 Each example includes:
 - Basic usage demonstration

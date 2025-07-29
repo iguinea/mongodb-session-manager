@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import UTC, datetime
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 from pymongo import MongoClient
 from pymongo.collection import Collection
@@ -26,6 +26,7 @@ class MongoDBSessionRepository(SessionRepository):
         database_name: str = "database_name",
         collection_name: str = "collection_name",
         client: Optional[MongoClient] = None,
+        metadata_fields: Optional[List[str]] = None,
         **kwargs: Any,
     ) -> None:
         """Initialize MongoDB Session Repository.
@@ -52,7 +53,7 @@ class MongoDBSessionRepository(SessionRepository):
 
         self.database: Database = self.client[database_name]
         self.collection: Collection = self.database[collection_name]
-
+        self.metadata_fields = metadata_fields
         # Create indexes for timestamp ordering (only once per collection)
         self._ensure_indexes()
 
@@ -69,6 +70,10 @@ class MongoDBSessionRepository(SessionRepository):
             self.collection.create_index("updated_at")
             # Note: MongoDB doesn't support positional operators ($) in index definitions
             # Messages are nested arrays, so we rely on the _id index for document lookup
+            if self.metadata_fields:
+                for field in self.metadata_fields:
+                    self.collection.create_index(field)
+
             logger.info("MongoDB indexes created successfully")
         except PyMongoError as e:
             logger.warning(f"Failed to create indexes: {e}")
@@ -82,7 +87,11 @@ class MongoDBSessionRepository(SessionRepository):
             "created_at": datetime.now(UTC),
             "updated_at": datetime.now(UTC),
             "agents": {},
+            "metadata": {},
         }
+        if self.metadata_fields:
+            for field in self.metadata_fields:
+                session_doc["metadata"][field.split(".")[1]] = ""
 
         try:
             self.collection.insert_one(session_doc)
@@ -446,3 +455,42 @@ class MongoDBSessionRepository(SessionRepository):
             logger.info("MongoDB connection closed")
         else:
             logger.info("Skipping close - using shared MongoDB client")
+
+    # CUSTOM METHODS
+    def update_metadata(self, session_id: str, metadata: Dict[str, Any]) -> None:
+        """Update the metadata for the session."""
+        try:
+            # Build $set operation with dot notation to preserve existing values
+            set_operations = {
+                f"metadata.{key}": value for key, value in metadata.items()
+            }
+
+            self.collection.update_one(
+                {"_id": session_id},
+                {"$set": set_operations},
+            )
+        except PyMongoError as e:
+            logger.error(f"Failed to update metadata for session {session_id}: {e}")
+            raise
+
+    def get_metadata(self, session_id: str) -> Dict[str, Any]:
+        """Get the metadata for the session."""
+        return self.collection.find_one({"_id": session_id}, {"metadata": 1})
+
+    def delete_metadata(self, session_id: str, metadata_keys: List[str]) -> None:
+        """Delete metadata keys for the session."""
+        try:
+            # Build $unset operation with dot notation
+            unset_operations = {
+                f"metadata.{metadata_key}": "" for metadata_key in metadata_keys
+            }
+
+            self.collection.update_one(
+                {"_id": session_id},
+                {"$unset": unset_operations},
+            )
+        except PyMongoError as e:
+            logger.error(
+                f"Failed to delete metadata keys {metadata_keys} for session {session_id}: {e}"
+            )
+            raise
