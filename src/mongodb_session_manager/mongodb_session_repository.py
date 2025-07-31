@@ -18,7 +18,123 @@ logger = logging.getLogger(__name__)
 
 
 class MongoDBSessionRepository(SessionRepository):
-    """MongoDB implementation of SessionRepository interface."""
+    """MongoDB implementation of SessionRepository interface for persistent session storage.
+
+    This class provides low-level MongoDB operations for session management, implementing
+    the SessionRepository interface from Strands SDK. It handles all database interactions
+    including CRUD operations for sessions, agents, and messages, with support for
+    metadata management and connection lifecycle control.
+
+    Key Features:
+        - Document-based storage with embedded agents and messages
+        - Smart connection management (owns vs borrows MongoDB client)
+        - Automatic index creation for optimized queries
+        - Datetime serialization/deserialization for MongoDB compatibility
+        - Metadata field indexing with partial updates support
+        - Thread-safe operations with proper error handling
+
+    Methods:
+        __init__(connection_string, database_name, collection_name, client, metadata_fields, metadataHook, **kwargs):
+            Initialize repository with MongoDB connection and configuration.
+
+        create_session(session, **kwargs):
+            Create a new session document in MongoDB.
+
+        read_session(session_id, **kwargs):
+            Read a session from MongoDB by ID.
+
+        create_agent(session_id, session_agent, **kwargs):
+            Create an agent within a session document.
+
+        read_agent(session_id, agent_id, **kwargs):
+            Read an agent from a session by agent ID.
+
+        update_agent(session_id, session_agent, **kwargs):
+            Update an existing agent, preserving timestamps.
+
+        create_message(session_id, agent_id, session_message, **kwargs):
+            Add a message to an agent's message array.
+
+        read_message(session_id, agent_id, message_id, **kwargs):
+            Read a specific message by ID.
+
+        update_message(session_id, agent_id, session_message, **kwargs):
+            Update a message (typically for redaction).
+
+        list_messages(session_id, agent_id, limit, offset, **kwargs):
+            List messages with pagination support.
+
+        update_metadata(session_id, metadata):
+            Update session metadata with partial updates (preserves existing fields).
+
+        get_metadata(session_id):
+            Retrieve metadata for a specific session.
+
+        delete_metadata(session_id, metadata_keys):
+            Delete specific metadata fields using MongoDB $unset.
+
+        close():
+            Close MongoDB connection if owned by this repository.
+
+    MongoDB Schema:
+        ```json
+        {
+            "_id": "session-id",
+            "session_id": "session-id",
+            "session_type": "default",
+            "created_at": ISODate(),
+            "updated_at": ISODate(),
+            "metadata": {
+                "key": "value"
+            },
+            "agents": {
+                "agent-id": {
+                    "agent_data": {...},
+                    "created_at": ISODate(),
+                    "updated_at": ISODate(),
+                    "messages": [
+                        {
+                            "message_id": 1,
+                            "role": "user",
+                            "content": "...",
+                            "created_at": ISODate(),
+                            "updated_at": ISODate(),
+                            "event_loop_metrics": {...}
+                        }
+                    ]
+                }
+            }
+        }
+        ```
+
+    Example:
+        ```python
+        # Create repository with new connection
+        repo = MongoDBSessionRepository(
+            connection_string="mongodb://localhost:27017/",
+            database_name="chat_db",
+            collection_name="sessions"
+        )
+
+        # Or reuse existing client
+        repo = MongoDBSessionRepository(
+            client=existing_mongo_client,
+            database_name="chat_db",
+            collection_name="sessions"
+        )
+
+        # Create session
+        session = Session(session_id="user-123", session_type="chat")
+        repo.create_session(session)
+
+        # Manage metadata
+        repo.update_metadata("user-123", {"priority": "high"})
+        metadata = repo.get_metadata("user-123")
+
+        # Clean up
+        repo.close()
+        ```
+    """
 
     def __init__(
         self,

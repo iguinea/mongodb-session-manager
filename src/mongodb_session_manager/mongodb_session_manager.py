@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Callable
 
 from pymongo import MongoClient
 from strands import Agent
@@ -19,7 +19,80 @@ logger = logging.getLogger(__name__)
 
 
 class MongoDBSessionManager(RepositorySessionManager):
-    """Itzulbira Session Manager for Strands Agents with comprehensive metrics tracking."""
+    """MongoDB Session Manager for Strands Agents with comprehensive session persistence and metadata management.
+
+    This class provides a complete session management solution for Strands Agents, storing conversations,
+    agent state, and metadata in MongoDB. It extends RepositorySessionManager from the Strands SDK to
+    provide MongoDB-specific functionality with automatic metrics tracking and metadata management.
+
+    Key Features:
+        - Persistent storage of agent conversations and state in MongoDB
+        - Automatic capture of event loop metrics (tokens, latency) during sync operations
+        - Partial metadata updates that preserve existing fields
+        - Built-in metadata tool for agent integration
+        - Smart connection management (supports both owned and borrowed MongoDB clients)
+        - Thread-safe operations with connection pooling support
+
+    Methods:
+        __init__(session_id, connection_string, database_name, collection_name, client, **kwargs):
+            Initialize the session manager with MongoDB connection details.
+
+        append_message(message, agent):
+            Append a message to the session for the specified agent.
+
+        redact_latest_message(redact_message, agent, **kwargs):
+            Redact the latest message in the conversation.
+
+        sync_agent(agent, **kwargs):
+            Synchronize agent data and capture event loop metrics (tokens, latency).
+
+        initialize(agent, **kwargs):
+            Initialize an agent with the session, loading conversation history.
+
+        update_metadata(metadata):
+            Update session metadata with partial updates (preserves existing fields).
+
+        get_metadata():
+            Retrieve all metadata for the current session.
+
+        delete_metadata(metadata_keys):
+            Delete specific metadata fields from the session.
+
+        get_metadata_tool():
+            Get a Strands tool that agents can use to manage metadata autonomously.
+
+        close():
+            Close the MongoDB connection and clean up resources.
+
+    Example:
+        ```python
+        # Create session manager
+        session_manager = MongoDBSessionManager(
+            session_id="user-123",
+            connection_string="mongodb://localhost:27017/",
+            database_name="chat_db",
+            collection_name="sessions"
+        )
+
+        # Create agent with session persistence
+        agent = Agent(
+            model="claude-3-sonnet",
+            session_manager=session_manager,
+            tools=[session_manager.get_metadata_tool()]
+        )
+
+        # Use the agent
+        response = agent("Hello!")
+        session_manager.sync_agent(agent)  # Captures metrics
+
+        # Manage metadata
+        session_manager.update_metadata({"user_name": "Alice", "topic": "AI"})
+        metadata = session_manager.get_metadata()
+
+        # Clean up
+        session_manager.close()
+        ```
+    """
 
     def __init__(
         self,
@@ -29,6 +102,7 @@ class MongoDBSessionManager(RepositorySessionManager):
         collection_name: str = "collection_name",
         client: Optional[MongoClient] = None,
         metadata_fields: Optional[List[str]] = None,
+        metadataHook: Optional[Callable[[Dict[str, Any]], None]] = None,
         **kwargs: Any,
     ) -> None:
         """Initialize Itzulbira Session Manager.
@@ -39,6 +113,8 @@ class MongoDBSessionManager(RepositorySessionManager):
             database_name: Name of the database
             collection_name: Name of the collection for sessions
             client: Optional pre-configured MongoClient to use
+            metadata_fields: List of fields to be indexed in the metadata
+            metadataHook: Hook to be called when metadata is updated, deleted or retrieved
             **kwargs: Additional arguments passed to parent class and MongoClient
         """
         # Extract MongoDB client kwargs
@@ -87,8 +163,39 @@ class MongoDBSessionManager(RepositorySessionManager):
             session_repository=self.session_repository,
             **parent_kwargs,
         )
+        
+        # Apply metadata hook if provided
+        if metadataHook:
+            self._apply_metadata_hook(metadataHook)
 
         logger.info(f"Initialized Itzulbira session manager for session: {session_id}")
+    
+    def _apply_metadata_hook(self, hook: Callable) -> None:
+        """Apply the metadata hook as a decorator to metadata methods.
+        
+        The hook will be called with:
+        - original_func: The original method being wrapped
+        - action: "update", "get", or "delete"
+        - session_id: The current session ID
+        - **kwargs: Additional arguments (metadata for update, keys for delete)
+        """
+        # Wrap update_metadata
+        original_update = self.update_metadata
+        def wrapped_update(metadata: Dict[str, Any]) -> None:
+            return hook(original_update, "update", self.session_id, metadata=metadata)
+        self.update_metadata = wrapped_update
+        
+        # Wrap get_metadata
+        original_get = self.get_metadata
+        def wrapped_get() -> Dict[str, Any]:
+            return hook(original_get, "get", self.session_id)
+        self.get_metadata = wrapped_get
+        
+        # Wrap delete_metadata
+        original_delete = self.delete_metadata
+        def wrapped_delete(metadata_keys: List[str]) -> None:
+            return hook(original_delete, "delete", self.session_id, keys=metadata_keys)
+        self.delete_metadata = wrapped_delete
 
     def append_message(self, message: Message, agent: Agent) -> None:
         """Append a message to the session."""

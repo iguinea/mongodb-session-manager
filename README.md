@@ -23,6 +23,7 @@ A MongoDB session manager for Strands Agents that provides persistent storage fo
 - **Clean API**: Simple, intuitive interface compatible with Strands SDK
 - **Metadata Management**: Partial updates preserve existing fields, field-level deletion
 - **Agent Tools**: Built-in metadata tool allows agents to manage session context
+- **Metadata Hooks**: Intercept and enhance metadata operations with custom logic
 
 ### Performance Optimization
 - **Connection Pool Singleton**: Reuse MongoDB connections across requests
@@ -276,6 +277,7 @@ help_response = support("How do I configure API keys?")  # Auto-metrics for supp
 - **Partial metadata updates**: Update specific fields without overwriting others
 - **Metadata field deletion**: Remove specific metadata fields for data cleanup
 - **Metadata tool for agents**: Agents can autonomously manage session metadata
+- **Metadata hooks**: Intercept and enhance metadata operations with custom logic
 
 ## 🧪 Testing
 
@@ -455,6 +457,45 @@ session_manager.delete_metadata(["user_email", "phone_number"])
 metadata = session_manager.get_metadata()
 ```
 
+### Metadata Hooks
+Intercept and enhance metadata operations with custom logic:
+
+```python
+# Example: Audit hook that logs all metadata operations
+def metadata_audit_hook(original_func, action, session_id, **kwargs):
+    logger.info(f"[AUDIT] {action} metadata for session {session_id}")
+    if action == "update" and "metadata" in kwargs:
+        logger.info(f"[AUDIT] Data: {kwargs['metadata']}")
+    
+    # Execute original function
+    if action == "update":
+        return original_func(kwargs["metadata"])
+    elif action == "delete":
+        return original_func(kwargs["keys"])
+    else:  # get
+        return original_func()
+
+# Create session manager with metadata hook
+session_manager = MongoDBSessionManager(
+    session_id="audited-session",
+    connection_string="mongodb://...",
+    database_name="my_db",
+    metadataHook=metadata_audit_hook  # Intercepts all metadata operations
+)
+
+# All metadata operations will be audited
+session_manager.update_metadata({"status": "active"})  # Logged
+metadata = session_manager.get_metadata()              # Logged
+session_manager.delete_metadata(["temp_field"])        # Logged
+```
+
+### Hook Use Cases
+- **Audit Trail**: Log all metadata operations for compliance
+- **Validation**: Enforce data quality rules before updates
+- **Caching**: Implement read caching for performance
+- **Synchronization**: Mirror metadata to external systems
+- **Access Control**: Enforce permissions on metadata fields
+
 ### Metadata Tool for Agents
 Agents can now dynamically manage session metadata using the built-in metadata tool:
 
@@ -509,6 +550,7 @@ See examples:
 - `examples/example_metadata_production.py`: Production customer support scenario
 - `examples/example_metadata_tool.py`: Agent using metadata tool autonomously
 - `examples/example_metadata_tool_direct.py`: Direct tool usage patterns
+- `examples/example_metadata_hook.py`: Comprehensive metadata hook examples
 
 ## 🏗️ MongoDB Schema
 
@@ -662,7 +704,7 @@ MongoDB implementation of the `SessionRepository` interface from Strands SDK.
 Main session management class extending RepositorySessionManager from Strands SDK.
 
 **Implemented Methods:**
-- `__init__()`: Initialize with MongoDB connection options
+- `__init__(metadataHook=None, **kwargs)`: Initialize with MongoDB connection options and optional metadata hook
 - `append_message(message, agent)`: Store message in session
 - `redact_latest_message(redact_message, agent)`: Redact the latest message
 - `sync_agent(agent)`: Sync agent data and capture event loop metrics
@@ -677,6 +719,7 @@ Main session management class extending RepositorySessionManager from Strands SD
 - Captures metrics from `agent.event_loop_metrics` during `sync_agent()`
 - Updates last message with token counts and latency
 - Handles MongoDB connection lifecycle intelligently
+- Applies metadata hooks to intercept update, get, and delete operations
 
 #### MongoDBSessionManagerFactory
 Factory for creating session managers with connection pooling.
@@ -736,6 +779,7 @@ Convenience function to create a session manager with default settings.
 - `examples/example_metadata_production.py`: Production use case for customer support with metadata
 - `examples/example_metadata_tool.py`: Agent autonomously managing metadata with built-in tool
 - `examples/example_metadata_tool_direct.py`: Direct usage of the metadata tool
+- `examples/example_metadata_hook.py`: Metadata hooks for audit, validation, and caching
 
 Each example includes:
 - Basic usage demonstration
