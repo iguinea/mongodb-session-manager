@@ -24,6 +24,8 @@ A MongoDB session manager for Strands Agents that provides persistent storage fo
 - **Metadata Management**: Partial updates preserve existing fields, field-level deletion
 - **Agent Tools**: Built-in metadata tool allows agents to manage session context
 - **Metadata Hooks**: Intercept and enhance metadata operations with custom logic
+- **Feedback System**: Store user feedback with ratings and comments
+- **Feedback Hooks**: Intercept feedback operations for audit, validation, and notifications
 
 ### Performance Optimization
 - **Connection Pool Singleton**: Reuse MongoDB connections across requests
@@ -552,6 +554,90 @@ See examples:
 - `examples/example_metadata_tool_direct.py`: Direct tool usage patterns
 - `examples/example_metadata_hook.py`: Comprehensive metadata hook examples
 
+## 💬 Feedback Management
+
+### User Feedback System
+The session manager supports storing user feedback with ratings and comments:
+
+```python
+# Add feedback to a session
+session_manager.add_feedback({
+    "rating": "up",  # or "down" or None
+    "comment": "The response was very helpful!"
+})
+
+# Get all feedback for a session
+feedbacks = session_manager.get_feedbacks()
+# Returns: [{"rating": "up", "comment": "...", "created_at": datetime}, ...]
+```
+
+### Feedback Hooks
+Intercept and enhance feedback operations with custom logic:
+
+```python
+# Audit hook - log all feedback
+def feedback_audit_hook(original_func, action, session_id, **kwargs):
+    logger.info(f"[FEEDBACK] New feedback for session {session_id}: {kwargs['feedback']}")
+    return original_func(kwargs["feedback"])
+
+# Validation hook - ensure quality feedback
+def feedback_validation_hook(original_func, action, session_id, **kwargs):
+    feedback = kwargs["feedback"]
+    if feedback.get("rating") == "down" and not feedback.get("comment"):
+        raise ValueError("Please provide a comment with negative feedback")
+    return original_func(feedback)
+
+# Create session manager with feedback hooks
+session_manager = MongoDBSessionManager(
+    session_id="user-session",
+    connection_string="mongodb://...",
+    feedbackHook=feedback_audit_hook
+)
+```
+
+### FastAPI Integration Example
+```python
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+
+app = FastAPI()
+
+class FeedbackRequest(BaseModel):
+    rating: Optional[str] = None  # "up", "down", or None
+    comment: str = ""
+
+@app.post("/api/sessions/{session_id}/feedback")
+async def add_feedback(session_id: str, feedback_data: FeedbackRequest):
+    try:
+        session_manager = factory.create_session_manager(
+            session_id=session_id,
+            feedbackHook=feedback_validation_hook
+        )
+        
+        session_manager.add_feedback({
+            "rating": feedback_data.rating,
+            "comment": feedback_data.comment
+        })
+        
+        return {"status": "success", "message": "Feedback recorded"}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+```
+
+### Use Cases
+- **Quality Monitoring**: Track user satisfaction with agent responses
+- **Improvement Insights**: Analyze negative feedback to improve prompts
+- **Audit Trail**: Log all feedback for compliance and analysis
+- **Real-time Alerts**: Notify support team on negative feedback
+- **Analytics**: Collect metrics on feedback patterns
+
+See `examples/example_feedback_hook.py` for comprehensive examples including:
+- Audit hooks for logging
+- Validation hooks for data quality
+- Notification hooks for alerts
+- Analytics hooks for metrics collection
+- Combined hooks for multiple behaviors
+
 ## 🏗️ MongoDB Schema
 
 Sessions are stored as nested documents with agents and messages:
@@ -603,7 +689,23 @@ Sessions are stored as nested documents with agents and messages:
                 }
             ]
         }
-    }
+    },
+    "metadata": {
+        "priority": "high",
+        "category": "support"
+    },
+    "feedbacks": [
+        {
+            "rating": "up",
+            "comment": "Very helpful response!",
+            "created_at": ISODate("2024-01-22T15:00:00Z")
+        },
+        {
+            "rating": "down",
+            "comment": "The answer was incomplete",
+            "created_at": ISODate("2024-01-22T16:30:00Z")
+        }
+    ]
 }
 ```
 
@@ -780,6 +882,7 @@ Convenience function to create a session manager with default settings.
 - `examples/example_metadata_tool.py`: Agent autonomously managing metadata with built-in tool
 - `examples/example_metadata_tool_direct.py`: Direct usage of the metadata tool
 - `examples/example_metadata_hook.py`: Metadata hooks for audit, validation, and caching
+- `examples/example_feedback_hook.py`: Feedback hooks for audit, validation, notifications, and analytics
 
 Each example includes:
 - Basic usage demonstration

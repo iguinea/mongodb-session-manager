@@ -75,13 +75,15 @@ class MongoDBSessionManagerFactory:
             session_id: Unique identifier for the session
             database_name: Override default database name
             collection_name: Override default collection name
-            **kwargs: Additional arguments for MongoDBSessionManager
+            metadata_fields: Override default metadata fields
+            **kwargs: Additional arguments for MongoDBSessionManager (including hooks)
 
         Returns:
             New MongoDBSessionManager instance using shared connection
         """
         db_name = database_name or self.database_name
         coll_name = collection_name or self.collection_name
+        meta_fields = metadata_fields or self.metadata_fields
 
         # Create session manager with shared client
         manager = MongoDBSessionManager(
@@ -89,7 +91,7 @@ class MongoDBSessionManagerFactory:
             database_name=db_name,
             collection_name=coll_name,
             client=self._client,
-            metadata_fields=metadata_fields,
+            metadata_fields=meta_fields,
             **kwargs,
         )
 

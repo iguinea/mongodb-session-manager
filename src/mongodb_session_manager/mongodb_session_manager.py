@@ -103,6 +103,7 @@ class MongoDBSessionManager(RepositorySessionManager):
         client: Optional[MongoClient] = None,
         metadata_fields: Optional[List[str]] = None,
         metadataHook: Optional[Callable[[Dict[str, Any]], None]] = None,
+        feedbackHook: Optional[Callable[[Dict[str, Any]], None]] = None,
         **kwargs: Any,
     ) -> None:
         """Initialize Itzulbira Session Manager.
@@ -115,6 +116,7 @@ class MongoDBSessionManager(RepositorySessionManager):
             client: Optional pre-configured MongoClient to use
             metadata_fields: List of fields to be indexed in the metadata
             metadataHook: Hook to be called when metadata is updated, deleted or retrieved
+            feedbackHook: Hook to be called when feedback is added
             **kwargs: Additional arguments passed to parent class and MongoClient
         """
         # Extract MongoDB client kwargs
@@ -167,6 +169,10 @@ class MongoDBSessionManager(RepositorySessionManager):
         # Apply metadata hook if provided
         if metadataHook:
             self._apply_metadata_hook(metadataHook)
+        
+        # Apply feedback hook if provided
+        if feedbackHook:
+            self._apply_feedback_hook(feedbackHook)
 
         logger.info(f"Initialized Itzulbira session manager for session: {session_id}")
     
@@ -373,6 +379,29 @@ class MongoDBSessionManager(RepositorySessionManager):
                 return f"Error managing metadata: {str(e)}"
 
         return manage_metadata
+    
+    def _apply_feedback_hook(self, hook: Callable) -> None:
+        """Apply the feedback hook as a decorator to feedback methods.
+        
+        The hook will be called with:
+        - original_func: The original method being wrapped
+        - action: "add" (only action for feedback)
+        - session_id: The current session ID
+        - **kwargs: Additional arguments (feedback object)
+        """
+        # Wrap add_feedback
+        original_add = self.add_feedback
+        def wrapped_add(feedback: Dict[str, Any]) -> None:
+            return hook(original_add, "add", self.session_id, feedback=feedback)
+        self.add_feedback = wrapped_add
+    
+    def add_feedback(self, feedback: Dict[str, Any]) -> None:
+        """Add feedback to the session."""
+        self.session_repository.add_feedback(self.session_id, feedback)
+    
+    def get_feedbacks(self) -> List[Dict[str, Any]]:
+        """Get all feedbacks for the session."""
+        return self.session_repository.get_feedbacks(self.session_id)
 
 
 # Convenience factory function

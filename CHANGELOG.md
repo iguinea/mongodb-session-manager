@@ -5,6 +5,33 @@ All notable changes to the MongoDB Session Manager project will be documented in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.8] - 2024-01-26
+
+### Added
+- **Feedback System**: New feedback management functionality for storing user ratings and comments
+  - `add_feedback()` method in `MongoDBSessionManager` to store feedback with automatic timestamps
+  - `get_feedbacks()` method to retrieve all feedback for a session
+  - `feedbacks` array field added to MongoDB schema
+  - Feedback structure: `{rating: "up"|"down"|null, comment: string, created_at: datetime}`
+- **Feedback Hooks**: New `feedbackHook` parameter in `MongoDBSessionManager` constructor
+  - `_apply_feedback_hook()` method that wraps the add_feedback method
+  - Hook supports "add" action only for intercepting feedback operations
+- Comprehensive feedback hook examples:
+  - Audit hooks for logging all feedback
+  - Validation hooks for ensuring feedback quality
+  - Notification hooks for alerting on negative feedback
+  - Analytics hooks for collecting feedback metrics
+  - Combined hooks for chaining multiple behaviors
+- New example file: `examples/example_feedback_hook.py`
+- FastAPI integration pattern for receiving feedback from frontend
+
+### Updated
+- `MongoDBSessionRepository`: Added `add_feedback()` and `get_feedbacks()` methods
+- `MongoDBSessionManagerFactory`: Now passes through feedbackHook parameter
+- Documentation updated to include feedback functionality
+- README.md: Added comprehensive feedback management section
+- CLAUDE.md: Updated with feedback system details
+
 ## [0.1.7] - 2024-01-25
 
 ### Added
@@ -121,6 +148,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - UV package manager integration
 - Docker Compose setup for local MongoDB
 
+[0.1.8]: https://github.com/yourusername/mongodb-session-manager/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/yourusername/mongodb-session-manager/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/yourusername/mongodb-session-manager/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/yourusername/mongodb-session-manager/compare/v0.1.4...v0.1.5

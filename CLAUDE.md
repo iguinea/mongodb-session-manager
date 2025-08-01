@@ -23,6 +23,8 @@ uv run python examples/example_performance.py
 uv run python examples/example_stream_async.py
 uv run python examples/example_metadata_tool.py
 uv run python examples/example_metadata_tool_direct.py
+uv run python examples/example_metadata_hook.py
+uv run python examples/example_feedback_hook.py
 
 # Run tests (when test suite is created)
 uv run pytest tests/
@@ -90,6 +92,9 @@ mongodb-session-manager/
    - **Event Loop Metrics**: Captures metrics from agent's event_loop_metrics during sync_agent()
    - **Metadata Management**: Direct methods for update, get, delete operations
    - **Metadata Tool**: Provides get_metadata_tool() for agent integration
+   - **Metadata Hooks**: Supports intercepting metadata operations with custom logic
+   - **Feedback System**: Stores user feedback (rating + comment) with automatic timestamps
+   - **Feedback Hooks**: Supports intercepting feedback operations for audit, validation, etc.
    - **Simplified Implementation**: Many automatic features have been commented out or removed
    - **Note**: Methods like check_session_exists() and get_metrics_summary() are not implemented in base class
 
@@ -120,6 +125,7 @@ Sessions are stored as single documents with embedded agents and messages:
   - Agents: Nested under `agents` object, keyed by agent_id
   - Messages: Array within each agent, with auto-incrementing message_id
   - Metrics: Stored in `event_loop_metrics` field of assistant messages
+  - Feedbacks: Array of feedback objects with rating, comment, and created_at timestamp
 - Indexes: Automatically created on `created_at` and `updated_at` fields
 
 ### Key Design Decisions
@@ -133,6 +139,7 @@ Sessions are stored as single documents with embedded agents and messages:
 - **Timestamp preservation**: Original creation times maintained during updates
 - **Error Handling**: Comprehensive error handling and logging
 - **Metadata Management**: Enhanced metadata operations with field-level updates
+- **Metadata Hooks**: Intercept and customize metadata operations
 
 ### Performance Optimizations for Stateless Environments
 
@@ -277,6 +284,56 @@ result = metadata_tool(action="set", metadata={"key": "value"})  # Update
 result = metadata_tool(action="delete", keys=["key1", "key2"])  # Delete
 ```
 
+### Metadata Hook Pattern
+```python
+# Create a hook to intercept metadata operations
+def metadata_audit_hook(original_func, action, session_id, **kwargs):
+    logger.info(f"[AUDIT] {action} on session {session_id}")
+    # Call original function with appropriate arguments
+    if action == "update":
+        return original_func(kwargs["metadata"])
+    elif action == "delete":
+        return original_func(kwargs["keys"])
+    else:  # get
+        return original_func()
+
+# Create session manager with hook
+session_manager = MongoDBSessionManager(
+    session_id="audited-session",
+    connection_string="mongodb://...",
+    metadataHook=metadata_audit_hook  # All metadata ops will be audited
+)
+
+# Hook examples: audit, validation, caching, combined hooks
+# See examples/example_metadata_hook.py for comprehensive examples
+```
+
+### Feedback Management Pattern
+```python
+# Add feedback to session
+session_manager.add_feedback({
+    "rating": "up",  # or "down" or None
+    "comment": "Great response!"
+})
+
+# Get all feedbacks
+feedbacks = session_manager.get_feedbacks()
+
+# Create session manager with feedback hook
+def feedback_audit_hook(original_func, action, session_id, **kwargs):
+    logger.info(f"[FEEDBACK] {action} on session {session_id}: {kwargs['feedback']}")
+    return original_func(kwargs["feedback"])
+
+session_manager = MongoDBSessionManager(
+    session_id="user-session",
+    connection_string="mongodb://...",
+    feedbackHook=feedback_audit_hook
+)
+
+# Hook examples: audit, validation, notification, analytics
+# See examples/example_feedback_hook.py for comprehensive examples
+```
+
 ### Interactive Chat Playground
 The project includes a web-based chat interface for testing:
 
@@ -310,6 +367,9 @@ The playground demonstrates:
 - ✅ Metadata field deletion for data cleanup
 - ✅ Metadata tool for agent integration (get_metadata_tool)
 - ✅ Agents can autonomously manage session metadata
+- ✅ Metadata hooks for intercepting and enhancing operations
+- ✅ Feedback system for storing user ratings and comments
+- ✅ Feedback hooks for audit, validation, and notifications
 
 ### Implementation Notes
 - The codebase implements core session persistence with automatic metrics capture
@@ -332,3 +392,9 @@ The playground demonstrates:
 - **NEW**: Fixed syntax error in delete_metadata method
 - **NEW**: Implemented get_metadata_tool() for agent metadata management
 - **NEW**: Created examples demonstrating metadata tool usage
+- **NEW**: Added metadata hooks support for intercepting and customizing metadata operations
+- **NEW**: Created comprehensive hook examples (audit, validation, caching, combined)
+- **NEW**: Implemented feedback system with add_feedback() and get_feedbacks() methods
+- **NEW**: Added feedbackHook support for intercepting feedback operations
+- **NEW**: Created example_feedback_hook.py with audit, validation, notification, and analytics hooks
+- **NEW**: Feedback data includes rating (up/down/null), comment, and automatic timestamp

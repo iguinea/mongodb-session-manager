@@ -204,6 +204,7 @@ class MongoDBSessionRepository(SessionRepository):
             "updated_at": datetime.now(UTC),
             "agents": {},
             "metadata": {},
+            "feedbacks": [],
         }
 
         if self.metadata_fields:
@@ -610,4 +611,43 @@ class MongoDBSessionRepository(SessionRepository):
             logger.error(
                 f"Failed to delete metadata keys {metadata_keys} for session {session_id}: {e}"
             )
+            raise
+
+    def add_feedback(self, session_id: str, feedback: Dict[str, Any]) -> None:
+        """Add feedback to the session."""
+        try:
+            # Add created_at timestamp
+            feedback_doc = {
+                **feedback,
+                "created_at": datetime.now(UTC)
+            }
+
+            # Push feedback to array and update session timestamp
+            self.collection.update_one(
+                {"_id": session_id},
+                {
+                    "$push": {"feedbacks": feedback_doc},
+                    "$set": {"updated_at": datetime.now(UTC)}
+                }
+            )
+            logger.info(f"Added feedback to session {session_id}")
+        except PyMongoError as e:
+            logger.error(f"Failed to add feedback to session {session_id}: {e}")
+            raise
+
+    def get_feedbacks(self, session_id: str) -> List[Dict[str, Any]]:
+        """Get all feedbacks for the session."""
+        try:
+            doc = self.collection.find_one(
+                {"_id": session_id},
+                {"feedbacks": 1}
+            )
+            
+            if not doc:
+                logger.debug(f"Session not found: {session_id}")
+                return []
+            
+            return doc.get("feedbacks", [])
+        except PyMongoError as e:
+            logger.error(f"Failed to get feedbacks for session {session_id}: {e}")
             raise
