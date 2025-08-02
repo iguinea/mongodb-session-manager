@@ -26,6 +26,7 @@ A MongoDB session manager for Strands Agents that provides persistent storage fo
 - **Metadata Hooks**: Intercept and enhance metadata operations with custom logic
 - **Feedback System**: Store user feedback with ratings and comments
 - **Feedback Hooks**: Intercept feedback operations for audit, validation, and notifications
+- **AWS Integration**: Optional SNS and SQS hooks for real-time notifications and event propagation
 
 ### Performance Optimization
 - **Connection Pool Singleton**: Reuse MongoDB connections across requests
@@ -637,6 +638,92 @@ See `examples/example_feedback_hook.py` for comprehensive examples including:
 - Notification hooks for alerts
 - Analytics hooks for metrics collection
 - Combined hooks for multiple behaviors
+
+## 🚀 AWS Integration Hooks
+
+### Optional AWS Service Integrations
+The library includes optional hooks for integrating with AWS services. These require the `custom_aws` package (python-helpers) to be installed.
+
+### SNS Feedback Notifications
+Send real-time notifications when users submit feedback:
+
+```python
+from mongodb_session_manager import (
+    create_feedback_sns_hook,
+    is_feedback_sns_hook_available
+)
+
+# Check if SNS integration is available
+if is_feedback_sns_hook_available():
+    # Create SNS hook for feedback notifications
+    feedback_hook = create_feedback_sns_hook(
+        topic_arn="arn:aws:sns:eu-west-1:123456789:feedback-alerts"
+    )
+    
+    # Create session manager with SNS notifications
+    session_manager = MongoDBSessionManager(
+        session_id="user-session",
+        connection_string="mongodb://...",
+        feedbackHook=feedback_hook
+    )
+    
+    # This will trigger SNS notification
+    session_manager.add_feedback({
+        "rating": "down",
+        "comment": "The answer was incorrect"
+    })
+```
+
+Features:
+- Real-time alerts for negative feedback
+- Non-blocking async notifications
+- Rich message attributes for filtering
+- Graceful degradation if SNS fails
+
+### SQS Metadata Propagation
+Propagate metadata changes for Server-Sent Events (SSE) or real-time sync:
+
+```python
+from mongodb_session_manager import (
+    create_metadata_sqs_hook,
+    is_metadata_sqs_hook_available
+)
+
+# Check if SQS integration is available
+if is_metadata_sqs_hook_available():
+    # Create SQS hook for metadata propagation
+    metadata_hook = create_metadata_sqs_hook(
+        queue_url="https://sqs.eu-west-1.amazonaws.com/123456789/metadata-sync",
+        metadata_fields=["status", "priority", "agent_state"]  # Only sync these fields
+    )
+    
+    # Create session manager with SQS propagation
+    session_manager = MongoDBSessionManager(
+        session_id="user-session",
+        connection_string="mongodb://...",
+        metadataHook=metadata_hook
+    )
+    
+    # These changes will be sent to SQS
+    session_manager.update_metadata({
+        "status": "processing",
+        "priority": "high",
+        "internal_data": "not synced"  # Won't be sent to SQS
+    })
+```
+
+Features:
+- Selective field propagation
+- Real-time metadata synchronization
+- Queue-based event distribution
+- Support for SSE back-propagation
+
+### AWS Hook Requirements
+- Install `python-helpers` package: `pip install python-helpers`
+- Configure AWS credentials with appropriate permissions:
+  - SNS: `sns:Publish` permission on the topic
+  - SQS: `sqs:SendMessage` permission on the queue
+- Create SNS topic and/or SQS queue in your AWS account
 
 ## 🏗️ MongoDB Schema
 

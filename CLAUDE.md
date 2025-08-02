@@ -59,6 +59,10 @@ mongodb-session-manager/
 │       ├── mongodb_session_repository.py  # MongoDB repository implementation
 │       ├── mongodb_connection_pool.py     # Singleton connection pool
 │       ├── mongodb_session_factory.py     # Factory pattern implementation
+│       └── hooks/                         # AWS integration hooks
+│           ├── __init__.py                # Hooks package initialization
+│           ├── feedback_sns_hook.py       # SNS notifications for feedback
+│           └── metadata_sqs_hook.py       # SQS propagation for metadata
 ├── examples/                              # Example scripts
 │   ├── example_calculator_tool.py         # Complete agent example with tools
 │   ├── example_fastapi.py                 # FastAPI integration example
@@ -109,12 +113,23 @@ mongodb-session-manager/
    - Creates session managers without connection overhead
    - Perfect for stateless environments like FastAPI
 
+5. **AWS Integration Hooks** (`hooks/` directory): Optional AWS service integrations
+   - **FeedbackSNSHook** (`feedback_sns_hook.py`): Send feedback notifications to AWS SNS
+     - Real-time alerts for negative feedback
+     - Non-blocking async notifications
+     - Graceful degradation if SNS fails
+   - **MetadataSQSHook** (`metadata_sqs_hook.py`): Propagate metadata changes to AWS SQS
+     - Real-time metadata synchronization via SSE
+     - Selective field propagation
+     - Queue-based event distribution
 
 6. **Helper Functions** (in `__init__.py` and `mongodb_session_factory.py`):
    - `create_mongodb_session_manager()`: Convenience function to create session manager
    - `initialize_global_factory()`: Set up global factory for FastAPI
    - `get_global_factory()`: Access the global factory instance
    - `close_global_factory()`: Clean up global resources
+   - `is_feedback_sns_hook_available()`: Check if SNS hook can be used
+   - `is_metadata_sqs_hook_available()`: Check if SQS hook can be used
 
 ### MongoDB Schema
 
@@ -158,12 +173,18 @@ The package exports the following from `src/mongodb_session_manager/__init__.py`
   - `MongoDBSessionRepository`: Repository implementation
   - `MongoDBConnectionPool`: Connection pool singleton
   - `MongoDBSessionManagerFactory`: Factory for session managers
+  - `FeedbackSNSHook`: AWS SNS hook for feedback (if custom_aws available)
+  - `MetadataSQSHook`: AWS SQS hook for metadata (if custom_aws available)
 - **Functions**:
   - `create_mongodb_session_manager`: Convenience function
   - `initialize_global_factory`: Set up global factory
   - `get_global_factory`: Access global factory
   - `close_global_factory`: Clean up global factory
-- **Version**: `__version__ = "0.1.2"`
+  - `create_feedback_sns_hook`: Create SNS feedback hook (if custom_aws available)
+  - `create_metadata_sqs_hook`: Create SQS metadata hook (if custom_aws available)
+  - `is_feedback_sns_hook_available()`: Check SNS hook availability
+  - `is_metadata_sqs_hook_available()`: Check SQS hook availability
+- **Version**: `__version__ = "0.1.9"`
 
 ## Dependencies
 
@@ -334,6 +355,70 @@ session_manager = MongoDBSessionManager(
 # See examples/example_feedback_hook.py for comprehensive examples
 ```
 
+### AWS Integration Patterns
+
+#### SNS Feedback Notifications
+```python
+from mongodb_session_manager import (
+    MongoDBSessionManager,
+    create_feedback_sns_hook,
+    is_feedback_sns_hook_available
+)
+
+# Check if SNS hook is available
+if is_feedback_sns_hook_available():
+    # Create SNS hook for real-time feedback notifications
+    feedback_hook = create_feedback_sns_hook(
+        topic_arn="arn:aws:sns:eu-west-1:123456789:virtual-agents-feedback"
+    )
+    
+    session_manager = MongoDBSessionManager(
+        session_id="user-session",
+        connection_string="mongodb://...",
+        feedbackHook=feedback_hook
+    )
+    
+    # Negative feedback triggers SNS notification
+    session_manager.add_feedback({
+        "rating": "down",
+        "comment": "Response was incomplete"
+    })
+else:
+    print("SNS hook not available - install python-helpers package")
+```
+
+#### SQS Metadata Propagation
+```python
+from mongodb_session_manager import (
+    MongoDBSessionManager,
+    create_metadata_sqs_hook,
+    is_metadata_sqs_hook_available
+)
+
+# Check if SQS hook is available
+if is_metadata_sqs_hook_available():
+    # Create SQS hook for SSE back-propagation
+    metadata_hook = create_metadata_sqs_hook(
+        queue_url="https://sqs.eu-west-1.amazonaws.com/123456789/metadata-updates",
+        metadata_fields=["status", "agent_state", "priority"]  # Only propagate these fields
+    )
+    
+    session_manager = MongoDBSessionManager(
+        session_id="user-session",
+        connection_string="mongodb://...",
+        metadataHook=metadata_hook
+    )
+    
+    # Metadata changes are sent to SQS for real-time sync
+    session_manager.update_metadata({
+        "status": "processing",
+        "agent_state": "thinking",
+        "internal_field": "not propagated"  # Won't be sent to SQS
+    })
+else:
+    print("SQS hook not available - install python-helpers package")
+```
+
 ### Interactive Chat Playground
 The project includes a web-based chat interface for testing:
 
@@ -370,6 +455,9 @@ The playground demonstrates:
 - ✅ Metadata hooks for intercepting and enhancing operations
 - ✅ Feedback system for storing user ratings and comments
 - ✅ Feedback hooks for audit, validation, and notifications
+- ✅ AWS SNS integration for real-time feedback alerts
+- ✅ AWS SQS integration for metadata SSE propagation
+- ✅ Optional AWS dependencies with graceful degradation
 
 ### Implementation Notes
 - The codebase implements core session persistence with automatic metrics capture
@@ -387,14 +475,18 @@ The playground demonstrates:
 - Removed caching layer implementation
 - Updated documentation to reflect actual implementation
 - Maintained automatic metrics capture from agent's event loop
-- **NEW**: Enhanced metadata update to preserve existing fields when updating
-- **NEW**: Added metadata deletion capability for specific fields
-- **NEW**: Fixed syntax error in delete_metadata method
-- **NEW**: Implemented get_metadata_tool() for agent metadata management
-- **NEW**: Created examples demonstrating metadata tool usage
-- **NEW**: Added metadata hooks support for intercepting and customizing metadata operations
-- **NEW**: Created comprehensive hook examples (audit, validation, caching, combined)
-- **NEW**: Implemented feedback system with add_feedback() and get_feedbacks() methods
-- **NEW**: Added feedbackHook support for intercepting feedback operations
-- **NEW**: Created example_feedback_hook.py with audit, validation, notification, and analytics hooks
-- **NEW**: Feedback data includes rating (up/down/null), comment, and automatic timestamp
+- Enhanced metadata update to preserve existing fields when updating
+- Added metadata deletion capability for specific fields
+- Fixed syntax error in delete_metadata method
+- Implemented get_metadata_tool() for agent metadata management
+- Created examples demonstrating metadata tool usage
+- Added metadata hooks support for intercepting and customizing metadata operations
+- Created comprehensive hook examples (audit, validation, caching, combined)
+- Implemented feedback system with add_feedback() and get_feedbacks() methods
+- Added feedbackHook support for intercepting feedback operations
+- Created example_feedback_hook.py with audit, validation, notification, and analytics hooks
+- Feedback data includes rating (up/down/null), comment, and automatic timestamp
+- **NEW**: AWS SNS integration hook for real-time feedback notifications
+- **NEW**: AWS SQS integration hook for metadata SSE back-propagation
+- **NEW**: Added hooks directory with comprehensive AWS service integrations
+- **NEW**: Helper functions to check AWS hook availability

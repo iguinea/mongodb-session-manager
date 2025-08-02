@@ -5,6 +5,40 @@ All notable changes to the MongoDB Session Manager project will be documented in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.9] - 2024-01-27
+
+### Added
+- **AWS Integration Hooks**: Optional AWS service integrations for real-time notifications and event propagation
+  - `FeedbackSNSHook`: Send feedback notifications to AWS SNS for real-time alerts
+  - `MetadataSQSHook`: Propagate metadata changes to AWS SQS for SSE back-propagation
+  - Both hooks require `custom_aws` package (python-helpers) as optional dependency
+- **Hook Creation Functions**:
+  - `create_feedback_sns_hook()`: Create SNS hook with topic ARN
+  - `create_metadata_sqs_hook()`: Create SQS hook with queue URL and field filtering
+- **Availability Check Functions**:
+  - `is_feedback_sns_hook_available()`: Check if SNS hook can be used
+  - `is_metadata_sqs_hook_available()`: Check if SQS hook can be used
+- **Hooks Package**: New `hooks/` directory containing AWS integration modules
+  - Comprehensive docstrings for both hook modules
+  - Non-blocking async operation with graceful error handling
+  - Support for both async and sync execution contexts
+
+### Updated
+- `__init__.py`: Added conditional exports for AWS hooks based on availability
+- Documentation updated to include AWS integration patterns
+- README.md: Added AWS Integration Hooks section with examples
+- CLAUDE.md: Added AWS hooks architecture and usage patterns
+
+### Technical Details
+- SNS hook features:
+  - Real-time notifications for feedback events
+  - Message attributes for SNS filtering
+  - Automatic rating categorization (positive/negative/neutral)
+- SQS hook features:
+  - Selective field propagation to minimize message size
+  - Support for metadata update and delete operations
+  - Designed for SSE (Server-Sent Events) back-propagation
+
 ## [0.1.8] - 2024-01-26
 
 ### Added
@@ -148,6 +182,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - UV package manager integration
 - Docker Compose setup for local MongoDB
 
+[0.1.9]: https://github.com/yourusername/mongodb-session-manager/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/yourusername/mongodb-session-manager/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/yourusername/mongodb-session-manager/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/yourusername/mongodb-session-manager/compare/v0.1.5...v0.1.6
