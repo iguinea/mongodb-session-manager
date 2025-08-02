@@ -46,4 +46,4 @@ build-backend = "hatchling.build"
 packages = ["src/mongodb_session_manager"]
 
 [tool.uv.sources]
-python-helpers = { git = "http://github.com/iguinea/python-helpers", rev = "v0.1.5" }
+python-helpers = { git = "https://github.com/iguinea/python-helpers", rev = "v0.1.5" }
