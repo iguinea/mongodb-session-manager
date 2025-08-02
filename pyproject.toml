@@ -1,6 +1,6 @@
 [project]
 name = "mongodb-session-manager"
-version = "0.1.9"
+version = "0.1.10"
 description = "MongoDB session management for Strands Agents"
 readme = "README.md"
 requires-python = ">=3.13"
@@ -46,4 +46,4 @@ build-backend = "hatchling.build"
 packages = ["src/mongodb_session_manager"]
 
 [tool.uv.sources]
-python-helpers = { git = "http://github.com/iguinea/python-helpers" }
+python-helpers = { git = "http://github.com/iguinea/python-helpers", rev = "v0.1.5" }

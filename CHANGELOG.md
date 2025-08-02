@@ -29,6 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - README.md: Added AWS Integration Hooks section with examples
 - CLAUDE.md: Added AWS hooks architecture and usage patterns
 
+### Fixed
+- Removed unused `TYPE_CHECKING` import from `__init__.py`
+- Fixed missing `List` import in `metadata_sqs_hook.py`
+
 ### Technical Details
 - SNS hook features:
   - Real-time notifications for feedback events
