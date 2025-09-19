@@ -95,6 +95,8 @@ class MongoDBConnectionPool:
                 f"MongoDB connection pool initialized - "
                 f"maxPoolSize: {merged_kwargs['maxPoolSize']}, "
                 f"minPoolSize: {merged_kwargs['minPoolSize']}"
+                f"minPoolSize: {merged_kwargs['retryWrites']}"
+                f"minPoolSize: {merged_kwargs['retryReads']}"
             )
             
             return instance._client

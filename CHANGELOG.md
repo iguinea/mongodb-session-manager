@@ -5,6 +5,20 @@ All notable changes to the MongoDB Session Manager project will be documented in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.11] - 2025-01-19
+
+### Changed
+- **MongoDB Connection Pool**: Disabled automatic retry for write operations by setting `retryWrites` to `False`
+  - This change improves error handling predictability and prevents potential data inconsistencies
+  - Read operations still maintain automatic retries with `retryReads: True`
+
+## [0.1.10] - 2025-01-19
+
+### Fixed
+- Fixed import issues in `__init__.py` and `metadata_sqs_hook.py`
+- Removed unused import to clean up the codebase
+- Enhanced CHANGELOG to reflect import fixes and AWS integration hook additions
+
 ## [0.1.9] - 2024-01-27
 
 ### Added
