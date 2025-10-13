@@ -5,6 +5,14 @@ All notable changes to the MongoDB Session Manager project will be documented in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.12] - 2025-01-19
+
+### Changed
+- **MetadataSQSHook**: Standardized SQS message format for better event handling
+  - Added `event_type: "metadata_update"` field to message body for consistent event categorization
+  - Updated message attributes to use `event_type` instead of `operation` for better downstream filtering
+  - This change improves event processing consistency and aligns with event-driven architecture best practices
+
 ## [0.1.11] - 2025-01-19
 
 ### Changed

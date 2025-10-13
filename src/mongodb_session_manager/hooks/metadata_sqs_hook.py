@@ -170,6 +170,7 @@ class MetadataSQSHook:
             # Prepare the message
             message_data = {
                 "session_id": session_id,
+                "event_type": "metadata_update",
                 "operation": operation,
                 "metadata": relevant_metadata,
                 "timestamp": datetime.now().isoformat(),
@@ -189,7 +190,7 @@ class MetadataSQSHook:
                 message_body=message_body,
                 message_attributes={
                     "session_id": {"DataType": "String", "StringValue": session_id},
-                    "operation": {"DataType": "String", "StringValue": operation},
+                    "event_type": {"DataType": "String", "StringValue": "metadata_update"},
                 },
             )
 
