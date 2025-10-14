@@ -5,6 +5,41 @@ All notable changes to the MongoDB Session Manager project will be documented in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.13] - 2025-01-19
+
+### Changed - BREAKING CHANGE ⚠️
+- **FeedbackSNSHook**: Redesigned to support separate SNS topics for different feedback types
+  - `create_feedback_sns_hook()` now requires three topic ARNs instead of one:
+    - `topic_arn_good`: For positive feedback (rating="up")
+    - `topic_arn_bad`: For negative feedback (rating="down")
+    - `topic_arn_neutral`: For neutral feedback (rating=None)
+  - Messages are automatically routed to the appropriate topic based on rating
+  - Message format changed to include session context: `"Session: {session_id}\n\n{comment}"`
+  - Removed unused imports (json, datetime) from feedback_sns_hook.py
+
+### Migration Guide
+**Before (v0.1.12 and earlier):**
+```python
+feedback_hook = create_feedback_sns_hook(
+    topic_arn="arn:aws:sns:eu-west-1:123456789:feedback-alerts"
+)
+```
+
+**After (v0.1.13+):**
+```python
+feedback_hook = create_feedback_sns_hook(
+    topic_arn_good="arn:aws:sns:eu-west-1:123456789:feedback-good",
+    topic_arn_bad="arn:aws:sns:eu-west-1:123456789:feedback-bad",
+    topic_arn_neutral="arn:aws:sns:eu-west-1:123456789:feedback-neutral"
+)
+```
+
+### Updated
+- Documentation updated across all files to reflect new three-topic pattern
+- README.md: Updated SNS feedback section with new usage examples
+- CLAUDE.md: Updated AWS integration patterns with three-topic routing
+- feedback_sns_hook.py: Comprehensive docstring updates with new message format
+
 ## [0.1.12] - 2025-01-19
 
 ### Changed

@@ -645,7 +645,7 @@ See `examples/example_feedback_hook.py` for comprehensive examples including:
 The library includes optional hooks for integrating with AWS services. These require the `custom_aws` package (python-helpers) to be installed.
 
 ### SNS Feedback Notifications
-Send real-time notifications when users submit feedback:
+Send real-time notifications to different topics based on feedback rating:
 
 ```python
 from mongodb_session_manager import (
@@ -655,27 +655,36 @@ from mongodb_session_manager import (
 
 # Check if SNS integration is available
 if is_feedback_sns_hook_available():
-    # Create SNS hook for feedback notifications
+    # Create SNS hook with three separate topics for routing
     feedback_hook = create_feedback_sns_hook(
-        topic_arn="arn:aws:sns:eu-west-1:123456789:feedback-alerts"
+        topic_arn_good="arn:aws:sns:eu-west-1:123456789:feedback-good",
+        topic_arn_bad="arn:aws:sns:eu-west-1:123456789:feedback-bad",
+        topic_arn_neutral="arn:aws:sns:eu-west-1:123456789:feedback-neutral"
     )
-    
+
     # Create session manager with SNS notifications
     session_manager = MongoDBSessionManager(
         session_id="user-session",
         connection_string="mongodb://...",
         feedbackHook=feedback_hook
     )
-    
-    # This will trigger SNS notification
+
+    # Routes to topic_arn_bad
     session_manager.add_feedback({
         "rating": "down",
         "comment": "The answer was incorrect"
     })
+
+    # Routes to topic_arn_good
+    session_manager.add_feedback({
+        "rating": "up",
+        "comment": "Great response!"
+    })
 ```
 
 Features:
-- Real-time alerts for negative feedback
+- Automatic topic routing based on feedback rating
+- Real-time alerts with session context
 - Non-blocking async notifications
 - Rich message attributes for filtering
 - Graceful degradation if SNS fails

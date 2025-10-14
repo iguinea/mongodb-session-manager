@@ -367,21 +367,29 @@ from mongodb_session_manager import (
 
 # Check if SNS hook is available
 if is_feedback_sns_hook_available():
-    # Create SNS hook for real-time feedback notifications
+    # Create SNS hook with separate topics for different feedback types
     feedback_hook = create_feedback_sns_hook(
-        topic_arn="arn:aws:sns:eu-west-1:123456789:virtual-agents-feedback"
+        topic_arn_good="arn:aws:sns:eu-west-1:123456789:feedback-good",
+        topic_arn_bad="arn:aws:sns:eu-west-1:123456789:feedback-bad",
+        topic_arn_neutral="arn:aws:sns:eu-west-1:123456789:feedback-neutral"
     )
-    
+
     session_manager = MongoDBSessionManager(
         session_id="user-session",
         connection_string="mongodb://...",
         feedbackHook=feedback_hook
     )
-    
-    # Negative feedback triggers SNS notification
+
+    # Routes to topic_arn_bad
     session_manager.add_feedback({
         "rating": "down",
         "comment": "Response was incomplete"
+    })
+
+    # Routes to topic_arn_good
+    session_manager.add_feedback({
+        "rating": "up",
+        "comment": "Great response!"
     })
 else:
     print("SNS hook not available - install python-helpers package")

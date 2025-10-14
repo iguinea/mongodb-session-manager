@@ -25,39 +25,54 @@ Usage:
     ```python
     from mongodb_session_manager import MongoDBSessionManager
     from mongodb_session_manager.hooks.feedback_sns_hook import create_feedback_hook
-    
-    # Create the SNS hook
+
+    # Create the SNS hook with three separate topics
     sns_hook = create_feedback_hook(
-        topic_arn="arn:aws:sns:eu-west-1:123456789:virtual-agents-feedback"
+        topic_arn_good="arn:aws:sns:eu-west-1:123456789:feedback-good",
+        topic_arn_bad="arn:aws:sns:eu-west-1:123456789:feedback-bad",
+        topic_arn_neutral="arn:aws:sns:eu-west-1:123456789:feedback-neutral"
     )
-    
+
     # Create session manager with SNS notifications
     session_manager = MongoDBSessionManager(
         session_id="user-session-123",
         connection_string="mongodb://...",
         feedbackHook=sns_hook
     )
-    
-    # When feedback is added, SNS notification is sent automatically
+
+    # Feedback is routed to the appropriate topic based on rating
     session_manager.add_feedback({
-        "rating": "down",
+        "rating": "down",  # Routes to topic_arn_bad
         "comment": "The response was incomplete"
+    })
+
+    session_manager.add_feedback({
+        "rating": "up",  # Routes to topic_arn_good
+        "comment": "Great response!"
     })
     ```
 
 SNS Message Format:
     Subject: "Virtual Agents Feedback {positive|negative|neutral} on session {session_id}"
-    
-    Message Body: User's comment text
-    
+
+    Message Body:
+        Session: {session_id}
+
+        {comment}
+
     Message Attributes:
         - session_id: String attribute with the session identifier
         - rating: String attribute with "positive", "negative", or "neutral"
 
+    Topic Routing:
+        - rating="up" → topic_arn_good
+        - rating="down" → topic_arn_bad
+        - rating=None → topic_arn_neutral
+
 Requirements:
     - custom_aws.sns module (from python-helpers package)
     - AWS credentials configured with SNS publish permissions
-    - Valid SNS topic ARN
+    - Three valid SNS topic ARNs (for good, bad, and neutral feedback)
 
 Error Handling:
     - ImportError: Raised during initialization if custom_aws.sns is not available
@@ -74,10 +89,8 @@ Performance Considerations:
     - Daemon threads are used in sync contexts to prevent hanging on exit
 """
 
-import json
 import logging
 import asyncio
-from datetime import datetime
 from typing import Dict, Any
 
 try:
@@ -94,12 +107,14 @@ logger = logging.getLogger(__name__)
 class FeedbackSNSHook:
     """Hook to send feedback notifications to SNS"""
 
-    def __init__(self, topic_arn: str):
+    def __init__(self, topic_arn_good: str, topic_arn_bad: str, topic_arn_neutral: str):
         """
         Initialize the feedback SNS hook
 
         Args:
-            topic_arn: Full SNS topic ARN (e.g., arn:aws:sns:eu-west-1:123456789:feedback-notifications)
+            topic_arn_good: SNS topic ARN for positive feedback (rating="up")
+            topic_arn_bad: SNS topic ARN for negative feedback (rating="down")
+            topic_arn_neutral: SNS topic ARN for neutral feedback (rating=None)
         """
         if not publish_message:
             raise ImportError(
@@ -107,8 +122,13 @@ class FeedbackSNSHook:
                 "Please install python-helpers package: pip install python-helpers"
             )
 
-        self.topic_arn = topic_arn
-        logger.info(f"Initialized FeedbackSNSHook with topic: {topic_arn}")
+        self.topic_arn_good = topic_arn_good
+        self.topic_arn_bad = topic_arn_bad
+        self.topic_arn_neutral = topic_arn_neutral
+        logger.info(
+            f"Initialized FeedbackSNSHook with topics - "
+            f"good: {topic_arn_good}, bad: {topic_arn_bad}, neutral: {topic_arn_neutral}"
+        )
 
     async def on_feedback_add(self, session_id: str, feedback: Dict[str, Any]) -> None:
         """
@@ -123,36 +143,31 @@ class FeedbackSNSHook:
             rating = feedback.get("rating")
             comment = feedback.get("comment", "")
 
-            # Map rating to positive/negative
-            rating_text = (
-                "positive"
-                if rating == "up"
-                else "negative" if rating == "down" else "neutral"
-            )
+            # Select the appropriate topic based on rating
+            if rating == "up":
+                topic_arn = self.topic_arn_good
+                rating_text = "positive"
+            elif rating == "down":
+                topic_arn = self.topic_arn_bad
+                rating_text = "negative"
+            else:
+                topic_arn = self.topic_arn_neutral
+                rating_text = "neutral"
 
             # Create subject
             subject = f"Virtual Agents Feedback {rating_text} on session {session_id}"
 
-            # Prepare message body
-            message_body = {
-                "session_id": session_id,
-                "rating": rating,
-                "comment": comment,
-                "timestamp": datetime.now().isoformat(),
-            }
-
-            # Convert to JSON string
-            message = json.dumps(message_body, indent=2, ensure_ascii=False)
+            # Format message with session_id and comment
+            message = f"Session: {session_id}\n\n{comment}"
 
             # Log the message for debugging
-            logger.debug(f"Sending feedback notification to SNS: {subject}")
+            logger.debug(f"Sending feedback notification to SNS topic {topic_arn}: {subject}")
 
             # Send to SNS using asyncio.to_thread for non-blocking operation
             await asyncio.to_thread(
                 publish_message,
-                topic_arn=self.topic_arn,
-                # message=message,
-                message=comment,
+                topic_arn=topic_arn,
+                message=message,
                 subject=subject,
                 message_attributes={
                     "session_id": {"DataType": "String", "StringValue": session_id},
@@ -161,7 +176,7 @@ class FeedbackSNSHook:
             )
 
             logger.info(
-                f"Sent feedback notification to SNS for session {session_id} "
+                f"Sent feedback notification to SNS topic {topic_arn} for session {session_id} "
                 f"with rating: {rating_text}"
             )
 
@@ -176,18 +191,20 @@ class FeedbackSNSHook:
             )
 
 
-def create_feedback_hook(topic_arn: str):
+def create_feedback_hook(topic_arn_good: str, topic_arn_bad: str, topic_arn_neutral: str):
     """
     Create a feedback hook function for mongodb-session-manager
 
     Args:
-        topic_arn: Full SNS topic ARN
+        topic_arn_good: SNS topic ARN for positive feedback (rating="up")
+        topic_arn_bad: SNS topic ARN for negative feedback (rating="down")
+        topic_arn_neutral: SNS topic ARN for neutral feedback (rating=None)
 
     Returns:
         Hook function that handles feedback operations
     """
     try:
-        sns_hook = FeedbackSNSHook(topic_arn)
+        sns_hook = FeedbackSNSHook(topic_arn_good, topic_arn_bad, topic_arn_neutral)
 
         def feedback_hook_wrapper(
             original_func, action: str, session_id: str, **kwargs
