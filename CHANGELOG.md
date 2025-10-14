@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Message format changed to include session context: `"Session: {session_id}\n\n{comment}"`
   - Removed unused imports (json, datetime) from feedback_sns_hook.py
 
+### Added
+- **Optional Topic ARNs**: Topics can be set to `"none"` to disable notifications for specific feedback types
+  - Example: `topic_arn_neutral="none"` will skip SNS notifications for neutral feedback
+  - Logs informational message when skipping due to "none" value
+  - Useful for selectively enabling only good/bad feedback notifications
+
 ### Migration Guide
 **Before (v0.1.12 and earlier):**
 ```python

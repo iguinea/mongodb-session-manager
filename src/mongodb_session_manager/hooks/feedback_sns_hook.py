@@ -33,6 +33,13 @@ Usage:
         topic_arn_neutral="arn:aws:sns:eu-west-1:123456789:feedback-neutral"
     )
 
+    # Optional: Disable notifications for specific feedback types by using "none"
+    sns_hook_selective = create_feedback_hook(
+        topic_arn_good="arn:aws:sns:eu-west-1:123456789:feedback-good",
+        topic_arn_bad="arn:aws:sns:eu-west-1:123456789:feedback-bad",
+        topic_arn_neutral="none"  # Neutral feedback won't trigger SNS
+    )
+
     # Create session manager with SNS notifications
     session_manager = MongoDBSessionManager(
         session_id="user-session-123",
@@ -112,9 +119,9 @@ class FeedbackSNSHook:
         Initialize the feedback SNS hook
 
         Args:
-            topic_arn_good: SNS topic ARN for positive feedback (rating="up")
-            topic_arn_bad: SNS topic ARN for negative feedback (rating="down")
-            topic_arn_neutral: SNS topic ARN for neutral feedback (rating=None)
+            topic_arn_good: SNS topic ARN for positive feedback (rating="up"). Use "none" to disable.
+            topic_arn_bad: SNS topic ARN for negative feedback (rating="down"). Use "none" to disable.
+            topic_arn_neutral: SNS topic ARN for neutral feedback (rating=None). Use "none" to disable.
         """
         if not publish_message:
             raise ImportError(
@@ -164,21 +171,25 @@ class FeedbackSNSHook:
             logger.debug(f"Sending feedback notification to SNS topic {topic_arn}: {subject}")
 
             # Send to SNS using asyncio.to_thread for non-blocking operation
-            await asyncio.to_thread(
-                publish_message,
-                topic_arn=topic_arn,
-                message=message,
-                subject=subject,
-                message_attributes={
-                    "session_id": {"DataType": "String", "StringValue": session_id},
-                    "rating": {"DataType": "String", "StringValue": rating_text},
-                },
-            )
+            if topic_arn != "none":
+                await asyncio.to_thread(
+                    publish_message,
+                    topic_arn=topic_arn,
+                    message=message,
+                    subject=subject,
+                    message_attributes={
+                        "session_id": {"DataType": "String", "StringValue": session_id},
+                        "rating": {"DataType": "String", "StringValue": rating_text},
+                    },
+                )
 
-            logger.info(
-                f"Sent feedback notification to SNS topic {topic_arn} for session {session_id} "
-                f"with rating: {rating_text}"
-            )
+                logger.info(
+                    f"Sent feedback notification to SNS topic {topic_arn} for session {session_id} "
+                    f"with rating: {rating_text}"
+                )
+            else:
+                logger.info(f"Skipping feedback notification to SNS topic {topic_arn} for session {session_id} "
+                            f"with rating: {rating_text} because topic_arn is none")
 
         except ImportError as e:
             logger.error(f"Import error in feedback SNS hook: {e}")
@@ -196,9 +207,9 @@ def create_feedback_hook(topic_arn_good: str, topic_arn_bad: str, topic_arn_neut
     Create a feedback hook function for mongodb-session-manager
 
     Args:
-        topic_arn_good: SNS topic ARN for positive feedback (rating="up")
-        topic_arn_bad: SNS topic ARN for negative feedback (rating="down")
-        topic_arn_neutral: SNS topic ARN for neutral feedback (rating=None)
+        topic_arn_good: SNS topic ARN for positive feedback (rating="up"). Use "none" to disable.
+        topic_arn_bad: SNS topic ARN for negative feedback (rating="down"). Use "none" to disable.
+        topic_arn_neutral: SNS topic ARN for neutral feedback (rating=None). Use "none" to disable.
 
     Returns:
         Hook function that handles feedback operations

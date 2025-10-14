@@ -184,7 +184,7 @@ The package exports the following from `src/mongodb_session_manager/__init__.py`
   - `create_metadata_sqs_hook`: Create SQS metadata hook (if custom_aws available)
   - `is_feedback_sns_hook_available()`: Check SNS hook availability
   - `is_metadata_sqs_hook_available()`: Check SQS hook availability
-- **Version**: `__version__ = "0.1.9"`
+- **Version**: `__version__ = "0.1.13"`
 
 ## Dependencies
 
