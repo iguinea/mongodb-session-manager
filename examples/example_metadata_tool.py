@@ -2,6 +2,17 @@
 """
 Example demonstrating the metadata tool for agents.
 
+📚 **Related Documentation:**
+   - User Guide: docs/examples/metadata-patterns.md
+   - Metadata Management: docs/user-guide/metadata-management.md
+
+🚀 **How to Run:**
+   ```bash
+   uv run python examples/example_metadata_tool.py
+   ```
+
+🔗 **Learn More:** https://github.com/iguinea/mongodb-session-manager/tree/main/docs
+
 This example shows how agents can use the metadata tool to dynamically
 manage session metadata during conversations.
 """

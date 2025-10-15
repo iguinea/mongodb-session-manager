@@ -34,6 +34,46 @@ A MongoDB session manager for Strands Agents that provides persistent storage fo
 - **Stateless-Ready**: Optimized for FastAPI and other stateless frameworks
 - **Reduced Connection Overhead**: Significant performance improvement over per-request connections
 
+## 📂 Documentation & Examples
+
+This project provides two complementary resources to help you learn and use MongoDB Session Manager:
+
+### 🚀 Runnable Scripts (`/examples/`)
+
+Execute immediately to see features in action:
+
+```bash
+# Basic agent with tools
+uv run python examples/example_calculator_tool.py
+
+# Agent configuration persistence
+uv run python examples/example_agent_config.py
+
+# FastAPI integration
+uv run python examples/example_fastapi_streaming.py
+
+# Metadata management
+uv run python examples/example_metadata_tool.py
+
+# Feedback system
+uv run python examples/example_feedback_hook.py
+```
+
+[View all examples →](examples/)
+
+### 📚 Comprehensive Documentation (`/docs/`)
+
+In-depth guides with explanations, patterns, and best practices:
+
+- **[Getting Started](docs/getting-started/)** - Installation, quickstart, basic concepts
+- **[User Guides](docs/user-guide/)** - Session management, pooling, factory, metadata, feedback, AWS, streaming
+- **[Examples & Patterns](docs/examples/)** - Practical examples and advanced patterns
+- **[API Reference](docs/api-reference/)** - Complete API documentation
+- **[Architecture](docs/architecture/)** - Design decisions, data model, performance
+- **[Development](docs/development/)** - Contributing, testing, releasing
+
+💡 **Recommended Workflow**: Read the docs to learn → Run the examples to practice → Build your application
+
 ## 📦 Installation
 
 ```bash
@@ -749,6 +789,8 @@ Sessions are stored as nested documents with agents and messages:
         "agent-id": {
             "agent_data": {
                 "agent_id": "agent-id",
+                "model": "eu.anthropic.claude-sonnet-4-20250514-v1:0",
+                "system_prompt": "You are a helpful assistant",
                 "state": {
                     "key": "value"
                 },
@@ -902,22 +944,28 @@ MongoDB implementation of the `SessionRepository` interface from Strands SDK.
 Main session management class extending RepositorySessionManager from Strands SDK.
 
 **Implemented Methods:**
-- `__init__(metadataHook=None, **kwargs)`: Initialize with MongoDB connection options and optional metadata hook
+- `__init__(metadataHook=None, feedbackHook=None, **kwargs)`: Initialize with MongoDB connection options and optional hooks
 - `append_message(message, agent)`: Store message in session
 - `redact_latest_message(redact_message, agent)`: Redact the latest message
-- `sync_agent(agent)`: Sync agent data and capture event loop metrics
+- `sync_agent(agent)`: Sync agent data, capture event loop metrics, and persist agent configuration (model, system_prompt)
 - `initialize(agent)`: Initialize an agent with the session
 - `update_metadata(metadata)`: Update session metadata (preserves existing fields)
 - `get_metadata()`: Retrieve session metadata
 - `delete_metadata(metadata_keys)`: Delete specific metadata fields
 - `get_metadata_tool()`: Get a Strands tool for agent metadata management
+- `add_feedback(feedback)`: Store user feedback with rating and comment
+- `get_feedbacks()`: Retrieve all feedback for the session
+- `get_agent_config(agent_id)`: Get agent configuration (model, system_prompt) **NEW v0.1.14**
+- `update_agent_config(agent_id, model, system_prompt)`: Update agent configuration **NEW v0.1.14**
+- `list_agents()`: List all agents in session with their configurations **NEW v0.1.14**
 - `close()`: Close database connections
 
 **Automatic Features:**
 - Captures metrics from `agent.event_loop_metrics` during `sync_agent()`
+- **Captures and persists agent configuration** (model, system_prompt) during `sync_agent()` **NEW v0.1.14**
 - Updates last message with token counts and latency
 - Handles MongoDB connection lifecycle intelligently
-- Applies metadata hooks to intercept update, get, and delete operations
+- Applies metadata and feedback hooks to intercept operations
 
 #### MongoDBSessionManagerFactory
 Factory for creating session managers with connection pooling.
@@ -979,6 +1027,7 @@ Convenience function to create a session manager with default settings.
 - `examples/example_metadata_tool_direct.py`: Direct usage of the metadata tool
 - `examples/example_metadata_hook.py`: Metadata hooks for audit, validation, and caching
 - `examples/example_feedback_hook.py`: Feedback hooks for audit, validation, notifications, and analytics
+- `examples/example_agent_config.py`: **NEW v0.1.14** - Agent configuration persistence and retrieval
 
 Each example includes:
 - Basic usage demonstration

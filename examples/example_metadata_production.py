@@ -2,6 +2,17 @@
 """
 Production example demonstrating metadata management for customer support sessions.
 
+📚 **Related Documentation:**
+   - User Guide: docs/examples/metadata-patterns.md
+   - Metadata Management: docs/user-guide/metadata-management.md
+
+🚀 **How to Run:**
+   ```bash
+   uv run python examples/example_metadata_production.py
+   ```
+
+🔗 **Learn More:** https://github.com/iguinea/mongodb-session-manager/tree/main/docs
+
 This example shows how to use metadata updates in a real-world customer support
 scenario where metadata is gradually built up during the conversation.
 """

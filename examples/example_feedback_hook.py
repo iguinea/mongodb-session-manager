@@ -2,6 +2,18 @@
 """
 Example demonstrating the feedback hook functionality.
 
+📚 **Related Documentation:**
+   - User Guide: docs/examples/feedback-patterns.md
+   - Feedback System: docs/user-guide/feedback-system.md
+   - API Reference: docs/api-reference/hooks.md
+
+🚀 **How to Run:**
+   ```bash
+   uv run python examples/example_feedback_hook.py
+   ```
+
+🔗 **Learn More:** https://github.com/iguinea/mongodb-session-manager/tree/main/docs
+
 This example shows how to use the feedbackHook parameter to intercept
 and enhance feedback operations with custom logic like auditing,
 validation, notifications, and FastAPI integration.

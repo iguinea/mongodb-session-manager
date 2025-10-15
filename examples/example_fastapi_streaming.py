@@ -1,3 +1,20 @@
+"""Example FastAPI integration with streaming responses and factory pattern.
+
+📚 **Related Documentation:**
+   - User Guide: docs/examples/fastapi-integration.md
+   - Async Streaming: docs/user-guide/async-streaming.md
+
+🚀 **How to Run:**
+   ```bash
+   uv run python examples/example_fastapi_streaming.py
+   ```
+
+🔗 **Learn More:** https://github.com/iguinea/mongodb-session-manager/tree/main/docs
+
+This example demonstrates real-time streaming responses with session persistence
+and the factory pattern for optimized connection management.
+"""
+
 import logging
 import asyncio
 import signal

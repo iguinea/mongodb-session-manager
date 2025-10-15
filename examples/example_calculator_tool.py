@@ -1,6 +1,18 @@
 #!/usr/bin/env python3
 """
 Example using MongoDBSessionManager with Strands calculator tool.
+
+📚 **Related Documentation:**
+   - User Guide: docs/examples/basic-usage.md
+   - Getting Started: docs/getting-started/quickstart.md
+
+🚀 **How to Run:**
+   ```bash
+   uv run python examples/example_calculator_tool.py
+   ```
+
+🔗 **Learn More:** https://github.com/iguinea/mongodb-session-manager/tree/main/docs
+
 Demonstrates automatic timing and token tracking.
 """
 
@@ -103,8 +115,8 @@ Si te preguntan sobre la capital de algun pais, usa la herramienta country_quest
     print(f"✅ Respuesta: {response}")
     print(f"✅ Metrics: {response.metrics}")
     print(f"✅ State: {agent.state.get()}")
-    metrics = session_manager.get_metrics_summary(agent_id=_agent_id)
-    print(f"✅ Metrics: {metrics}")
+    # Note: get_metrics_summary() is not implemented in MongoDBSessionManager
+    # Metrics are captured automatically via event_loop_metrics in response objects
 
     session_manager.close()
 

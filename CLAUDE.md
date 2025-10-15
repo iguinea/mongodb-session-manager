@@ -68,7 +68,11 @@ mongodb-session-manager/
 │   ├── example_fastapi.py                 # FastAPI integration example
 │   ├── example_performance.py             # Performance benchmarks
 │   ├── example_stream_async.py            # Async streaming with real-time metrics
-│   └── example_fastapi_streaming.py       # FastAPI with streaming and factory pattern
+│   ├── example_fastapi_streaming.py       # FastAPI with streaming and factory pattern
+│   ├── example_metadata_tool.py           # Agent using metadata tool autonomously
+│   ├── example_metadata_hook.py           # Metadata hooks (audit, validation, caching)
+│   ├── example_feedback_hook.py           # Feedback hooks (audit, validation, notifications)
+│   └── example_agent_config.py            # Agent configuration persistence demo
 ├── playground/                            # Interactive demos
 │   └── chat/                              # Web-based chat interface
 │       ├── chat.html                      # Chat UI with real-time streaming
@@ -94,11 +98,13 @@ mongodb-session-manager/
    - Provides high-level session management interface
    - Integrates with Strands Agent lifecycle hooks
    - **Event Loop Metrics**: Captures metrics from agent's event_loop_metrics during sync_agent()
+   - **Agent Configuration Persistence**: Automatically captures and stores model and system_prompt
    - **Metadata Management**: Direct methods for update, get, delete operations
    - **Metadata Tool**: Provides get_metadata_tool() for agent integration
    - **Metadata Hooks**: Supports intercepting metadata operations with custom logic
    - **Feedback System**: Stores user feedback (rating + comment) with automatic timestamps
    - **Feedback Hooks**: Supports intercepting feedback operations for audit, validation, etc.
+   - **Agent Config Methods**: get_agent_config(), update_agent_config(), list_agents()
    - **Simplified Implementation**: Many automatic features have been commented out or removed
    - **Note**: Methods like check_session_exists() and get_metrics_summary() are not implemented in base class
 
@@ -135,13 +141,16 @@ mongodb-session-manager/
 
 Sessions are stored as single documents with embedded agents and messages:
 - Collection: Configurable (defaults to `collection_name` parameter)
-- Document structure: 
+- Document structure:
   - Root: session document with `_id`, `session_id`, `session_type`, timestamps
   - Agents: Nested under `agents` object, keyed by agent_id
+    - **agent_data**: Contains agent_id, state, conversation_manager_state, **model**, **system_prompt**, timestamps
   - Messages: Array within each agent, with auto-incrementing message_id
   - Metrics: Stored in `event_loop_metrics` field of assistant messages
   - Feedbacks: Array of feedback objects with rating, comment, and created_at timestamp
 - Indexes: Automatically created on `created_at` and `updated_at` fields
+
+**New in v0.1.14**: `model` and `system_prompt` fields in agent_data for configuration persistence
 
 ### Key Design Decisions
 
@@ -184,14 +193,14 @@ The package exports the following from `src/mongodb_session_manager/__init__.py`
   - `create_metadata_sqs_hook`: Create SQS metadata hook (if custom_aws available)
   - `is_feedback_sns_hook_available()`: Check SNS hook availability
   - `is_metadata_sqs_hook_available()`: Check SQS hook availability
-- **Version**: `__version__ = "0.1.13"`
+- **Version**: `__version__ = "0.1.14"`
 
 ## Dependencies
 
 Core dependencies:
 - `pymongo>=4.13.2`: MongoDB Python driver
-- `strands-agents>=1.0.1`: Core Strands Agents SDK
-- `strands-agents-tools>=0.2.1`: Strands tools
+- `strands-agents>=1.12.0`: Core Strands Agents SDK
+- `strands-agents-tools>=0.2.11`: Strands tools
 - `fastapi>=0.116.1`: For FastAPI integration examples
 - `uvloop>=0.21.0`: High-performance event loop
 
@@ -427,6 +436,45 @@ else:
     print("SQS hook not available - install python-helpers package")
 ```
 
+### Agent Configuration Persistence Pattern
+```python
+# Configuration is automatically captured during sync_agent()
+agent = Agent(
+    agent_id="support-agent",
+    model="eu.anthropic.claude-sonnet-4-20250514-v1:0",
+    system_prompt="You are a friendly customer support agent.",
+    session_manager=session_manager
+)
+
+# Use the agent
+response = agent("Hello!")  # sync_agent() is called automatically, capturing config
+
+# Retrieve agent configuration
+config = session_manager.get_agent_config("support-agent")
+print(f"Model: {config['model']}")
+print(f"System Prompt: {config['system_prompt']}")
+
+# Update agent configuration (useful for experimentation)
+session_manager.update_agent_config(
+    "support-agent",
+    model="eu.anthropic.claude-haiku-4-20250514-v1:0",  # Switch to faster model
+    system_prompt="You are a friendly and efficient customer support agent."
+)
+
+# List all agents in session with their configurations
+agents = session_manager.list_agents()
+for agent_info in agents:
+    print(f"Agent: {agent_info['agent_id']}")
+    print(f"  Model: {agent_info.get('model', 'Not captured')}")
+    print(f"  Prompt: {agent_info.get('system_prompt', 'Not captured')[:50]}...")
+
+# Use cases:
+# 1. Auditing: Track which models were used for compliance
+# 2. Debugging: Reproduce agent behavior with exact configuration
+# 3. Analytics: Analyze model usage patterns and costs
+# 4. A/B Testing: Compare different prompts/models for same conversations
+```
+
 ### Interactive Chat Playground
 The project includes a web-based chat interface for testing:
 
@@ -453,6 +501,8 @@ The playground demonstrates:
 - ✅ Connection pooling via singleton pattern
 - ✅ Factory pattern for efficient session manager creation
 - ✅ Event loop metrics capture from agents (via sync_agent)
+- ✅ **Agent configuration persistence** (model and system_prompt auto-capture)
+- ✅ **Agent config retrieval and update** (get_agent_config, update_agent_config, list_agents)
 - ✅ Multiple agents per session with separate conversation history
 - ✅ Thread-safe operations
 - ✅ Async streaming support
@@ -476,25 +526,37 @@ The playground demonstrates:
 
 ## Recent Updates
 
-- Simplified implementation by removing automatic metrics features
-- Updated documentation to reflect current functionality
-- Maintained core session persistence and connection pooling features
-- Simplified implementation focusing on core functionality
-- Removed caching layer implementation
-- Updated documentation to reflect actual implementation
-- Maintained automatic metrics capture from agent's event loop
-- Enhanced metadata update to preserve existing fields when updating
-- Added metadata deletion capability for specific fields
-- Fixed syntax error in delete_metadata method
-- Implemented get_metadata_tool() for agent metadata management
-- Created examples demonstrating metadata tool usage
-- Added metadata hooks support for intercepting and customizing metadata operations
-- Created comprehensive hook examples (audit, validation, caching, combined)
+### Version 0.1.14 (2025-10-15) 🆕
+- **Agent Configuration Persistence**: Automatic capture and storage of `model` and `system_prompt`
+  - sync_agent() now persists agent configuration automatically
+  - New get_agent_config(agent_id) method to retrieve configuration
+  - New update_agent_config(agent_id, model, system_prompt) to modify configuration
+  - New list_agents() method to list all agents with their configurations
+  - Enables auditing, reproducibility, analytics, and compliance
+- Created example_agent_config.py demonstrating the new functionality
+- MongoDB schema extended with model and system_prompt fields in agent_data
+- Fully backward compatible with existing documents
+
+### Previous Updates
+- AWS SNS integration hook for real-time feedback notifications
+- AWS SQS integration hook for metadata SSE back-propagation
+- Added hooks directory with comprehensive AWS service integrations
+- Helper functions to check AWS hook availability
 - Implemented feedback system with add_feedback() and get_feedbacks() methods
 - Added feedbackHook support for intercepting feedback operations
-- Created example_feedback_hook.py with audit, validation, notification, and analytics hooks
-- Feedback data includes rating (up/down/null), comment, and automatic timestamp
-- **NEW**: AWS SNS integration hook for real-time feedback notifications
-- **NEW**: AWS SQS integration hook for metadata SSE back-propagation
-- **NEW**: Added hooks directory with comprehensive AWS service integrations
-- **NEW**: Helper functions to check AWS hook availability
+- Implemented get_metadata_tool() for agent metadata management
+- Added metadata hooks support for intercepting and customizing metadata operations
+- Enhanced metadata update to preserve existing fields when updating
+- Added metadata deletion capability for specific fields
+- Maintained automatic metrics capture from agent's event loop
+- Connection pooling via singleton pattern
+- Factory pattern for efficient session manager creation
+
+
+## Rules
+- Trabajas sobre un entorno UV
+- Update documentation files (@CLAUDE.md and @README.md) when implementing new features or making significant changes
+- Cuando se realicen fixes o se implementen nuevas funcionalidades, y estás se validen por el usuario (por lo que habrá que pedir conformidad con las soluciones implementadas) quiero que actualices la documentacion pertinente, (@docs/README.md para ver que documentacion hay que actualizar) , asi como actualices el fichero @CHANGELOG.md
+- Cuando se hable de trabajar en una nueva funcionalidad, cuando el usuario acepte el plan, este se guardará en @features/<n>_<short_description>/plan.md .  Este fichero se usará para ver el progreso de la implementación de la nueva feature.
+- En @docs/README.md tienes la referencia a la documentacion del proyecto
+- Cuando vayas a generar una nueva release, ten en cuenta que la version tambien está en los ficheros: @src/mongodb_session_manager/__init__.py y @pyproject.toml

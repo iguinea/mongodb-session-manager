@@ -253,6 +253,27 @@ class MongoDBSessionManager(RepositorySessionManager):
                         {"$set": update_data},
                     )
 
+        # Capture and store agent configuration (model and system_prompt)
+        agent_config_update = {}
+        if hasattr(agent, "model") and agent.model:
+            # Extract model identifier as string from BedrockModel.config['model_id']
+            # or fall back to model_id attribute or str representation
+            model_id = None
+            if hasattr(agent.model, "config") and isinstance(agent.model.config, dict):
+                model_id = agent.model.config.get("model_id")
+            if not model_id:
+                model_id = getattr(agent.model, "model_id", str(agent.model))
+            agent_config_update[f"agents.{agent.agent_id}.agent_data.model"] = model_id
+        if hasattr(agent, "system_prompt") and agent.system_prompt:
+            agent_config_update[f"agents.{agent.agent_id}.agent_data.system_prompt"] = agent.system_prompt
+
+        if agent_config_update:
+            self.session_repository.collection.update_one(
+                {"_id": self.session_id},
+                {"$set": agent_config_update},
+            )
+            logger.debug(f"Captured agent configuration for {agent.agent_id}: model={model_id if 'model_id' in locals() else 'N/A'}")
+
     def initialize(self, agent: "Agent", **kwargs: Any) -> None:
         """Initialize an agent with a session."""
         super().initialize(agent, **kwargs)
@@ -402,6 +423,137 @@ class MongoDBSessionManager(RepositorySessionManager):
     def get_feedbacks(self) -> List[Dict[str, Any]]:
         """Get all feedbacks for the session."""
         return self.session_repository.get_feedbacks(self.session_id)
+
+    def get_agent_config(self, agent_id: str) -> Optional[Dict[str, Any]]:
+        """Get configuration (model and system_prompt) for a specific agent.
+
+        Args:
+            agent_id: ID of the agent to retrieve configuration for
+
+        Returns:
+            Dict with agent_id, model, and system_prompt if found, None if agent doesn't exist
+
+        Example:
+            config = session_manager.get_agent_config("assistant-1")
+            if config:
+                print(f"Model: {config.get('model')}")
+                print(f"System prompt: {config.get('system_prompt')}")
+        """
+        try:
+            doc = self.session_repository.collection.find_one(
+                {"_id": self.session_id},
+                {f"agents.{agent_id}.agent_data": 1}
+            )
+
+            if not doc or "agents" not in doc or agent_id not in doc["agents"]:
+                logger.debug(f"Agent {agent_id} not found in session {self.session_id}")
+                return None
+
+            agent_data = doc["agents"][agent_id].get("agent_data", {})
+
+            return {
+                "agent_id": agent_id,
+                "model": agent_data.get("model"),
+                "system_prompt": agent_data.get("system_prompt")
+            }
+        except Exception as e:
+            logger.error(f"Failed to get agent config for {agent_id}: {e}")
+            return None
+
+    def update_agent_config(
+        self,
+        agent_id: str,
+        model: Optional[str] = None,
+        system_prompt: Optional[str] = None
+    ) -> None:
+        """Update model or system_prompt for a specific agent.
+
+        Args:
+            agent_id: ID of the agent to update
+            model: New model identifier (optional)
+            system_prompt: New system prompt (optional)
+
+        Raises:
+            ValueError: If agent doesn't exist
+
+        Example:
+            # Update only model
+            session_manager.update_agent_config("assistant-1", model="claude-3-opus")
+
+            # Update only system_prompt
+            session_manager.update_agent_config(
+                "assistant-1",
+                system_prompt="You are an expert coder"
+            )
+
+            # Update both
+            session_manager.update_agent_config(
+                "assistant-1",
+                model="claude-3-opus",
+                system_prompt="You are an expert coder"
+            )
+        """
+        # Build update dict
+        update_fields = {}
+        if model is not None:
+            update_fields[f"agents.{agent_id}.agent_data.model"] = model
+        if system_prompt is not None:
+            update_fields[f"agents.{agent_id}.agent_data.system_prompt"] = system_prompt
+
+        if not update_fields:
+            logger.warning(f"No fields to update for agent {agent_id}")
+            return
+
+        try:
+            result = self.session_repository.collection.update_one(
+                {"_id": self.session_id},
+                {"$set": update_fields}
+            )
+
+            if result.matched_count == 0:
+                raise ValueError(f"Session {self.session_id} not found")
+
+            logger.info(f"Updated agent config for {agent_id}: {list(update_fields.keys())}")
+        except Exception as e:
+            logger.error(f"Failed to update agent config for {agent_id}: {e}")
+            raise
+
+    def list_agents(self) -> List[Dict[str, Any]]:
+        """List all agents in the session with their configurations.
+
+        Returns:
+            List of dicts with agent_id, model, and system_prompt for each agent
+
+        Example:
+            agents = session_manager.list_agents()
+            for agent in agents:
+                print(f"Agent: {agent['agent_id']}")
+                print(f"  Model: {agent.get('model', 'N/A')}")
+                print(f"  System Prompt: {agent.get('system_prompt', 'N/A')}")
+        """
+        try:
+            doc = self.session_repository.collection.find_one(
+                {"_id": self.session_id},
+                {"agents": 1}
+            )
+
+            if not doc or "agents" not in doc:
+                logger.debug(f"No agents found in session {self.session_id}")
+                return []
+
+            agents_list = []
+            for agent_id, agent_obj in doc["agents"].items():
+                agent_data = agent_obj.get("agent_data", {})
+                agents_list.append({
+                    "agent_id": agent_id,
+                    "model": agent_data.get("model"),
+                    "system_prompt": agent_data.get("system_prompt")
+                })
+
+            return agents_list
+        except Exception as e:
+            logger.error(f"Failed to list agents for session {self.session_id}: {e}")
+            return []
 
 
 # Convenience factory function

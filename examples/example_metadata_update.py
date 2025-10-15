@@ -2,6 +2,17 @@
 """
 Example demonstrating metadata update functionality with field preservation.
 
+📚 **Related Documentation:**
+   - User Guide: docs/examples/metadata-patterns.md
+   - Metadata Management: docs/user-guide/metadata-management.md
+
+🚀 **How to Run:**
+   ```bash
+   uv run python examples/example_metadata_update.py
+   ```
+
+🔗 **Learn More:** https://github.com/iguinea/mongodb-session-manager/tree/main/docs
+
 This example shows how the updated metadata methods preserve existing metadata fields
 while only updating specified fields.
 """

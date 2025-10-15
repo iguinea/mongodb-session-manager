@@ -5,6 +5,75 @@ All notable changes to the MongoDB Session Manager project will be documented in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.1.15] - 2025-10-15
+
+### Changed
+- **Dependency Upgrades**: Updated Strands packages to latest versions for improved stability and features
+  - `strands-agents`: 1.0.1 → **1.12.0** (11 minor versions)
+  - `strands-agents-tools`: 0.2.1 → **0.2.11** (10 patch versions)
+
+### Fixed
+- **SessionMessage Compatibility**: Fixed compatibility with strands-agents 1.12.0+ `SessionMessage` constructor
+  - Added filtering for metrics fields (`latency_ms`, `input_tokens`, `output_tokens`) that are no longer accepted as constructor parameters
+  - These fields are still stored in MongoDB for analytics but filtered when converting to SessionMessage objects
+  - Fixes "SessionMessage.__init__() got an unexpected keyword argument" errors when loading existing sessions
+  - Updated both `read_message()` and `list_messages()` methods in `MongoDBSessionRepository`
+
+### Added
+- **Documentation Overhaul**: Comprehensive documentation structure with 30+ new files
+  - Getting Started guides (installation, quickstart, basic concepts)
+  - User guides (session management, connection pooling, factory pattern, metadata, feedback, AWS integrations, async streaming)
+  - API reference documentation for all classes and hooks
+  - Architecture documentation (overview, design decisions, data model, performance)
+  - Development guides (setup, contributing, testing, releasing)
+  - Examples and patterns (basic usage, FastAPI integration, metadata patterns, feedback patterns, AWS patterns)
+  - FAQ and documentation index at `docs/README.md`
+- New `examples/README.md` with quick reference to all example scripts
+
+### Benefits from Strands Upgrades
+- **Performance**: Better error handling and improved tool loading mechanisms
+- **Features**: New model providers (Gemini), enhanced tool specifications with optional output schemas
+- **Observability**: Modern OpenTelemetry v1.37 semantic conventions for better monitoring
+- **Stability**: 12 versions worth of bug fixes and improvements across strands-agents
+- **Tools**: Access to 10+ new tools (Elasticsearch, Twelve Labs Video, Exa/Tavily search, Bright Data)
+- **Compatibility**: Better LiteLLM and model provider support (OpenAI, Bedrock, Anthropic)
+
+### Testing
+- ✅ Verified compatibility with `example_calculator_tool.py` (basic agent + tools)
+- ✅ Verified compatibility with `example_agent_config.py` (agent configuration persistence)
+- ✅ Verified compatibility with `example_metadata_hook.py` (metadata hooks functionality)
+
+## [0.1.14] - 2025-10-15
+
+### Added
+- **Agent Configuration Persistence**: Automatic capture and storage of `model` and `system_prompt` fields from agents
+  - `sync_agent()` now automatically captures and persists agent configuration (model, system_prompt) to MongoDB
+  - New `get_agent_config(agent_id)` method to retrieve agent configuration by ID
+  - New `update_agent_config(agent_id, model, system_prompt)` method to modify agent configuration
+  - New `list_agents()` method to list all agents in a session with their configurations
+  - Agent configuration stored in `agents.{agent_id}.agent_data.model` and `.system_prompt` fields
+  - Backward compatible: existing documents without these fields continue to work
+- New example file: `examples/example_agent_config.py` demonstrating configuration persistence
+- Feature plan documentation in `features/1_agent_config_persistence/`
+
+### Changed
+- MongoDB schema extended with `model` and `system_prompt` fields in agent_data
+- `sync_agent()` now performs additional update to persist agent configuration
+
+### Benefits
+- **Auditing**: Track which model and system prompt were used for each conversation
+- **Reproducibility**: Recreate agent behavior by using the same configuration
+- **Analytics**: Analyze model usage patterns, costs, and performance
+- **Compliance**: Maintain records of system prompts for regulatory purposes
+
+### Technical Details
+- Model and system_prompt are captured from the `Agent` object during `sync_agent()`
+- Fields are stored using MongoDB `$set` operation with dot notation
+- Configuration updates are logged at DEBUG level for observability
+- Methods handle missing agents gracefully (return None or empty list)
+
 ## [0.1.13] - 2025-01-19
 
 ### Changed - BREAKING CHANGE ⚠️
@@ -249,8 +318,14 @@ feedback_hook = create_feedback_sns_hook(
 - UV package manager integration
 - Docker Compose setup for local MongoDB
 
-[0.1.9]: https://github.com/yourusername/mongodb-session-manager/compare/v0.1.8...v0.1.9
-[0.1.8]: https://github.com/yourusername/mongodb-session-manager/compare/v0.1.7...v0.1.8
+[0.1.15]: https://github.com/iguinea/mongodb-session-manager/compare/v0.1.14...v0.1.15
+[0.1.14]: https://github.com/iguinea/mongodb-session-manager/compare/v0.1.13...v0.1.14
+[0.1.13]: https://github.com/iguinea/mongodb-session-manager/compare/v0.1.12...v0.1.13
+[0.1.12]: https://github.com/iguinea/mongodb-session-manager/compare/v0.1.11...v0.1.12
+[0.1.11]: https://github.com/iguinea/mongodb-session-manager/compare/v0.1.10...v0.1.11
+[0.1.10]: https://github.com/iguinea/mongodb-session-manager/compare/v0.1.9...v0.1.10
+[0.1.9]: https://github.com/iguinea/mongodb-session-manager/compare/v0.1.8...v0.1.9
+[0.1.8]: https://github.com/iguinea/mongodb-session-manager/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/yourusername/mongodb-session-manager/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/yourusername/mongodb-session-manager/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/yourusername/mongodb-session-manager/compare/v0.1.4...v0.1.5

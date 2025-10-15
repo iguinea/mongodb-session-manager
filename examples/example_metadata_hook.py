@@ -2,6 +2,18 @@
 """
 Example demonstrating the metadata hook functionality.
 
+📚 **Related Documentation:**
+   - User Guide: docs/examples/metadata-patterns.md
+   - Metadata Management: docs/user-guide/metadata-management.md
+   - API Reference: docs/api-reference/hooks.md
+
+🚀 **How to Run:**
+   ```bash
+   uv run python examples/example_metadata_hook.py
+   ```
+
+🔗 **Learn More:** https://github.com/iguinea/mongodb-session-manager/tree/main/docs
+
 This example shows how to use the metadataHook parameter to intercept
 and enhance metadata operations with custom logic like auditing,
 validation, caching, or synchronization.

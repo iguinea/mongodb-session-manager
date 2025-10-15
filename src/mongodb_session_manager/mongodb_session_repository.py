@@ -302,7 +302,14 @@ class MongoDBSessionRepository(SessionRepository):
 
             agent_data = doc["agents"][agent_id]["agent_data"]
 
-            session_agent = SessionAgent(**agent_data)
+            # Filter out config fields that SessionAgent doesn't accept
+            # These are stored for auditing but are not part of SessionAgent schema
+            config_fields = ["model", "system_prompt"]
+            filtered_agent_data = {
+                k: v for k, v in agent_data.items() if k not in config_fields
+            }
+
+            session_agent = SessionAgent(**filtered_agent_data)
             logger.debug(f"Read agent {agent_id} from session {session_id}")
             return session_agent
 
@@ -426,7 +433,9 @@ class MongoDBSessionRepository(SessionRepository):
                     # logger.warning(f"msg_data2: {msg_data}")
 
                     # Filter out metrics fields that SessionMessage doesn't accept
-                    metrics_fields = ["event_loop_metrics"]
+                    # event_loop_metrics is the custom metrics we store
+                    # latency_ms, input_tokens, output_tokens are no longer accepted in strands-agents 1.12.0+
+                    metrics_fields = ["event_loop_metrics", "latency_ms", "input_tokens", "output_tokens"]
                     filtered_msg_data = {
                         k: v for k, v in msg_data.items() if k not in metrics_fields
                     }
@@ -547,7 +556,9 @@ class MongoDBSessionRepository(SessionRepository):
                     logger.debug(f"Message {i} structure: {list(msg_data.keys())}")
 
                     # Filter out metrics fields that SessionMessage doesn't accept
-                    metrics_fields = ["event_loop_metrics"]
+                    # event_loop_metrics is the custom metrics we store
+                    # latency_ms, input_tokens, output_tokens are no longer accepted in strands-agents 1.12.0+
+                    metrics_fields = ["event_loop_metrics", "latency_ms", "input_tokens", "output_tokens"]
                     filtered_msg_data = {
                         k: v for k, v in msg_data.items() if k not in metrics_fields
                     }

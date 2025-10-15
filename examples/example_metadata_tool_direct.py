@@ -2,6 +2,17 @@
 """
 Example demonstrating direct usage of the metadata tool.
 
+📚 **Related Documentation:**
+   - User Guide: docs/examples/metadata-patterns.md
+   - Metadata Management: docs/user-guide/metadata-management.md
+
+🚀 **How to Run:**
+   ```bash
+   uv run python examples/example_metadata_tool_direct.py
+   ```
+
+🔗 **Learn More:** https://github.com/iguinea/mongodb-session-manager/tree/main/docs
+
 This example shows how to use the metadata tool directly without
 relying on the agent's interpretation.
 """

@@ -1,5 +1,16 @@
 """Example FastAPI integration with optimized MongoDB Session Manager.
 
+📚 **Related Documentation:**
+   - User Guide: docs/examples/fastapi-integration.md
+   - Factory Pattern: docs/user-guide/factory-pattern.md
+
+🚀 **How to Run:**
+   ```bash
+   uv run python examples/example_fastapi.py
+   ```
+
+🔗 **Learn More:** https://github.com/iguinea/mongodb-session-manager/tree/main/docs
+
 This example demonstrates how to use the connection pooling
 for high-performance stateless API endpoints.
 """

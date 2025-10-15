@@ -1,5 +1,16 @@
 """Performance comparison example for MongoDB Session Manager.
 
+📚 **Related Documentation:**
+   - Architecture: docs/architecture/performance.md
+   - Connection Pooling: docs/user-guide/connection-pooling.md
+
+🚀 **How to Run:**
+   ```bash
+   uv run python examples/example_performance.py
+   ```
+
+🔗 **Learn More:** https://github.com/iguinea/mongodb-session-manager/tree/main/docs
+
 This example demonstrates the performance difference between:
 1. Creating new connections for each session (old approach)
 2. Using connection pooling (optimized approach)
