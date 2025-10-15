@@ -1098,6 +1098,145 @@ You can customize the chat behavior by modifying:
 - **Tools**: Add or modify tools available to the agent
 - **UI**: Modify `chat.html` and `chat-widget.js` for UI changes
 
+## 🔍 Session Viewer (v0.1.16)
+
+### Overview
+Session Viewer is a complete web application for visualizing and analyzing MongoDB sessions. It provides a modern interface to search, filter, and view conversation timelines with real-time interaction.
+
+### Quick Start
+
+```bash
+# Terminal 1: Start the backend API (port 8882)
+cd session_viewer/backend
+make dev
+
+# Terminal 2: Start the frontend (port 8883)
+cd session_viewer/frontend
+make run
+```
+
+Then open your browser to: http://localhost:8883
+
+### Key Features
+
+**Backend (FastAPI REST API):**
+- **Dynamic Filtering**: Search by session ID, date range, and any metadata field
+- **Multiple Filters**: Apply multiple metadata filters simultaneously with AND logic
+- **Pagination**: Server-side pagination with configurable page sizes (default: 20)
+- **Unified Timeline**: Chronologically merged messages from all agents + feedbacks
+- **Connection Pooling**: Uses MongoDBConnectionPool for optimal performance
+- **Configurable**: MongoDB connection settings via .env file
+
+**Frontend (Vanilla JavaScript + Tailwind CSS):**
+- **3-Panel Layout**: Filters, results list, and session detail side-by-side
+- **Dynamic Filters**: Add/remove metadata filters at runtime
+- **Real-time Search**: Instant results with loading states
+- **Timeline View**: Messages and feedbacks in chronological order
+- **Responsive Design**: Works on desktop, tablet, and mobile
+- **Health Monitoring**: Real-time backend connectivity indicator
+
+### API Endpoints
+
+```bash
+# Health check
+GET /health
+
+# Get available metadata fields
+GET /api/v1/metadata-fields
+
+# Search sessions
+GET /api/v1/sessions/search?session_id=abc&limit=20&offset=0&filters={"priority":"high"}
+
+# Get session detail
+GET /api/v1/sessions/{session_id}
+```
+
+### Architecture
+
+**Backend Stack:**
+- FastAPI with async/await
+- Pydantic models for validation
+- MongoDB aggregation for metadata discovery
+- Dynamic query building with regex
+- Timeline unification algorithm
+
+**Frontend Stack:**
+- Vanilla JavaScript with ES6 classes (OOP)
+- Tailwind CSS (utility-first styling)
+- axios (HTTP client)
+- marked.js (markdown rendering)
+- dayjs (date formatting)
+
+**Key Classes:**
+- `APIClient`: HTTP communication
+- `FilterPanel`: Dynamic filter management
+- `ResultsList`: Search results with pagination
+- `SessionDetail`: Session visualization with timeline
+- `SessionViewer`: Main orchestrator
+
+### Configuration
+
+Backend configuration via `session_viewer/backend/.env`:
+
+```env
+# MongoDB
+MONGODB_CONNECTION_STRING=mongodb://localhost:27017/
+MONGODB_DATABASE=chats
+MONGODB_COLLECTION=virtual_agents
+
+# API
+API_HOST=0.0.0.0
+API_PORT=8882
+
+# CORS
+ALLOWED_ORIGINS=http://localhost:8883,http://127.0.0.1:8883
+
+# Pagination
+DEFAULT_PAGE_SIZE=20
+MAX_PAGE_SIZE=100
+```
+
+Frontend connects to backend at `http://localhost:8882/api/v1` (configurable in viewer.js).
+
+### Use Cases
+
+- **Session Analysis**: Review conversation history and agent interactions
+- **Quality Assurance**: Examine agent responses and user feedback
+- **Debugging**: Trace issues by viewing complete session timelines
+- **Metrics Review**: Analyze token usage, latency, and agent performance
+- **Customer Support**: Quick lookup of customer conversations by metadata
+- **Data Exploration**: Discover patterns in session metadata fields
+
+### Documentation
+
+- **Backend**: Complete API documentation in `session_viewer/backend/README.md`
+- **Frontend**: UI architecture guide in `session_viewer/frontend/README.md`
+- **Feature Plan**: Implementation details in `features/2_session_viewer/plan.md`
+
+### Example: Search Sessions
+
+```bash
+# Search by session ID (partial match)
+curl "http://localhost:8882/api/v1/sessions/search?session_id=user-123"
+
+# Search with metadata filters
+curl "http://localhost:8882/api/v1/sessions/search?filters={\"priority\":\"high\",\"status\":\"active\"}"
+
+# Search with date range
+curl "http://localhost:8882/api/v1/sessions/search?created_at_start=2024-01-01T00:00:00Z&created_at_end=2024-12-31T23:59:59Z"
+
+# Combine all filters with pagination
+curl "http://localhost:8882/api/v1/sessions/search?session_id=support&filters={\"category\":\"billing\"}&limit=10&offset=0"
+```
+
+### Benefits
+
+- **Visibility**: Gain insights into agent behavior and user interactions
+- **Efficiency**: Quickly find and review sessions with flexible filtering
+- **Collaboration**: Share session URLs with team members for review
+- **Monitoring**: Track feedback patterns and identify improvement areas
+- **Self-Service**: Non-technical users can explore session data independently
+
 ## 📄 License
 
 This project is licensed under the same terms as the parent Itzulbira project.

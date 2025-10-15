@@ -7,6 +7,254 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.18] - 2025-10-15
+
+### Added
+- **Authentication System**: Password protection for Session Viewer application
+  - Backend endpoint `POST /api/v1/check_password` for password validation
+  - Password stored as `BACKEND_PASSWORD` in `.env` (default: `123456`)
+  - SHA-256 password hashing using js-sha256 library for security
+  - Frontend modal with elegant dark gradient background and centered logo
+  - Header-based authentication (`X-Password`) for all API requests
+  - Middleware validates password on every request (except `/health` and `/check_password`)
+  - Password stored in memory only (not localStorage) - lost on browser close/refresh
+  - Unlimited retry attempts with clear error messages
+  - Auto-focus on password input for better UX
+
+- **Resizable Panels**: Drag-to-resize functionality for left panel (Filters + Results)
+  - Drag handle between panels with visual hover/dragging states
+  - Width constraints: 20% minimum, 70% maximum
+  - localStorage persistence for user preference
+  - Responsive design: disabled on mobile (stacks vertically)
+  - Smooth dragging with cursor change and text selection prevention
+
+- **Interactive JSON Visualization**: Enhanced JSON display using renderjson library
+  - Tool calls and results now display as collapsible JSON trees
+  - Metadata display with interactive expand/collapse controls
+  - "Expand All" / "Collapse All" buttons for metadata section
+  - Syntax highlighting with color-coded types (strings, numbers, booleans, keys)
+  - Configurable display levels (show 2 levels by default)
+  - String truncation for long values (100 chars max)
+
+- **Direct Session Loading**: URL parameter support for quick access
+  - Use `?session_id=<ID>` to load session directly on page load
+  - Automatic session detail display on initialization
+  - Useful for sharing links to specific sessions
+
+- **Favicon**: Added custom SVG favicon for better branding
+  - Blue document/list icon matching the application theme
+  - Visible in browser tabs and bookmarks
+
+### Changed
+- **CORS Configuration**: Set to allow all origins (`*`) for easier development
+  - Changed from specific origins to wildcard for development
+  - `allow_credentials` set to `False` (required with `allow_origins=["*"]`)
+  - Commented for easy production switch back to specific origins
+
+- **Frontend Initialization**: Application only starts after successful authentication
+  - SessionViewer and PanelResizer initialized after password validation
+  - Clean modal removal from DOM on successful login
+
+- **Layout System**: Changed from CSS Grid to Flexbox for resizable panels
+  - Left panel with fixed/adjustable width
+  - Right panel flex-grows to fill remaining space
+  - Resize handle positioned between panels
+
+### Security
+- **Password Hashing**: SHA-256 hash of password travels over network, not plain text
+- **No Persistence**: Password not stored in browser (localStorage/sessionStorage)
+- **Session-based**: Password required on every page load/refresh
+- **Header-based Auth**: All API requests include `X-Password` header with hash
+- **Environment Variable**: Password stored in backend `.env` as `BACKEND_PASSWORD`
+
+### Technical Details
+- **Modified Files**:
+  - Backend: `main.py` (authentication middleware + endpoint), `config.py` (BACKEND_PASSWORD), `.env` (BACKEND_PASSWORD=123456)
+  - Frontend: `index.html` (auth modal + resizable layout + renderjson), `viewer.js` (PanelResizer class + URL params + metadata controls)
+  - Libraries: Added `js-sha256` (0.9.0) and `renderjson` (1.4.0) via CDN
+
+- **Authentication Flow**:
+  1. User opens page → Modal displayed with dark gradient background
+  2. User enters password → Frontend hashes with SHA-256
+  3. Frontend sends hash to `POST /api/v1/check_password`
+  4. Backend validates hash against environment variable
+  5. On success: Modal removed, axios configured with header, app initialized
+  6. On failure: Error message displayed, retry allowed
+
+- **Panel Resizing**:
+  - Mouse events: `mousedown`, `mousemove`, `mouseup`
+  - Width calculated as percentage of parent container
+  - Body class `resizing` added during drag to prevent text selection
+  - localStorage key: `session-viewer-left-panel-width`
+
+### Benefits
+- **Security**: Unauthorized users cannot access session data
+- **Flexibility**: Resizable panels adapt to user preferences
+- **Usability**: Better JSON visualization improves data comprehension
+- **Convenience**: Direct session URLs enable easy sharing and bookmarking
+- **Branding**: Favicon improves professional appearance
+
+### Configuration
+```bash
+# Backend .env
+BACKEND_PASSWORD=123456  # Change for production
+ALLOWED_ORIGINS_STR=*    # For development, specify origins for production
+```
+
+### Usage Examples
+```bash
+# Access with authentication
+http://localhost:8883
+# Enter password: 123456
+
+# Direct session access
+http://localhost:8883?session_id=abc123
+
+# Resize panels
+# Drag the vertical handle between left and right panels
+```
+
+## [0.1.17] - 2025-10-15
+
+### Added
+- **Session Viewer UI Enhancements**: Major improvements to visualization and user experience
+  - **Tool Call Visualization**: Display tool calls and results in timeline with color-coded badges
+    - 🔧 Blue badges for tool calls with collapsible JSON input parameters
+    - ✅ Green badges for successful tool results with collapsible output
+    - ❌ Red badges for failed tool results with error details
+    - New functions: `parseMessageContent()`, `renderToolUse()`, `renderToolResult()`
+    - Professional styling with hover effects and transitions
+  - **System Prompt Display**: Full markdown-rendered system prompts in agent summary
+    - Click "📝 System Prompt" to expand/collapse full prompt
+    - Uses zero-md for professional markdown rendering (code blocks, lists, emphasis)
+    - Scrollable area (max 300px) with custom scrollbar
+    - No more truncated prompts - see the complete agent configuration
+  - **Layout Reorganization**: Improved workflow with new 2-column layout
+    - Left column (5/12): Filters + Results stacked vertically
+    - Right column (7/12): Session details (wider for better content display)
+    - More intuitive flow: filter → see results → explore details
+    - Better space utilization on all screen sizes
+
+### Changed
+- Session Viewer frontend now uses 2-column layout instead of 3-column
+- Agent Summary displays full system prompts with markdown rendering instead of truncated text (was 60 chars)
+- Timeline messages now parse and display `toolUse` and `toolResult` content types alongside text
+- Results panel height adjusted to `calc(100vh - 600px)` to accommodate filters above
+
+### Fixed
+- Tool calls and results were previously rendered as plain text, now properly visualized
+
+### Technical Details
+- **Modified Files**:
+  - `session_viewer/frontend/components.js`:
+    - Lines 121-160: New `parseMessageContent()` function to detect text/toolUse/toolResult
+    - Lines 166-222: New tool rendering functions (`renderToolUse`, `renderToolResult`)
+    - Lines 228-334: Enhanced `renderTimelineMessage()` with multi-content parsing
+    - Lines 427-518: Rewritten `renderAgentSummary()` with zero-md integration
+  - `session_viewer/frontend/index.html`:
+    - Lines 92-226: CSS styles for tool blocks, badges, and collapsible details
+    - Lines 227-273: CSS styles for agent prompt display with custom scrollbar
+    - Lines 248-385: Reorganized grid layout structure (3 cols → 2 cols)
+
+### Benefits
+- **Better Debugging**: Visual distinction between tool calls, results, and text messages
+- **Full Context**: Complete system prompts help understand agent behavior
+- **Improved UX**: More intuitive layout reduces eye movement and improves workflow
+- **Professional Look**: Color-coded badges and collapsible sections for clean timeline
+
+## [0.1.16] - 2025-10-15
+
+### Added
+- **Session Viewer**: Full-featured web application for viewing and analyzing MongoDB sessions
+  - **Backend FastAPI API** (`session_viewer/backend/`):
+    - 4 REST API endpoints with dynamic filtering and pagination
+    - `GET /api/v1/sessions/search` - Search sessions with multiple filters (AND logic)
+    - `GET /api/v1/sessions/{id}` - Get complete session with unified timeline
+    - `GET /api/v1/metadata-fields` - List available metadata fields dynamically
+    - `GET /health` - Health check with connection pool statistics
+    - Dynamic MongoDB query builder for metadata filters
+    - Unified timeline algorithm (merges multi-agent messages + feedbacks chronologically)
+    - Connection pooling integration for high performance
+    - CORS configuration for frontend integration
+    - Comprehensive error handling and logging
+  - **Frontend Web Application** (`session_viewer/frontend/`):
+    - Modern UI with Tailwind CSS and vanilla JavaScript (ES6 classes)
+    - 3-panel layout: Filters, Results, Session Detail
+    - Dynamic filter panel with add/remove metadata filters
+    - Session search with session ID, date range, and metadata fields
+    - Pagination for search results (configurable page size)
+    - Session detail view with expandable metadata
+    - Unified chronological timeline for all agents
+    - Message rendering with markdown support (marked.js)
+    - Feedback indicators inline in timeline (👍/👎)
+    - Metrics display (tokens, latency) for assistant messages
+    - Agent summary with model and system_prompt configuration
+    - Real-time health check indicator
+    - Responsive design for desktop, tablet, and mobile
+  - **Libraries Used**:
+    - Backend: FastAPI, pydantic-settings, uvicorn
+    - Frontend: Tailwind CSS (CDN), marked.js, dayjs, axios
+  - **Documentation**:
+    - Backend README with API documentation and examples
+    - Frontend README with architecture and usage guide
+    - Feature plan in `features/2_session_viewer/plan.md`
+    - Progress tracking in `features/2_session_viewer/progress.md`
+    - Makefile commands for both backend and frontend
+
+### Features
+- **Dynamic Metadata Filtering**: Users can add any metadata field as a filter at runtime
+- **Multi-criteria Search**: Combine session ID, date range, and multiple metadata filters
+- **Pagination**: Server-side pagination with configurable page sizes (default 20, max 100)
+- **Timeline Unification**: Messages from all agents and feedbacks merged chronologically
+- **Markdown Rendering**: Full markdown support in assistant messages
+- **Feedback Integration**: User feedbacks displayed at correct chronological position
+- **Agent Configuration Display**: Shows model and system_prompt for each agent
+- **Health Monitoring**: Real-time backend connectivity status
+- **Configurable**: Backend settings via `.env` file
+
+### Architecture
+- **Backend**: RESTful API with FastAPI, MongoDB aggregation pipelines, connection pooling
+- **Frontend**: OOP JavaScript with classes (APIClient, FilterPanel, ResultsList, SessionDetail, SessionViewer)
+- **Communication**: Axios for HTTP requests, JSON data exchange
+- **Styling**: Utility-first Tailwind CSS, responsive grid layout
+- **Deployment**: Backend on port 8882, Frontend on port 8883
+
+### Files Created
+- Backend: `config.py`, `models.py`, `main.py`, `.env.example`, `Makefile`, `README.md`
+- Frontend: `index.html`, `viewer.js`, `components.js`, `Makefile`, `README.md`
+- Total: 11 new files with 1500+ lines of code
+
+### Usage
+```bash
+# Backend
+cd session_viewer/backend
+cp .env.example .env
+make run  # or: uv run python main.py
+
+# Frontend
+cd session_viewer/frontend
+make run  # or: python3 -m http.server 8883
+
+# Access: http://localhost:8883
+```
+
+### Benefits
+- **Debugging**: Visualize complete conversation flows across multiple agents
+- **Analytics**: Analyze session patterns by metadata fields
+- **Auditing**: Review historical interactions and feedbacks
+- **Troubleshooting**: Identify issues in agent responses and timing
+- **User Research**: Understand user behavior and feedback patterns
+
+### Technical Details
+- REST API follows OpenAPI 3.0 specification
+- MongoDB queries use regex for partial matching (case-insensitive)
+- Timeline sorting by `created_at` timestamp (ISO 8601)
+- Frontend uses ES6 classes for maintainable OOP architecture
+- Components are pure functions for reusability
+- Loading and empty states for better UX
+- Error handling with user-friendly messages
+- CORS enabled for localhost development
+
 ## [0.1.15] - 2025-10-15
 
 ### Changed
@@ -318,6 +566,8 @@ feedback_hook = create_feedback_sns_hook(
 - UV package manager integration
 - Docker Compose setup for local MongoDB
 
+[0.1.17]: https://github.com/iguinea/mongodb-session-manager/compare/v0.1.16...v0.1.17
+[0.1.16]: https://github.com/iguinea/mongodb-session-manager/compare/v0.1.15...v0.1.16
 [0.1.15]: https://github.com/iguinea/mongodb-session-manager/compare/v0.1.14...v0.1.15
 [0.1.14]: https://github.com/iguinea/mongodb-session-manager/compare/v0.1.13...v0.1.14
 [0.1.13]: https://github.com/iguinea/mongodb-session-manager/compare/v0.1.12...v0.1.13

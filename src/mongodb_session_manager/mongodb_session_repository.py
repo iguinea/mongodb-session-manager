@@ -184,6 +184,8 @@ class MongoDBSessionRepository(SessionRepository):
             # Index on session timestamps
             self.collection.create_index("created_at")
             self.collection.create_index("updated_at")
+            # Index on session_id for efficient searches in Session Viewer
+            self.collection.create_index("session_id")
             # Note: MongoDB doesn't support positional operators ($) in index definitions
             # Messages are nested arrays, so we rely on the _id index for document lookup
             if self.metadata_fields:

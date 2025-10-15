@@ -46,6 +46,13 @@ uv run ruff format .
 cd playground/chat
 make frontend              # Start frontend server on port 8881
 make backend-fastapi-streaming  # Start backend API on port 8880
+
+# Run the Session Viewer web application
+cd session_viewer/backend
+make dev                   # Start backend API on port 8882
+
+cd session_viewer/frontend
+make run                   # Start frontend on port 8883
 ```
 
 ## Project Structure
@@ -78,6 +85,20 @@ mongodb-session-manager/
 │       ├── chat.html                      # Chat UI with real-time streaming
 │       ├── chat-widget.js                 # JavaScript for chat functionality
 │       └── Makefile                       # Commands to run frontend/backend
+├── session_viewer/                        # Session Viewer web application (v0.1.16)
+│   ├── backend/                           # FastAPI REST API
+│   │   ├── main.py                        # API endpoints and business logic
+│   │   ├── models.py                      # Pydantic request/response models
+│   │   ├── config.py                      # Settings with pydantic-settings
+│   │   ├── .env.example                   # Configuration template
+│   │   ├── Makefile                       # Development commands
+│   │   └── README.md                      # Backend API documentation
+│   └── frontend/                          # Vanilla JS + Tailwind CSS UI
+│       ├── index.html                     # 3-panel layout (filters, results, detail)
+│       ├── viewer.js                      # ES6 classes (OOP architecture)
+│       ├── components.js                  # Reusable UI components
+│       ├── Makefile                       # Frontend server commands
+│       └── README.md                      # Frontend documentation
 ├── tests/                                 # Test directory (to be created)
 ├── pyproject.toml                         # Project configuration
 ├── uv.lock                                # UV lock file
@@ -193,7 +214,7 @@ The package exports the following from `src/mongodb_session_manager/__init__.py`
   - `create_metadata_sqs_hook`: Create SQS metadata hook (if custom_aws available)
   - `is_feedback_sns_hook_available()`: Check SNS hook availability
   - `is_metadata_sqs_hook_available()`: Check SQS hook availability
-- **Version**: `__version__ = "0.1.14"`
+- **Version**: `__version__ = "0.1.15"`
 
 ## Dependencies
 
@@ -494,6 +515,108 @@ The playground demonstrates:
 - Automatic metrics tracking
 - Metadata view with session statistics
 
+### Session Viewer Web Application (v0.1.16)
+The project includes a complete web application for visualizing and analyzing MongoDB sessions stored by the session manager.
+
+```bash
+# Terminal 1: Start backend API (port 8882)
+cd session_viewer/backend && make dev
+
+# Terminal 2: Start frontend (port 8883)
+cd session_viewer/frontend && make run
+
+# Open browser to: http://localhost:8883
+```
+
+**Architecture:**
+- **Backend**: FastAPI REST API with 4 endpoints (health, metadata-fields, search, detail)
+- **Frontend**: Vanilla JavaScript (ES6 classes) with Tailwind CSS
+- **Connection**: Uses MongoDBConnectionPool for efficient database access
+
+**Key Features:**
+- Dynamic filtering by session_id, date range, and any metadata field
+- Multiple simultaneous filters with AND logic
+- Server-side pagination (configurable page size)
+- Unified timeline merging messages from all agents + feedbacks chronologically
+- Real-time health monitoring
+- Responsive 3-panel layout (filters, results, detail)
+
+**File Structure:**
+```
+session_viewer/
+├── backend/
+│   ├── main.py          # FastAPI app with endpoints
+│   ├── models.py        # Pydantic request/response models
+│   ├── config.py        # Settings with pydantic-settings
+│   ├── .env.example     # Configuration template
+│   ├── Makefile         # Commands (run, dev, format)
+│   └── README.md        # API documentation
+└── frontend/
+    ├── index.html       # 3-panel UI layout
+    ├── viewer.js        # ES6 classes (APIClient, FilterPanel, ResultsList, SessionDetail, SessionViewer)
+    ├── components.js    # Pure rendering functions
+    ├── Makefile         # Commands (run, open, clean)
+    └── README.md        # Frontend documentation
+```
+
+**API Endpoints:**
+- `GET /health`: Health check
+- `GET /api/v1/metadata-fields`: Get available metadata fields (aggregation pipeline)
+- `GET /api/v1/sessions/search`: Search with filters, pagination
+- `GET /api/v1/sessions/{session_id}`: Get complete session with unified timeline
+
+**Frontend Classes:**
+- `APIClient`: HTTP communication with axios
+- `FilterPanel`: Dynamic filter management (add/remove filters at runtime)
+- `ResultsList`: Search results with pagination controls
+- `SessionDetail`: Session visualization with timeline
+- `SessionViewer`: Main orchestrator coordinating all components
+
+**Timeline Unification Algorithm:**
+The backend merges messages from all agents and feedbacks into a single chronological timeline:
+```python
+def build_unified_timeline(session_data):
+    timeline = []
+
+    # Collect messages from all agents
+    for agent_id, agent_data in session_data.get("agents", {}).items():
+        for msg in agent_data.get("messages", []):
+            timeline.append({
+                "type": "message",
+                "agent_id": agent_id,
+                # ... message data
+            })
+
+    # Add feedbacks
+    for feedback in session_data.get("feedbacks", []):
+        timeline.append({
+            "type": "feedback",
+            # ... feedback data
+        })
+
+    # Sort by timestamp
+    timeline.sort(key=lambda x: x["timestamp"])
+    return timeline
+```
+
+**Configuration:**
+Backend uses `.env` file with MongoDB connection, CORS origins, and pagination settings. Frontend connects to backend at `http://localhost:8882/api/v1` (configurable in viewer.js).
+
+**Use Cases:**
+- **Session Analysis**: Review conversation history and agent interactions
+- **Quality Assurance**: Examine agent responses and user feedback
+- **Debugging**: Trace issues by viewing complete session timelines
+- **Metrics Review**: Analyze token usage, latency, and agent performance
+- **Customer Support**: Quick lookup of customer conversations by metadata
+- **Data Exploration**: Discover patterns in session metadata fields
+
+**Implementation Notes:**
+- Backend searches by `session_id` field in MongoDB documents
+- Dynamic query building with regex for partial matching
+- Aggregation pipeline used to discover unique metadata fields
+- Component-based frontend architecture for maintainability
+- Health indicator shows real-time backend connectivity status
+
 ## Current Implementation Status
 
 ### Working Features
@@ -516,6 +639,7 @@ The playground demonstrates:
 - ✅ AWS SNS integration for real-time feedback alerts
 - ✅ AWS SQS integration for metadata SSE propagation
 - ✅ Optional AWS dependencies with graceful degradation
+- ✅ **Session Viewer web application** (v0.1.16) - Complete UI for visualizing and analyzing sessions
 
 ### Implementation Notes
 - The codebase implements core session persistence with automatic metrics capture
@@ -526,7 +650,22 @@ The playground demonstrates:
 
 ## Recent Updates
 
-### Version 0.1.14 (2025-10-15) 🆕
+### Version 0.1.16 (2025-10-15) 🆕
+- **Session Viewer Web Application**: Complete web app for visualizing and analyzing MongoDB sessions
+  - **Backend**: FastAPI REST API with 4 endpoints (health, metadata-fields, search, detail)
+  - **Frontend**: Vanilla JavaScript with ES6 classes + Tailwind CSS
+  - **Dynamic Filtering**: Search by session ID, date range, and any metadata field
+  - **Multiple Filters**: Apply multiple metadata filters simultaneously with AND logic
+  - **Pagination**: Server-side pagination with configurable page sizes
+  - **Unified Timeline**: Chronologically merged messages from all agents + feedbacks
+  - **Real-time Health Monitoring**: Backend connectivity indicator
+  - **Responsive Design**: 3-panel layout (filters, results, detail)
+  - **Connection Pooling**: Uses MongoDBConnectionPool for optimal performance
+  - **Libraries**: axios, marked.js, dayjs, Tailwind CSS
+  - **11 Files Created**: Complete backend and frontend implementation
+  - See `session_viewer/backend/README.md` and `session_viewer/frontend/README.md` for documentation
+
+### Version 0.1.14 (2025-10-15)
 - **Agent Configuration Persistence**: Automatic capture and storage of `model` and `system_prompt`
   - sync_agent() now persists agent configuration automatically
   - New get_agent_config(agent_id) method to retrieve configuration
