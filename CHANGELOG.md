@@ -7,6 +7,93 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.19] - 2025-10-16
+
+### Added
+- **Dynamic Index-Based Filters**: Session Viewer filters now automatically based on MongoDB indexes
+  - Backend queries collection indexes (`list_indexes()`) to determine available filters
+  - Automatic type detection (string, date, number, boolean, enum) by sampling documents
+  - Configurable enum fields via `ENUM_FIELDS_STR` environment variable
+  - Type-appropriate UI controls:
+    - Enum fields → Dropdown with predefined values
+    - Date fields → Date picker
+    - Number fields → Number input
+    - Boolean fields → True/False dropdown
+    - String fields → Text input (default)
+  - Performance guarantee: only indexed fields can be filtered (no full collection scans)
+
+### Changed
+- **API Response Structure**: `/api/v1/metadata-fields` now returns `FieldInfo` objects with type information
+  - **Old format** (v0.1.16-0.1.18):
+    ```json
+    {
+      "fields": ["status", "priority"],
+      "sample_values": {"status": ["active", "completed"]}
+    }
+    ```
+  - **New format** (v0.1.19+):
+    ```json
+    {
+      "fields": [
+        {"field": "metadata.status", "type": "enum", "values": ["active", "completed"]},
+        {"field": "created_at", "type": "date"},
+        {"field": "session_id", "type": "string"}
+      ]
+    }
+    ```
+- **Frontend Filter Rendering**: Dynamic filter inputs now adapt to field type automatically
+- **Backend Version**: FastAPI app version updated to 0.1.19
+
+### Configuration
+New environment variables for dynamic filter configuration:
+- `ENUM_FIELDS_STR`: Comma-separated list of fields to treat as enum dropdowns
+  - Example: `metadata.status,metadata.priority,metadata.case_type`
+  - Fields not in this list will use text input (even if they have few unique values)
+- `ENUM_MAX_VALUES`: Maximum distinct values for enum detection (default: 50)
+  - If a configured enum field has more values than this limit, it falls back to text input
+
+### Implementation Details
+- **Backend**: 3 new helper functions in `main.py`:
+  - `get_indexed_fields()`: Extracts field names from MongoDB indexes
+  - `detect_field_type()`: Samples 100 documents to determine field type
+  - `get_enum_values()`: Retrieves distinct values for enum fields
+  - `get_metadata_fields()`: Refactored to use index-based approach
+- **Frontend**: Major refactor of `renderDynamicFilter()` in `components.js`:
+  - Field selector now stores type information in dataset attributes
+  - Event listener on field change renders appropriate input control
+  - Enum values stored as JSON and parsed dynamically
+
+### Benefits
+- ✅ **Automatic**: Filters adapt to existing indexes without code changes
+- ✅ **Performant**: Only indexed fields = guaranteed fast queries
+- ✅ **Flexible**: Enum configuration via environment variables
+- ✅ **Extensible**: Add new filter by creating MongoDB index + optional enum config
+- ✅ **Type-safe**: Appropriate UI controls reduce user errors
+- ✅ **Maintainable**: No hardcoded filter lists
+
+### Migration Guide
+**Backward Compatible**: Frontend continues to work if backend returns old format.
+
+**To Enable Dynamic Filters**:
+1. Ensure fields you want to filter have MongoDB indexes:
+   ```javascript
+   db.sessions.createIndex({"metadata.status": 1});
+   db.sessions.createIndex({"metadata.priority": 1});
+   db.sessions.createIndex({"created_at": -1});
+   ```
+2. Configure enum fields in `.env`:
+   ```bash
+   ENUM_FIELDS_STR=metadata.status,metadata.priority
+   ```
+3. Restart backend: `cd session_viewer/backend && make dev`
+4. Frontend will automatically load new field structure
+
+### Documentation
+- Updated `features/3_dynamic_index_filters/plan.md` with complete specification
+- Updated `features/3_dynamic_index_filters/progress.md` for tracking
+- Updated `session_viewer/backend/.env.example` with new configuration
+- See full documentation in feature plan for implementation details
+
 ## [0.1.18] - 2025-10-15
 
 ### Added

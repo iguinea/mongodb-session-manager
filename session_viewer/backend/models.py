@@ -93,14 +93,41 @@ class SessionDetail(BaseModel):
 # Metadata Fields Models
 # ============================================================================
 
-class MetadataFieldsResponse(BaseModel):
-    """Available metadata fields and sample values."""
+class FieldInfo(BaseModel):
+    """Information about an indexed field.
 
-    fields: List[str] = Field(..., description="List of available metadata field names")
-    sample_values: Dict[str, List[Any]] = Field(
+    Attributes:
+        field: Full field name (e.g., "metadata.status", "created_at")
+        type: Detected field type (string, date, number, boolean, enum)
+        values: Possible values for enum fields (None for other types)
+
+    Example:
+        {
+          "field": "metadata.status",
+          "type": "enum",
+          "values": ["active", "completed", "failed"]
+        }
+    """
+    field: str = Field(..., description="Field name")
+    type: Literal["string", "date", "number", "boolean", "enum"] = Field(
         ...,
-        description="Sample values for each field (limited to first 10)"
+        description="Detected field type"
     )
+    values: Optional[List[Any]] = Field(
+        None,
+        description="Possible values for enum fields"
+    )
+
+
+class MetadataFieldsResponse(BaseModel):
+    """Available indexed fields with type information.
+
+    This model replaces the old structure that returned plain field names
+    and sample values. Now returns structured FieldInfo objects with
+    type information for better frontend rendering.
+    """
+
+    fields: List[FieldInfo] = Field(..., description="List of indexed fields with type info")
 
 
 # ============================================================================

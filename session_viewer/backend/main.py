@@ -37,6 +37,7 @@ from models import (
     TimelineFeedback,
     TimelineItem,
     AgentSummary,
+    FieldInfo,
     MetadataFieldsResponse,
     HealthResponse,
     ConnectionPoolStats,
@@ -97,7 +98,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Session Viewer API",
     description="REST API for viewing and analyzing MongoDB session data",
-    version="0.1.16",
+    version="0.1.19",
     lifespan=lifespan,
 )
 
@@ -119,6 +120,10 @@ app.add_middleware(
 @app.middleware("http")
 async def password_middleware(request: Request, call_next):
     """Validate password for all requests except /health and /check_password."""
+    # Allow OPTIONS requests (CORS preflight) to pass through
+    if request.method == "OPTIONS":
+        return await call_next(request)
+
     # Exclude authentication endpoints
     excluded_paths = ["/health", "/api/v1/check_password"]
 
@@ -250,46 +255,270 @@ def build_unified_timeline(session_doc: Dict[str, Any]) -> List[TimelineItem]:
     return timeline
 
 
-def get_metadata_fields(collection: Any) -> MetadataFieldsResponse:
-    """Get available metadata fields from all sessions.
+def get_indexed_fields(collection: Any) -> List[str]:
+    """Extract field names from MongoDB collection indexes.
 
-    Uses MongoDB aggregation pipeline to extract unique metadata field names
-    and sample values across all documents.
+    This function queries all indexes on the collection and extracts
+    the field names, excluding system indexes (_id, _fts, etc.).
+
+    Args:
+        collection: MongoDB collection object
+
+    Returns:
+        List of unique indexed field names
+
+    Example:
+        >>> get_indexed_fields(my_collection)
+        ['session_id', 'created_at', 'metadata.status', 'metadata.priority']
+    """
+    indexed_fields = []
+
+    try:
+        indexes = collection.list_indexes()
+
+        for index in indexes:
+            index_name = index.get("name", "")
+
+            # Skip system indexes
+            if index_name.startswith("_"):
+                continue
+
+            # Extract field names from index keys
+            # index["key"] is like: {"metadata.status": 1, "created_at": -1}
+            for field_name, _ in index.get("key", {}).items():
+                # Skip internal fields
+                if field_name not in ["_id", "_fts", "_ftsx"]:
+                    indexed_fields.append(field_name)
+
+        # Remove duplicates and return
+        unique_fields = list(set(indexed_fields))
+        logger.info(f"Found {len(unique_fields)} unique indexed fields")
+        return unique_fields
+
+    except Exception as e:
+        logger.error(f"Error listing indexes: {e}")
+        return []
+
+
+def detect_field_type(collection: Any, field_name: str) -> str:
+    """Detect field data type by sampling documents.
+
+    Analyzes up to 100 random documents to determine the most common
+    data type for the field. Uses heuristics for type detection:
+    - Convention-based: fields with "date" or "at" suffix → date
+    - Sample-based: analyze actual values in documents
+
+    Args:
+        collection: MongoDB collection
+        field_name: Full field name (e.g., "metadata.status")
+
+    Returns:
+        Type string: "string", "date", "number", "boolean"
+        Priority order: boolean > number > date > string
+
+    Example:
+        >>> detect_field_type(collection, "metadata.priority")
+        "string"
+        >>> detect_field_type(collection, "created_at")
+        "date"
+    """
+    # Convention-based detection for dates
+    if "date" in field_name.lower() or field_name.endswith("_at"):
+        return "date"
+
+    # Sample documents to analyze actual values
+    try:
+        pipeline = [
+            {"$match": {field_name: {"$exists": True, "$ne": None}}},
+            {"$sample": {"size": 100}},
+            {"$project": {field_name: 1}}
+        ]
+
+        samples = list(collection.aggregate(pipeline))
+
+        if not samples:
+            return "string"  # Default if no samples
+
+        # Analyze types found in samples
+        types_found = set()
+
+        for doc in samples:
+            # Navigate nested fields (e.g., "metadata.status")
+            value = doc
+            for part in field_name.split("."):
+                if isinstance(value, dict):
+                    value = value.get(part)
+                else:
+                    value = None
+                    break
+
+            if value is None:
+                continue
+
+            # Determine Python type
+            if isinstance(value, bool):
+                types_found.add("boolean")
+            elif isinstance(value, (int, float)):
+                types_found.add("number")
+            elif isinstance(value, datetime):
+                types_found.add("date")
+            else:
+                types_found.add("string")
+
+        # Return most specific type (priority order)
+        if "boolean" in types_found:
+            return "boolean"
+        elif "number" in types_found:
+            return "number"
+        elif "date" in types_found:
+            return "date"
+        else:
+            return "string"
+
+    except Exception as e:
+        logger.warning(f"Error detecting type for {field_name}: {e}")
+        return "string"  # Safe default
+
+
+def get_enum_values(
+    collection: Any,
+    field_name: str,
+    max_values: int
+) -> Optional[List[Any]]:
+    """Get distinct values for a field to use as enum options.
+
+    Retrieves all unique values for the field. If the count exceeds
+    max_values, returns None (too many values, not suitable for enum).
+
+    Args:
+        collection: MongoDB collection
+        field_name: Full field name (e.g., "metadata.status")
+        max_values: Maximum number of values allowed for enum
+
+    Returns:
+        Sorted list of distinct values if count <= max_values
+        None if too many values or error
+
+    Example:
+        >>> get_enum_values(collection, "metadata.status", 50)
+        ["active", "completed", "failed", "pending"]
+
+        >>> get_enum_values(collection, "metadata.customer_id", 50)
+        None  # Too many unique customer IDs
+    """
+    try:
+        # Get distinct values for the field
+        distinct_values = collection.distinct(field_name)
+
+        # Check if count is within limit
+        if len(distinct_values) > max_values:
+            logger.info(
+                f"Field {field_name} has {len(distinct_values)} values "
+                f"(exceeds limit of {max_values}), treating as regular field"
+            )
+            return None
+
+        # Sort values for consistent display
+        # Convert to string for sorting to handle mixed types
+        sorted_values = sorted(distinct_values, key=lambda x: str(x))
+
+        logger.debug(f"Field {field_name} enum values: {sorted_values}")
+        return sorted_values
+
+    except Exception as e:
+        logger.warning(f"Error getting enum values for {field_name}: {e}")
+        return None
+
+
+def get_metadata_fields(collection: Any) -> MetadataFieldsResponse:
+    """Get indexed fields with type information and enum values.
+
+    This function replaces the old aggregation-based approach with
+    an index-based approach that:
+    1. Lists all indexes on the collection
+    2. Extracts field names from indexes
+    3. Detects data type for each field
+    4. Retrieves enum values for configured enum fields
 
     Args:
         collection: MongoDB collection
 
     Returns:
-        MetadataFieldsResponse with fields and sample values
+        MetadataFieldsResponse with FieldInfo objects
+
+    Raises:
+        HTTPException: If unable to retrieve field information
+
+    Example Response:
+        {
+          "fields": [
+            {"field": "session_id", "type": "string"},
+            {"field": "created_at", "type": "date"},
+            {
+              "field": "metadata.status",
+              "type": "enum",
+              "values": ["active", "completed"]
+            }
+          ]
+        }
     """
     try:
-        # Aggregation pipeline to extract metadata fields
-        pipeline = [
-            {"$project": {"metadata": {"$objectToArray": "$metadata"}}},
-            {"$unwind": "$metadata"},
-            {"$group": {
-                "_id": "$metadata.k",
-                "sample_values": {"$addToSet": "$metadata.v"}
-            }},
-            {"$project": {
-                "field": "$_id",
-                "sample_values": {"$slice": ["$sample_values", 10]}
-            }}
-        ]
+        # Step 1: Get indexed fields
+        indexed_fields = get_indexed_fields(collection)
 
-        results = list(collection.aggregate(pipeline))
+        logger.info(f"Found {len(indexed_fields)} indexed fields")
 
-        fields = [r["field"] for r in results]
-        sample_values = {r["field"]: r["sample_values"] for r in results}
+        # Step 2: Build FieldInfo for each indexed field
+        field_infos = []
 
-        return MetadataFieldsResponse(
-            fields=fields,
-            sample_values=sample_values
-        )
+        for field_name in indexed_fields:
+            # Detect base type
+            field_type = detect_field_type(collection, field_name)
 
-    except PyMongoError as e:
+            # Check if field should be treated as enum
+            values = None
+            if field_name in settings.enum_fields:
+                logger.info(f"Checking enum values for configured field: {field_name}")
+                values = get_enum_values(
+                    collection,
+                    field_name,
+                    settings.enum_max_values
+                )
+
+                # Only set type to enum if values were successfully retrieved
+                if values:
+                    field_type = "enum"
+                    logger.info(
+                        f"Field {field_name} configured as enum with "
+                        f"{len(values)} values"
+                    )
+                else:
+                    logger.warning(
+                        f"Field {field_name} configured as enum but has too "
+                        f"many values or error, treating as {field_type}"
+                    )
+
+            # Create FieldInfo object
+            field_info = FieldInfo(
+                field=field_name,
+                type=field_type,
+                values=values
+            )
+            field_infos.append(field_info)
+
+        # Sort fields alphabetically by field name for better UX
+        field_infos.sort(key=lambda f: f.field.lower())
+
+        logger.info(f"Returning {len(field_infos)} fields with type information")
+
+        return MetadataFieldsResponse(fields=field_infos)
+
+    except Exception as e:
         logger.error(f"Error getting metadata fields: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve metadata fields")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve metadata fields: {str(e)}"
+        )
 
 
 # ============================================================================
@@ -432,10 +661,27 @@ async def get_session_detail(session_id: str):
 
 @app.get("/api/v1/metadata-fields", response_model=MetadataFieldsResponse)
 async def list_metadata_fields():
-    """Get available metadata fields across all sessions.
+    """Get indexed fields with type information.
 
-    Returns all unique metadata field names and sample values
-    to help users build dynamic filters.
+    Returns all fields that have MongoDB indexes, along with their
+    detected data types and enum values (if configured).
+
+    This endpoint now returns structured FieldInfo objects instead of
+    plain field names. Frontend uses this to render appropriate input
+    controls (text, date, number, enum dropdown).
+
+    Configuration:
+    - ENUM_FIELDS_STR: Comma-separated list of fields to treat as enums
+    - ENUM_MAX_VALUES: Maximum distinct values for enum detection
+
+    Example Response:
+        {
+          "fields": [
+            {"field": "session_id", "type": "string"},
+            {"field": "created_at", "type": "date"},
+            {"field": "metadata.status", "type": "enum", "values": ["active", "completed"]}
+          ]
+        }
     """
     try:
         collection = app.state.collection
@@ -514,7 +760,7 @@ async def check_password(request: Dict[str, Any]):
 
         is_valid = password_hash == expected_hash
 
-        logger.info(f"Password validation: {'success' if is_valid else 'failed'}")
+        # logger.info(f"Password validation: {'success' if is_valid else 'failed'}")
 
         return {"valid": is_valid}
 

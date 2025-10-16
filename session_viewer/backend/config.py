@@ -29,7 +29,7 @@ class Settings(BaseSettings):
 
     # CORS Configuration
     frontend_url: str = "http://localhost:8883"
-    allowed_origins_str: str = "http://localhost:8883,http://127.0.0.1:8883"
+    allowed_origins_str: str = "http://localhost:8883,http://127.0.0.1:8883,http://0.0.0.0:8883"
 
     @property
     def allowed_origins(self) -> List[str]:
@@ -45,6 +45,25 @@ class Settings(BaseSettings):
 
     # Authentication
     backend_password: str = "123456"
+
+    # Dynamic Filter Configuration
+    enum_fields_str: str = ""
+    enum_max_values: int = 50
+
+    @property
+    def enum_fields(self) -> List[str]:
+        """Parse enum fields from comma-separated string.
+
+        Returns:
+            List of field names configured as enums.
+
+        Example:
+            ENUM_FIELDS_STR="metadata.status,metadata.priority"
+            Returns: ["metadata.status", "metadata.priority"]
+        """
+        if not self.enum_fields_str:
+            return []
+        return [field.strip() for field in self.enum_fields_str.split(",")]
 
     class Config:
         """Pydantic configuration."""

@@ -20,7 +20,8 @@ class APIClient {
       baseURL: this.baseURL,
       timeout: 30000,
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        ...axios.defaults.headers.common  // Include authentication headers
       }
     });
   }
@@ -91,7 +92,7 @@ class FilterPanel {
     this.container = container;
     this.onSearch = onSearch;
     this.onClear = onClear;
-    this.availableFields = [];
+    this.fieldInfos = [];
     this.dynamicFilters = [];
 
     this.init();
@@ -121,23 +122,34 @@ class FilterPanel {
   }
 
   /**
-   * Load available metadata fields from backend
+   * Load available indexed fields from backend
+   * Now receives FieldInfo objects with type information
    */
   async loadMetadataFields(apiClient) {
     try {
       const data = await apiClient.getMetadataFields();
-      this.availableFields = data.fields || [];
+
+      // Store FieldInfo objects and sort alphabetically by field name
+      this.fieldInfos = (data.fields || []).sort((a, b) =>
+        a.field.toLowerCase().localeCompare(b.field.toLowerCase())
+      );
+
+      console.log(`Loaded ${this.fieldInfos.length} indexed fields with types:`,
+        this.fieldInfos.map(f => `${f.field} (${f.type})`).join(', ')
+      );
     } catch (error) {
       console.error('Error loading metadata fields:', error);
-      this.availableFields = [];
+      this.fieldInfos = [];
     }
   }
 
   /**
    * Add a new dynamic filter
+   * Now passes fieldInfos instead of simple field names
    */
   addFilter() {
-    const filterElement = Components.renderDynamicFilter(this.availableFields);
+    // Render filter with type information
+    const filterElement = Components.renderDynamicFilter(this.fieldInfos);
 
     // Bind remove button
     const removeBtn = filterElement.querySelector('.remove-filter-btn');
@@ -647,6 +659,16 @@ class SessionViewer {
 
     if (sessionId) {
       console.log(`Loading session from URL parameter: ${sessionId}`);
+
+      // Hide left panel (filters + results) and resize handle
+      const leftPanel = document.getElementById('left-panel');
+      const resizeHandle = document.getElementById('resize-handle');
+      const rightPanel = document.getElementById('right-panel');
+
+      if (leftPanel) leftPanel.classList.add('hidden-panel');
+      if (resizeHandle) resizeHandle.classList.add('hidden-panel');
+      if (rightPanel) rightPanel.style.width = '100%';
+
       // Load the session directly
       this.handleSessionSelect(sessionId);
     }

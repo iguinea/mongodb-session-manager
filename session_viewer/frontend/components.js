@@ -512,71 +512,21 @@ function renderAgentSummary(agentId, summary) {
     div.appendChild(modelInfo);
   }
 
-  // System prompt with collapsible zero-md
+  // System prompt with modal button
   if (summary.system_prompt) {
-    const promptContainer = document.createElement('div');
-    promptContainer.className = 'mt-2';
-
-    const details = document.createElement('details');
-    details.className = 'agent-prompt-details';
-
-    const summary_el = document.createElement('summary');
-    summary_el.className = 'cursor-pointer text-xs font-medium text-gray-700 hover:text-gray-900 select-none';
-    summary_el.textContent = '📝 System Prompt';
-    details.appendChild(summary_el);
-
-    // Create zero-md element for the prompt
-    const zeroMd = document.createElement('zero-md');
-    zeroMd.className = 'agent-prompt-content';
-
-    // Add markdown content
-    const script = document.createElement('script');
-    script.type = 'text/markdown';
-    script.textContent = summary.system_prompt;
-    zeroMd.appendChild(script);
-
-    // Add custom styles for the prompt display
-    const style = document.createElement('template');
-    style.innerHTML = `
-      <style>
-        :host {
-          --markdown-font-size: 0.75rem;
-          --markdown-line-height: 1.4;
-        }
-        p { margin: 0.5em 0; }
-        p:first-child { margin-top: 0; }
-        p:last-child { margin-bottom: 0; }
-        code {
-          background: rgba(0, 0, 0, 0.05);
-          padding: 0.2em 0.4em;
-          border-radius: 0.25rem;
-          font-size: 0.85em;
-        }
-        pre {
-          background: rgba(0, 0, 0, 0.05);
-          padding: 0.75em;
-          border-radius: 0.375rem;
-          overflow-x: auto;
-          font-size: 0.85em;
-        }
-        pre code {
-          background: transparent;
-          padding: 0;
-        }
-        ul, ol {
-          margin: 0.5em 0;
-          padding-left: 1.5em;
-        }
-        li {
-          margin: 0.25em 0;
-        }
-      </style>
+    const promptBtn = document.createElement('button');
+    promptBtn.className = 'mt-2 text-xs font-medium text-gray-700 hover:text-primary-600 transition-colors flex items-center space-x-1';
+    promptBtn.innerHTML = `
+      <span>📝</span>
+      <span>Ver System Prompt</span>
     `;
-    zeroMd.appendChild(style);
 
-    details.appendChild(zeroMd);
-    promptContainer.appendChild(details);
-    div.appendChild(promptContainer);
+    // Open modal on click
+    promptBtn.addEventListener('click', () => {
+      window.openPromptModal(summary.system_prompt);
+    });
+
+    div.appendChild(promptBtn);
   }
 
   return div;
@@ -609,30 +559,151 @@ function renderMetadata(metadata) {
 
 /**
  * Dynamic Filter Component
- * Renders a dynamic filter input row
+ * Renders a filter row with field selector and type-appropriate value input
+ *
+ * @param {Array} fieldInfos - Array of FieldInfo objects from backend
+ * @returns {HTMLElement} Filter row element
+ *
+ * FieldInfo structure:
+ * {
+ *   field: "metadata.status",
+ *   type: "enum",
+ *   values: ["active", "completed"]
+ * }
  */
-function renderDynamicFilter(availableFields = []) {
+function renderDynamicFilter(fieldInfos = []) {
   const container = document.createElement('div');
   container.className = 'flex items-center space-x-2 p-2 bg-gray-50 rounded-md';
 
-  container.innerHTML = `
-    <select class="filter-field flex-1 px-2 py-1 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-primary-500 focus:border-transparent">
-      <option value="">Seleccionar campo...</option>
-      ${availableFields.map(field => `
-        <option value="metadata.${field}">metadata.${field}</option>
-      `).join('')}
-    </select>
-    <input
-      type="text"
-      class="filter-value flex-1 px-2 py-1 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-primary-500 focus:border-transparent"
-      placeholder="Valor..."
-    />
-    <button class="remove-filter-btn p-1 text-gray-400 hover:text-red-600">
-      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-      </svg>
-    </button>
+  // Field selector
+  const fieldSelect = document.createElement('select');
+  fieldSelect.className = 'filter-field flex-1 px-2 py-1 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-primary-500 focus:border-transparent';
+
+  // Default option
+  const defaultOption = document.createElement('option');
+  defaultOption.value = '';
+  defaultOption.textContent = 'Seleccionar campo...';
+  fieldSelect.appendChild(defaultOption);
+
+  // Add field options with type information stored in dataset
+  fieldInfos.forEach(fieldInfo => {
+    const option = document.createElement('option');
+    option.value = fieldInfo.field;
+    option.textContent = fieldInfo.field;
+    option.dataset.type = fieldInfo.type;
+
+    // Store enum values as JSON if present
+    if (fieldInfo.type === 'enum' && fieldInfo.values) {
+      option.dataset.values = JSON.stringify(fieldInfo.values);
+    }
+
+    fieldSelect.appendChild(option);
+  });
+
+  // Value input container (will be replaced when field changes)
+  const valueContainer = document.createElement('div');
+  valueContainer.className = 'filter-value-container flex-1';
+
+  // Initial value input (generic text)
+  const initialInput = document.createElement('input');
+  initialInput.type = 'text';
+  initialInput.className = 'filter-value w-full px-2 py-1 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-primary-500 focus:border-transparent';
+  initialInput.placeholder = 'Valor...';
+  valueContainer.appendChild(initialInput);
+
+  // Remove button
+  const removeBtn = document.createElement('button');
+  removeBtn.className = 'remove-filter-btn p-1 text-gray-400 hover:text-red-600 transition-colors';
+  removeBtn.innerHTML = `
+    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+    </svg>
   `;
+
+  /**
+   * Event handler: When field is selected, render appropriate value input
+   */
+  fieldSelect.addEventListener('change', () => {
+    const selectedOption = fieldSelect.options[fieldSelect.selectedIndex];
+    const fieldType = selectedOption.dataset.type;
+    const enumValues = selectedOption.dataset.values;
+
+    // Clear current value input
+    valueContainer.innerHTML = '';
+
+    // Render type-appropriate input control
+    let newInput;
+
+    switch (fieldType) {
+      case 'enum':
+        // Dropdown with predefined values
+        newInput = document.createElement('select');
+        newInput.className = 'filter-value w-full px-2 py-1 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-primary-500 focus:border-transparent';
+
+        // Default option
+        const defaultOpt = document.createElement('option');
+        defaultOpt.value = '';
+        defaultOpt.textContent = 'Seleccionar valor...';
+        newInput.appendChild(defaultOpt);
+
+        // Enum values from backend
+        if (enumValues) {
+          const values = JSON.parse(enumValues);
+          values.forEach(value => {
+            const opt = document.createElement('option');
+            opt.value = value;
+            opt.textContent = value;
+            newInput.appendChild(opt);
+          });
+        }
+        break;
+
+      case 'date':
+        // Date picker
+        newInput = document.createElement('input');
+        newInput.type = 'date';
+        newInput.className = 'filter-value w-full px-2 py-1 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-primary-500 focus:border-transparent';
+        break;
+
+      case 'number':
+        // Number input
+        newInput = document.createElement('input');
+        newInput.type = 'number';
+        newInput.className = 'filter-value w-full px-2 py-1 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-primary-500 focus:border-transparent';
+        newInput.placeholder = 'Valor numérico...';
+        break;
+
+      case 'boolean':
+        // True/False dropdown
+        newInput = document.createElement('select');
+        newInput.className = 'filter-value w-full px-2 py-1 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-primary-500 focus:border-transparent';
+
+        ['', 'true', 'false'].forEach(val => {
+          const opt = document.createElement('option');
+          opt.value = val;
+          opt.textContent = val === '' ? 'Seleccionar...' : val;
+          newInput.appendChild(opt);
+        });
+        break;
+
+      case 'string':
+      default:
+        // Text input (default fallback)
+        newInput = document.createElement('input');
+        newInput.type = 'text';
+        newInput.className = 'filter-value w-full px-2 py-1 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-primary-500 focus:border-transparent';
+        newInput.placeholder = 'Valor...';
+        break;
+    }
+
+    // Add new input to container
+    valueContainer.appendChild(newInput);
+  });
+
+  // Assemble filter row
+  container.appendChild(fieldSelect);
+  container.appendChild(valueContainer);
+  container.appendChild(removeBtn);
 
   return container;
 }
