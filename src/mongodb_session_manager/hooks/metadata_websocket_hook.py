@@ -19,7 +19,7 @@ Architecture:
     The hook integrates with MongoDB Session Manager's metadataHook system to:
     1. Intercept all metadata operations (update, delete)
     2. Execute the original metadata operation first (ensuring data consistency)
-    3. Extract connection_id from metadata.ws_connection_id
+    3. Extract connection_id from metadata.connection_id
     4. Extract relevant metadata fields for propagation
     5. Send changes directly to WebSocket client using API Gateway Management API
     6. Handle both async/await and synchronous contexts automatically
@@ -49,9 +49,9 @@ Usage:
     )
 
     # Metadata changes are automatically sent to connected WebSocket client
-    # NOTE: ws_connection_id MUST be present in metadata for hook to work
+    # NOTE: connection_id MUST be present in metadata for hook to work
     session_manager.update_metadata({
-        "ws_connection_id": "abc123def456",  # Required!
+        "connection_id": "abc123def456",  # Required!
         "status": "processing",
         "agent_state": "thinking",
         "internal_field": "not propagated"  # This won't be sent if not in metadata_fields
@@ -74,7 +74,7 @@ WebSocket Message Format:
     ```
 
 Connection ID Management:
-    The hook reads the WebSocket connection ID from `metadata.ws_connection_id`.
+    The hook reads the WebSocket connection ID from `metadata.connection_id`.
     This field must be set when a WebSocket client connects:
 
     ```python
@@ -84,7 +84,7 @@ Connection ID Management:
 
     # Store connection ID in metadata
     session_manager.update_metadata({
-        "ws_connection_id": connection_id
+        "connection_id": connection_id
     })
 
     # Now all subsequent metadata updates will be pushed to this connection
@@ -101,7 +101,7 @@ Requirements:
     - boto3 >= 1.26.0 (for API Gateway Management API support)
     - AWS credentials configured with execute-api:ManageConnections permission
     - Valid API Gateway WebSocket endpoint URL
-    - Connection IDs must be stored in metadata.ws_connection_id
+    - Connection IDs must be stored in metadata.connection_id
 
 Error Handling:
     - ImportError: Raised during initialization if boto3 is not available
@@ -164,7 +164,7 @@ class MetadataWebSocketHook:
             api_gateway_endpoint: Full API Gateway WebSocket endpoint URL
                                  (e.g., https://abc123.execute-api.us-east-1.amazonaws.com/prod)
             metadata_fields: Optional list of metadata field names to propagate.
-                           If None, all fields except ws_connection_id are sent.
+                           If None, all fields except connection_id are sent.
             region: AWS region for the API Gateway (default: us-east-1)
 
         Raises:
@@ -204,11 +204,11 @@ class MetadataWebSocketHook:
         """
         try:
             # Extract connection_id from metadata
-            connection_id = metadata.get("ws_connection_id")
+            connection_id = metadata.get("connection_id")
 
             if not connection_id:
                 logger.warning(
-                    f"No ws_connection_id found in metadata for session {session_id}. "
+                    f"No connection_id found in metadata for session {session_id}. "
                     "WebSocket hook cannot send message without connection_id."
                 )
                 return
@@ -224,9 +224,9 @@ class MetadataWebSocketHook:
                     k: v for k, v in relevant_metadata.items() if v is not None
                 }
             else:
-                # If no specific fields configured, send all metadata except ws_connection_id
+                # If no specific fields configured, send all metadata except connection_id
                 relevant_metadata = {
-                    k: v for k, v in metadata.items() if k != "ws_connection_id"
+                    k: v for k, v in metadata.items() if k != "connection_id"
                 }
 
             # Prepare the message
@@ -300,7 +300,7 @@ def create_metadata_hook(
         api_gateway_endpoint: Full API Gateway WebSocket endpoint URL
                              (e.g., https://abc123.execute-api.us-east-1.amazonaws.com/prod)
         metadata_fields: Optional list of metadata field names to propagate.
-                        If None, all fields except ws_connection_id are sent.
+                        If None, all fields except connection_id are sent.
         region: AWS region for the API Gateway (default: us-east-1)
 
     Returns:
@@ -371,13 +371,13 @@ def create_metadata_hook(
             elif action == "delete" and "keys" in kwargs:
                 result = original_func(kwargs["keys"])
                 # For delete, send empty metadata for deleted keys
-                # But we still need the ws_connection_id from current metadata
+                # But we still need the connection_id from current metadata
                 # We'll need to get current metadata first
                 try:
                     # Get current metadata to extract connection_id
                     current_metadata = original_func.__self__.get_metadata()
                     deleted_metadata = {
-                        "ws_connection_id": current_metadata.get("ws_connection_id"),
+                        "connection_id": current_metadata.get("connection_id"),
                         **{key: None for key in kwargs["keys"]},
                     }
 

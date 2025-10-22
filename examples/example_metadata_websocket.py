@@ -28,7 +28,7 @@ metadata updates directly to connected WebSocket clients via AWS API Gateway.
 **Prerequisites:**
 1. AWS API Gateway WebSocket API deployed
 2. AWS credentials configured with execute-api:ManageConnections permission
-3. WebSocket client connected with connection_id stored in metadata.ws_connection_id
+3. WebSocket client connected with connection_id stored in metadata.connection_id
 
 **Use Cases:**
 - Real-time session viewer updates
@@ -90,9 +90,7 @@ def demo_websocket_hook():
     print("\n✅ WebSocket hook is available")
 
     # Step 1: Create WebSocket hook with selective field propagation
-    print(
-        f"\n📡 Creating WebSocket hook with endpoint: {WEBSOCKET_ENDPOINT[:50]}..."
-    )
+    print(f"\n📡 Creating WebSocket hook with endpoint: {WEBSOCKET_ENDPOINT[:50]}...")
     print("   Only propagating fields: status, agent_state, progress, last_action")
 
     websocket_hook = create_metadata_websocket_hook(
@@ -126,16 +124,12 @@ def demo_websocket_hook():
 
     # Step 3: Store WebSocket connection ID in metadata
     print(f"\n🔌 Storing WebSocket connection ID: {DEMO_CONNECTION_ID}")
-    print(
-        "   ⚠️  NOTE: This simulates a real WebSocket connection. In production,"
-    )
-    print(
-        "      the connection_id comes from API Gateway $connect event."
-    )
+    print("   ⚠️  NOTE: This simulates a real WebSocket connection. In production,")
+    print("      the connection_id comes from API Gateway $connect event.")
 
     session_manager.update_metadata(
         {
-            "ws_connection_id": DEMO_CONNECTION_ID,
+            "connection_id": DEMO_CONNECTION_ID,
             "status": "connected",
             "user_id": "demo-user",
             "session_type": "demo",
@@ -191,12 +185,14 @@ def demo_websocket_hook():
 
     for i, step in enumerate(workflow_steps, 1):
         print(f"   Step {i}/{len(workflow_steps)}: {step['last_action']}")
-        print(f"      → Status: {step['status']}, State: {step['agent_state']}, Progress: {step['progress']}%")
+        print(
+            f"      → Status: {step['status']}, State: {step['agent_state']}, Progress: {step['progress']}%"
+        )
 
         # Update metadata - this will trigger WebSocket send
         session_manager.update_metadata(
             {
-                "ws_connection_id": DEMO_CONNECTION_ID,  # Always include connection_id
+                "connection_id": DEMO_CONNECTION_ID,  # Always include connection_id
                 **step,
                 "internal_debug": f"Step {i}",  # This won't be sent (not in metadata_fields)
             }
@@ -218,35 +214,33 @@ def demo_websocket_hook():
     final_metadata = session_manager.get_metadata()
 
     for key, value in final_metadata.items():
-        if key != "ws_connection_id":  # Don't print connection_id twice
+        if key != "connection_id":  # Don't print connection_id twice
             print(f"   {key}: {value}")
 
     print("\n" + "=" * 80)
     print("Demo completed successfully!")
     print("=" * 80)
     print("\n💡 Key Takeaways:")
-    print("   1. ws_connection_id must be stored in metadata for hook to work")
+    print("   1. connection_id must be stored in metadata for hook to work")
     print("   2. Only fields in metadata_fields are sent (minimizes bandwidth)")
     print("   3. Updates are sent asynchronously (non-blocking)")
     print("   4. Connection errors (GoneException) are logged, not raised")
     print("   5. Perfect for real-time UIs (Session Viewer, dashboards, chat)")
-    print(
-        "\n📖 For production usage, see: docs/user-guide/aws-integrations.md\n"
-    )
+    print("\n📖 For production usage, see: docs/user-guide/aws-integrations.md\n")
 
 
 def demo_without_connection_id():
     """
-    Demonstrates what happens when ws_connection_id is not in metadata.
+    Demonstrates what happens when connection_id is not in metadata.
     """
     print("\n" + "=" * 80)
-    print("DEMO: Missing ws_connection_id Warning")
+    print("DEMO: Missing connection_id Warning")
     print("=" * 80)
 
     if not is_metadata_websocket_hook_available():
         return
 
-    print("\n⚠️  Testing behavior when ws_connection_id is missing...")
+    print("\n⚠️  Testing behavior when connection_id is missing...")
 
     websocket_hook = create_metadata_websocket_hook(
         api_gateway_endpoint=WEBSOCKET_ENDPOINT,
@@ -261,13 +255,13 @@ def demo_without_connection_id():
         metadataHook=websocket_hook,
     )
 
-    # Try to update metadata without ws_connection_id
-    print("\n🔄 Updating metadata WITHOUT ws_connection_id...")
+    # Try to update metadata without connection_id
+    print("\n🔄 Updating metadata WITHOUT connection_id...")
 
     session_manager.update_metadata({"status": "test"})
 
     print(
-        "   ⚠️  Check logs above - should see warning: 'No ws_connection_id found in metadata'"
+        "   ⚠️  Check logs above - should see warning: 'No connection_id found in metadata'"
     )
     print("   ✅ Metadata still saved to MongoDB (hook failure doesn't block)")
     print("\n" + "=" * 80 + "\n")
@@ -284,9 +278,7 @@ def demo_production_pattern():
     print("\n💼 Production Recommendation:")
     print("   Use BOTH WebSocket and SQS hooks for:")
     print("   - WebSocket: Real-time UI updates (Session Viewer, dashboards)")
-    print(
-        "   - SQS: Backend processing, auditing, analytics, multi-consumer events"
-    )
+    print("   - SQS: Backend processing, auditing, analytics, multi-consumer events")
 
     print("\n📋 Example Configuration:")
     print(

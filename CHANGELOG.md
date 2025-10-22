@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Automatic handling of disconnected clients (GoneException logged, operation continues)
   - Selective field propagation via `metadata_fields` parameter to minimize bandwidth
   - Non-blocking async operation with support for both async and sync contexts
-  - Requires `ws_connection_id` in metadata (typically from API Gateway $connect event)
+  - Requires `connection_id` in metadata (typically from API Gateway $connect event)
   - New functions:
     - `create_metadata_websocket_hook()`: Create WebSocket hook with API Gateway endpoint
     - `is_metadata_websocket_hook_available()`: Check if boto3 is available

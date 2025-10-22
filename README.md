@@ -795,7 +795,7 @@ if is_metadata_websocket_hook_available():
     # IMPORTANT: Connection ID must be stored in metadata
     # This comes from API Gateway $connect event
     session_manager.update_metadata({
-        "ws_connection_id": "abc123def456",  # Required!
+        "connection_id": "abc123def456",  # Required!
         "status": "processing",
         "progress": 50,
         "agent_state": "thinking"
