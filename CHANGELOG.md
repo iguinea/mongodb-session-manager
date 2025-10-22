@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2025-10-22
+
+### Added
+- **WebSocket Real-time Updates Hook**: New metadata hook for ultra-low latency push notifications
+  - `MetadataWebSocketHook` sends metadata changes directly to WebSocket clients via AWS API Gateway
+  - Ultra-low latency compared to polling or SQS patterns (instant push to connected clients)
+  - Perfect for real-time UIs: Session Viewer, dashboards, monitoring interfaces, chat applications
+  - Automatic handling of disconnected clients (GoneException logged, operation continues)
+  - Selective field propagation via `metadata_fields` parameter to minimize bandwidth
+  - Non-blocking async operation with support for both async and sync contexts
+  - Requires `ws_connection_id` in metadata (typically from API Gateway $connect event)
+  - New functions:
+    - `create_metadata_websocket_hook()`: Create WebSocket hook with API Gateway endpoint
+    - `is_metadata_websocket_hook_available()`: Check if boto3 is available
+  - New example: `examples/example_metadata_websocket.py` with comprehensive demos
+
+### Documentation
+- Updated `CLAUDE.md` with WebSocket Integration Pattern section
+  - Usage examples with connection ID management
+  - WebSocket vs SQS comparison and benefits
+  - Combined pattern for using both hooks together (WebSocket + SQS)
+- Updated `README.md` with WebSocket hook in AWS Integrations section
+  - Feature comparison between WebSocket, SQS, and SNS hooks
+  - Requirements and AWS permissions (execute-api:ManageConnections)
+- Updated Package Exports section in both CLAUDE.md and README.md
+
+### Technical Details
+- **File**: `src/mongodb_session_manager/hooks/metadata_websocket_hook.py`
+- **Dependencies**: boto3 (already core dependency), botocore for ClientError handling
+- **AWS Service**: API Gateway Management API (`apigatewaymanagementapi` client)
+- **Message Format**: JSON with event_type, session_id, operation, metadata, timestamp
+- **Error Handling**: GoneException (disconnected clients) logged as INFO, other errors as ERROR
+- **Performance**: Direct push to clients, no polling overhead, daemon threads for sync contexts
+
+### Use Cases
+- Real-time Session Viewer with instant metadata updates
+- Live agent state monitoring in customer dashboards
+- Multi-step workflow progress indicators without polling
+- Chat interfaces showing agent thinking/processing states
+- Multi-user collaboration with synchronized session state
+
+### Benefits vs Alternatives
+- **vs SQS Hook**: 10-100x lower latency, ideal for single-client real-time UIs
+- **vs Polling**: Eliminates polling overhead, instant updates on state changes
+- **Complementary**: Best practice is to use WebSocket (UI) + SQS (backend) together
+
 ## [0.1.19] - 2025-10-16
 
 ### Added

@@ -149,6 +149,11 @@ mongodb-session-manager/
      - Real-time metadata synchronization via SSE
      - Selective field propagation
      - Queue-based event distribution
+   - **MetadataWebSocketHook** (`metadata_websocket_hook.py`): Push metadata changes to WebSocket clients
+     - Ultra-low latency direct push to connected clients
+     - Real-time updates for Session Viewer and dashboards
+     - Automatic handling of disconnected clients
+     - Perfect for chat interfaces and monitoring UIs
 
 6. **Helper Functions** (in `__init__.py` and `mongodb_session_factory.py`):
    - `create_mongodb_session_manager()`: Convenience function to create session manager
@@ -157,6 +162,7 @@ mongodb-session-manager/
    - `close_global_factory()`: Clean up global resources
    - `is_feedback_sns_hook_available()`: Check if SNS hook can be used
    - `is_metadata_sqs_hook_available()`: Check if SQS hook can be used
+   - `is_metadata_websocket_hook_available()`: Check if WebSocket hook can be used
 
 ### MongoDB Schema
 
@@ -205,6 +211,7 @@ The package exports the following from `src/mongodb_session_manager/__init__.py`
   - `MongoDBSessionManagerFactory`: Factory for session managers
   - `FeedbackSNSHook`: AWS SNS hook for feedback (if custom_aws available)
   - `MetadataSQSHook`: AWS SQS hook for metadata (if custom_aws available)
+  - `MetadataWebSocketHook`: AWS WebSocket hook for metadata (if boto3 available)
 - **Functions**:
   - `create_mongodb_session_manager`: Convenience function
   - `initialize_global_factory`: Set up global factory
@@ -212,9 +219,11 @@ The package exports the following from `src/mongodb_session_manager/__init__.py`
   - `close_global_factory`: Clean up global factory
   - `create_feedback_sns_hook`: Create SNS feedback hook (if custom_aws available)
   - `create_metadata_sqs_hook`: Create SQS metadata hook (if custom_aws available)
+  - `create_metadata_websocket_hook`: Create WebSocket metadata hook (if boto3 available)
   - `is_feedback_sns_hook_available()`: Check SNS hook availability
   - `is_metadata_sqs_hook_available()`: Check SQS hook availability
-- **Version**: `__version__ = "0.1.15"`
+  - `is_metadata_websocket_hook_available()`: Check WebSocket hook availability
+- **Version**: `__version__ = "0.2.0"`
 
 ## Dependencies
 
@@ -457,6 +466,68 @@ else:
     print("SQS hook not available - install python-helpers package")
 ```
 
+#### WebSocket Real-time Updates
+```python
+from mongodb_session_manager import (
+    MongoDBSessionManager,
+    create_metadata_websocket_hook,
+    is_metadata_websocket_hook_available
+)
+
+# Check if WebSocket hook is available
+if is_metadata_websocket_hook_available():
+    # Create WebSocket hook for ultra-low latency real-time updates
+    websocket_hook = create_metadata_websocket_hook(
+        api_gateway_endpoint="https://abc123.execute-api.us-east-1.amazonaws.com/prod",
+        metadata_fields=["status", "agent_state", "progress"],  # Only propagate these fields
+        region="us-east-1"
+    )
+
+    session_manager = MongoDBSessionManager(
+        session_id="user-session",
+        connection_string="mongodb://...",
+        metadataHook=websocket_hook
+    )
+
+    # IMPORTANT: ws_connection_id must be stored in metadata
+    # This typically comes from API Gateway $connect event
+    session_manager.update_metadata({
+        "ws_connection_id": "abc123def456",  # Required for WebSocket hook
+        "status": "processing",
+        "agent_state": "thinking",
+        "progress": 50
+    })
+
+    # Metadata changes are sent directly to WebSocket client
+    # Perfect for real-time Session Viewer, dashboards, chat UIs
+else:
+    print("WebSocket hook not available - install boto3")
+```
+
+**WebSocket vs SQS Comparison:**
+- **WebSocket Hook**: Ultra-low latency, direct push to connected clients, ideal for real-time UIs
+- **SQS Hook**: Multi-consumer, guaranteed delivery, ideal for event-driven backend processing
+- **Best Practice**: Use both together - WebSocket for UI + SQS for backend systems
+
+**Combined Pattern:**
+```python
+# Combine WebSocket and SQS hooks for production
+def combined_metadata_hook(original_func, action, session_id, **kwargs):
+    # WebSocket for instant UI updates
+    result = websocket_hook(original_func, action, session_id, **kwargs)
+
+    # SQS for backend processing (auditing, analytics, workflows)
+    sqs_hook(lambda: result, action, session_id, **kwargs)
+
+    return result
+
+session_manager = MongoDBSessionManager(
+    session_id="prod-session",
+    connection_string="mongodb://...",
+    metadataHook=combined_metadata_hook
+)
+```
+
 ### Agent Configuration Persistence Pattern
 ```python
 # Configuration is automatically captured during sync_agent()
@@ -600,7 +671,67 @@ def build_unified_timeline(session_data):
 ```
 
 **Configuration:**
-Backend uses `.env` file with MongoDB connection, CORS origins, and pagination settings. Frontend connects to backend at `http://localhost:8882/api/v1` (configurable in viewer.js).
+
+The Session Viewer backend is configured via environment variables in `session_viewer/backend/.env`. Copy `.env.example` to `.env` and configure for your environment.
+
+**Environment Variables Quick Reference:**
+
+| Variable | Default | Required | Description |
+|----------|---------|----------|-------------|
+| `MONGODB_CONNECTION_STRING` | `mongodb://...` | ✅ Prod | MongoDB connection string |
+| `DATABASE_NAME` | `examples` | Recommended | Database name |
+| `COLLECTION_NAME` | `sessions` | Optional | Collection name |
+| `BACKEND_PASSWORD` | `123456` | ✅ Prod | **⚠️ Change for production** |
+| `BACKEND_HOST` | `0.0.0.0` | Optional | Server bind host |
+| `BACKEND_PORT` | `8882` | Optional | Server port |
+| `ALLOWED_ORIGINS_STR` | `http://localhost:8883,...` | Optional | CORS origins (comma-separated) |
+| `MAX_POOL_SIZE` | `100` | Optional | MongoDB connection pool max size |
+| `MIN_POOL_SIZE` | `10` | Optional | MongoDB connection pool min size |
+| `MAX_IDLE_TIME_MS` | `30000` | Optional | Max idle time for connections (ms) |
+| `DEFAULT_PAGE_SIZE` | `20` | Optional | Default results per page |
+| `MAX_PAGE_SIZE` | `100` | Optional | Maximum results per page |
+| `ENUM_FIELDS_STR` | `""` | Optional | **v0.1.19+** Fields to display as dropdowns |
+| `ENUM_MAX_VALUES` | `50` | Optional | **v0.1.19+** Max values for enum detection |
+| `LOG_LEVEL` | `INFO` | Optional | Logging level |
+
+**Dynamic Filters (v0.1.19+):**
+Configure fields to display as dropdowns instead of text inputs:
+```bash
+# In .env
+ENUM_FIELDS_STR=metadata.status,metadata.priority,metadata.case_type
+ENUM_MAX_VALUES=50
+```
+
+**How Dynamic Filters Work:**
+1. Backend queries MongoDB indexes to find filterable fields (performance guarantee)
+2. For fields in `ENUM_FIELDS_STR`, retrieves distinct values
+3. If distinct count ≤ `ENUM_MAX_VALUES`, displays as dropdown
+4. Otherwise, displays as text input
+5. Appropriate UI controls rendered based on field type (string, date, number, boolean, enum)
+
+**Frontend Configuration:**
+Frontend connects to backend at `http://localhost:8882/api/v1` (configurable in `viewer.js` APIClient constructor).
+
+**Production Checklist:**
+1. ✅ Set strong `BACKEND_PASSWORD` (16+ characters)
+2. ✅ Use production MongoDB connection string
+3. ✅ Update `main.py` CORS from `allow_origins=["*"]` to `allow_origins=settings.allowed_origins`
+4. ✅ Configure `ENUM_FIELDS_STR` for optimal UX
+5. ✅ Create MongoDB indexes for filterable fields
+6. ✅ Set `LOG_LEVEL=WARNING` for production
+7. ✅ Use HTTPS reverse proxy (nginx/caddy)
+
+**MongoDB Indexes Required (v0.1.19+):**
+Only indexed fields appear as filterable in the UI:
+```javascript
+// In MongoDB shell
+db.sessions.createIndex({"session_id": 1});
+db.sessions.createIndex({"created_at": -1});
+db.sessions.createIndex({"metadata.status": 1});
+db.sessions.createIndex({"metadata.priority": 1});
+```
+
+See `session_viewer/backend/README.md` for complete configuration documentation.
 
 **Use Cases:**
 - **Session Analysis**: Review conversation history and agent interactions

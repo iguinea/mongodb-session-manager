@@ -38,6 +38,18 @@ except ImportError:
     MetadataSQSHook = None
     create_metadata_sqs_hook = None
 
+try:
+    from .hooks.metadata_websocket_hook import (
+        MetadataWebSocketHook,
+        create_metadata_hook as create_metadata_websocket_hook,
+    )
+
+    _metadata_websocket_available = True
+except ImportError:
+    _metadata_websocket_available = False
+    MetadataWebSocketHook = None
+    create_metadata_websocket_hook = None
+
 __all__ = [
     # Core classes
     "MongoDBSessionManager",
@@ -68,6 +80,14 @@ if _metadata_sqs_available:
         ]
     )
 
+if _metadata_websocket_available:
+    __all__.extend(
+        [
+            "MetadataWebSocketHook",
+            "create_metadata_websocket_hook",
+        ]
+    )
+
 
 # Helper functions to check hook availability
 def is_feedback_sns_hook_available() -> bool:
@@ -80,14 +100,20 @@ def is_metadata_sqs_hook_available() -> bool:
     return _metadata_sqs_available
 
 
+def is_metadata_websocket_hook_available() -> bool:
+    """Check if the metadata WebSocket hook is available (boto3 installed)."""
+    return _metadata_websocket_available
+
+
 # Export availability checkers
 __all__.extend(
     [
         "is_feedback_sns_hook_available",
         "is_metadata_sqs_hook_available",
+        "is_metadata_websocket_hook_available",
     ]
 )
 
-__version__ = "0.1.19"
+__version__ = "0.2.0"
 __author__ = "Iñaki Guinea Beristain"
 __author_email__ = "iguinea@gmail.com"

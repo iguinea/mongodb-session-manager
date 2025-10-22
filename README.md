@@ -26,7 +26,7 @@ A MongoDB session manager for Strands Agents that provides persistent storage fo
 - **Metadata Hooks**: Intercept and enhance metadata operations with custom logic
 - **Feedback System**: Store user feedback with ratings and comments
 - **Feedback Hooks**: Intercept feedback operations for audit, validation, and notifications
-- **AWS Integration**: Optional SNS and SQS hooks for real-time notifications and event propagation
+- **AWS Integration**: Optional SNS, SQS, and WebSocket hooks for real-time notifications and event propagation
 
 ### Performance Optimization
 - **Connection Pool Singleton**: Reuse MongoDB connections across requests
@@ -767,12 +767,67 @@ Features:
 - Queue-based event distribution
 - Support for SSE back-propagation
 
+### WebSocket Real-time Updates
+Push metadata changes directly to connected WebSocket clients with ultra-low latency:
+
+```python
+from mongodb_session_manager import (
+    create_metadata_websocket_hook,
+    is_metadata_websocket_hook_available
+)
+
+# Check if WebSocket integration is available
+if is_metadata_websocket_hook_available():
+    # Create WebSocket hook for direct push to clients
+    websocket_hook = create_metadata_websocket_hook(
+        api_gateway_endpoint="https://abc123.execute-api.us-east-1.amazonaws.com/prod",
+        metadata_fields=["status", "progress", "agent_state"],  # Only push these fields
+        region="us-east-1"
+    )
+
+    # Create session manager with WebSocket push
+    session_manager = MongoDBSessionManager(
+        session_id="user-session",
+        connection_string="mongodb://...",
+        metadataHook=websocket_hook
+    )
+
+    # IMPORTANT: Connection ID must be stored in metadata
+    # This comes from API Gateway $connect event
+    session_manager.update_metadata({
+        "ws_connection_id": "abc123def456",  # Required!
+        "status": "processing",
+        "progress": 50,
+        "agent_state": "thinking"
+    })
+```
+
+Features:
+- Ultra-low latency direct push to WebSocket clients
+- Perfect for real-time UIs (Session Viewer, dashboards)
+- Automatic handling of disconnected clients
+- Selective field propagation minimizes bandwidth
+- Non-blocking async operation
+
+**WebSocket vs SQS:**
+- **WebSocket**: Ultra-low latency, single-client push, ideal for real-time UIs
+- **SQS**: Multi-consumer, guaranteed delivery, ideal for backend processing
+- **Best Practice**: Use both together for comprehensive real-time architecture
+
 ### AWS Hook Requirements
+
+**For SNS and SQS hooks:**
 - Install `python-helpers` package: `pip install python-helpers`
 - Configure AWS credentials with appropriate permissions:
   - SNS: `sns:Publish` permission on the topic
   - SQS: `sqs:SendMessage` permission on the queue
 - Create SNS topic and/or SQS queue in your AWS account
+
+**For WebSocket hook:**
+- Install `boto3` (already a core dependency): `pip install boto3`
+- Configure AWS credentials with appropriate permissions:
+  - API Gateway: `execute-api:ManageConnections` permission
+- Create API Gateway WebSocket API in your AWS account
 
 ## 🏗️ MongoDB Schema
 
