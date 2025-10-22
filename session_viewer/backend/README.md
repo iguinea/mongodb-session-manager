@@ -169,28 +169,71 @@ curl "http://localhost:8882/api/v1/sessions/68ee8a6e8ff935ffff0f7b85"
 
 ### `GET /api/v1/metadata-fields`
 
-List available metadata fields across all sessions.
+Get indexed fields with type information and enum values (v0.1.19+).
+
+**Behavior:**
+1. Queries MongoDB collection indexes to find filterable fields
+2. Detects data type for each field (string, date, number, boolean, enum)
+3. For fields configured in `ENUM_FIELDS_STR`, retrieves distinct values
+4. Returns structured `FieldInfo` objects with type and optional enum values
+
+**Configuration:**
+- `ENUM_FIELDS_STR`: Comma-separated fields to treat as enums
+- `ENUM_MAX_VALUES`: Max distinct values for enum (default: 50)
 
 **Example Request:**
 ```bash
 curl "http://localhost:8882/api/v1/metadata-fields"
 ```
 
-**Response:**
+**Response (v0.1.19+):**
 ```json
 {
   "fields": [
-    "case_type",
-    "customer_phone",
-    "customer_cups",
-    "customer_itaxnum"
-  ],
-  "sample_values": {
-    "case_type": ["Analizando caso", "IP_REAPERTURA", "NEW_CASE"],
-    "customer_phone": ["604518797", "612345678"]
-  }
+    {
+      "field": "created_at",
+      "type": "date"
+    },
+    {
+      "field": "session_id",
+      "type": "string"
+    },
+    {
+      "field": "metadata.case_type",
+      "type": "enum",
+      "values": ["Analizando caso", "IP_REAPERTURA", "NEW_CASE"]
+    },
+    {
+      "field": "metadata.priority",
+      "type": "enum",
+      "values": ["low", "medium", "high", "urgent", "critical"]
+    },
+    {
+      "field": "metadata.customer_phone",
+      "type": "string"
+    }
+  ]
 }
 ```
+
+**Field Types:**
+- `string`: Text input field (default)
+- `date`: Date picker
+- `number`: Number input
+- `boolean`: True/False dropdown
+- `enum`: Dropdown with predefined values (requires `ENUM_FIELDS_STR` configuration)
+
+**Response Format Changes:**
+
+| Version | Format |
+|---------|--------|
+| v0.1.16-0.1.18 | `{"fields": [...], "sample_values": {...}}` |
+| v0.1.19+ | `{"fields": [{"field": "...", "type": "...", "values": [...]}]}` |
+
+**Migration Notes:**
+- Frontend is backward compatible
+- Old format still works if backend returns it
+- New format provides better UX with type-appropriate input controls
 
 ### `GET /health`
 
@@ -268,45 +311,290 @@ response = requests.get(
 
 ## Configuration
 
-All configuration is managed via environment variables in `.env`:
+All configuration is managed via environment variables in `.env`. Copy `.env.example` to `.env` and configure according to your environment.
+
+### Environment Variables Reference
+
+| Variable | Type | Default | Required | Description |
+|----------|------|---------|----------|-------------|
+| **MongoDB** |
+| `MONGODB_CONNECTION_STRING` | string | `mongodb://...` | ✅ Production | MongoDB connection string. **⚠️ Change for production** |
+| `DATABASE_NAME` | string | `examples` | Recommended | Database name for sessions |
+| `COLLECTION_NAME` | string | `sessions` | Optional | Collection name for session documents |
+| **Security** |
+| `BACKEND_PASSWORD` | string | `123456` | ✅ Production | Password for authentication. **⚠️ CRITICAL: Change for production** |
+| **Server** |
+| `BACKEND_HOST` | string | `0.0.0.0` | Optional | Host to bind the server |
+| `BACKEND_PORT` | int | `8882` | Optional | Port for the FastAPI server |
+| **CORS** |
+| `ALLOWED_ORIGINS_STR` | string | `http://localhost:8883,...` | Optional | Comma-separated allowed origins. **Note:** Code currently uses `*` (see Production) |
+| **Connection Pool** |
+| `MAX_POOL_SIZE` | int | `100` | Optional | Maximum MongoDB connections in pool |
+| `MIN_POOL_SIZE` | int | `10` | Optional | Minimum MongoDB connections in pool |
+| `MAX_IDLE_TIME_MS` | int | `30000` | Optional | Max idle time for connections (ms) |
+| **Pagination** |
+| `DEFAULT_PAGE_SIZE` | int | `20` | Optional | Default results per page |
+| `MAX_PAGE_SIZE` | int | `100` | Optional | Maximum results per page allowed |
+| **Dynamic Filters (v0.1.19+)** |
+| `ENUM_FIELDS_STR` | string | `""` (empty) | Optional | Comma-separated fields to display as dropdowns |
+| `ENUM_MAX_VALUES` | int | `50` | Optional | Max distinct values for enum detection |
+| **Logging** |
+| `LOG_LEVEL` | string | `INFO` | Optional | Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL |
+
+### Detailed Configuration
+
+#### MongoDB Configuration
+```bash
+# Development (local MongoDB)
+MONGODB_CONNECTION_STRING=mongodb://localhost:27017/
+
+# Production (MongoDB Atlas)
+MONGODB_CONNECTION_STRING=mongodb+srv://user:password@cluster.mongodb.net/
+
+# With Docker Compose (default)
+MONGODB_CONNECTION_STRING=mongodb://mongodb:mongodb@mongodb_session_manager-mongodb:27017/
+
+DATABASE_NAME=examples              # Change for production
+COLLECTION_NAME=sessions
+```
+
+#### Security Configuration
+```bash
+# CRITICAL: Change password for production
+BACKEND_PASSWORD=my_super_secure_password_2024
+
+# Password is hashed with SHA-256 on frontend before transmission
+# All endpoints (except /health and /check_password) require authentication
+```
+
+#### Dynamic Filter Configuration (v0.1.19+)
+
+Configure which fields should display as dropdowns with predefined values:
 
 ```bash
-# MongoDB Configuration
-MONGODB_CONNECTION_STRING=mongodb://mongodb:mongodb@localhost:27017/
-DATABASE_NAME=examples
-COLLECTION_NAME=sessions
+# Fields to treat as enums (dropdowns)
+# Comma-separated list of full field paths
+ENUM_FIELDS_STR=metadata.status,metadata.priority,metadata.case_type
 
-# Backend Server
-BACKEND_HOST=0.0.0.0
-BACKEND_PORT=8882
+# Maximum distinct values for enum detection
+# If a configured enum field exceeds this limit, it falls back to text input
+ENUM_MAX_VALUES=50
+```
 
-# Authentication
-BACKEND_PASSWORD=123456  # Change for production!
+**How it works:**
+1. Backend queries MongoDB indexes to find filterable fields
+2. For fields in `ENUM_FIELDS_STR`, retrieves distinct values
+3. If distinct values ≤ `ENUM_MAX_VALUES`, displays as dropdown
+4. Otherwise, displays as text input
+5. Guarantees performance by only allowing indexed fields
 
-# CORS (Development mode - allows all origins)
-# For production, specify allowed origins in ALLOWED_ORIGINS_STR
+**Example:**
+```bash
+# Configure dropdowns for status and priority
+ENUM_FIELDS_STR=metadata.status,metadata.priority
+
+# status has 3 values → dropdown with ["active", "completed", "failed"]
+# priority has 5 values → dropdown with ["low", "medium", "high", "urgent", "critical"]
+# Other fields → text input
+```
+
+#### CORS Configuration
+```bash
+# Development (allows all origins) - currently hardcoded in main.py
 ALLOWED_ORIGINS_STR=*
 
-# Pagination
-DEFAULT_PAGE_SIZE=20
-MAX_PAGE_SIZE=100
+# Production (specific origins)
+ALLOWED_ORIGINS_STR=https://yourdomain.com,https://app.yourdomain.com
+```
 
-# Logging
-LOG_LEVEL=INFO
+**⚠️ Important:** The code in `main.py:107-113` currently uses `allow_origins=["*"]` for development. For production, change to `allow_origins=settings.allowed_origins`.
+
+#### Connection Pool Configuration
+```bash
+MAX_POOL_SIZE=100        # Max connections (adjust for high traffic)
+MIN_POOL_SIZE=10         # Min connections (always available)
+MAX_IDLE_TIME_MS=30000   # Close idle connections after 30 seconds
+```
+
+#### Pagination Configuration
+```bash
+DEFAULT_PAGE_SIZE=20     # Results per page (user can override)
+MAX_PAGE_SIZE=100        # Maximum allowed (prevents large queries)
+```
+
+#### Logging Configuration
+```bash
+# Development
+LOG_LEVEL=DEBUG
+
+# Production
+LOG_LEVEL=WARNING
 ```
 
 ### Production Configuration
 
-For production deployments:
+For production deployments, follow this checklist:
 
-1. **Change Password**: Set strong password in `BACKEND_PASSWORD`
-2. **Configure CORS**: Change from `*` to specific origins:
-   ```bash
-   ALLOWED_ORIGINS_STR=https://yourdomain.com,https://app.yourdomain.com
-   ```
-3. **Update main.py**: Modify CORS middleware to use `settings.allowed_origins` instead of `["*"]` (see comments in code)
-4. **Enable HTTPS**: Use reverse proxy (nginx/caddy) for HTTPS
-5. **Set LOG_LEVEL**: Change to `WARNING` or `ERROR` for production
+#### 1. Security Configuration
+
+```bash
+# Set strong password (required)
+BACKEND_PASSWORD=<your_strong_password_here>
+
+# Use production MongoDB (required)
+MONGODB_CONNECTION_STRING=mongodb+srv://user:password@cluster.mongodb.net/
+DATABASE_NAME=production_sessions
+```
+
+**Security Best Practices:**
+- Use passwords with at least 16 characters
+- Include uppercase, lowercase, numbers, and symbols
+- Never commit `.env` file to version control
+- Rotate passwords regularly
+- Use environment-specific passwords (dev, staging, prod)
+
+#### 2. CORS Configuration
+
+**⚠️ Critical:** Update `main.py` to use specific origins instead of wildcard:
+
+```python
+# In main.py, change from:
+allow_origins=["*"]
+
+# To:
+allow_origins=settings.allowed_origins
+```
+
+Then configure allowed origins:
+```bash
+ALLOWED_ORIGINS_STR=https://yourdomain.com,https://app.yourdomain.com
+```
+
+#### 3. Dynamic Filters Configuration
+
+Configure enum fields for optimal UX:
+
+```bash
+# Analyze your metadata fields and configure the most common ones as enums
+ENUM_FIELDS_STR=metadata.status,metadata.priority,metadata.case_type
+
+# Adjust threshold based on your data
+ENUM_MAX_VALUES=50
+```
+
+**How to identify enum candidates:**
+```javascript
+// In MongoDB shell
+db.sessions.distinct("metadata.status").length  // If < 50, good candidate
+```
+
+#### 4. Performance Tuning
+
+```bash
+# Adjust pool size based on expected load
+MAX_POOL_SIZE=200        # Higher for high-traffic applications
+MIN_POOL_SIZE=20         # Higher for consistent load
+
+# Adjust pagination for your use case
+DEFAULT_PAGE_SIZE=20     # Lower for faster response times
+MAX_PAGE_SIZE=50         # Lower to prevent large queries
+```
+
+#### 5. Logging Configuration
+
+```bash
+# Production: reduce noise
+LOG_LEVEL=WARNING
+
+# Staging: more visibility
+LOG_LEVEL=INFO
+
+# Development: full visibility
+LOG_LEVEL=DEBUG
+```
+
+#### 6. Infrastructure Setup
+
+**HTTPS (Required for Production):**
+Use reverse proxy (nginx/caddy) to handle HTTPS:
+
+```nginx
+# nginx example
+server {
+    listen 443 ssl;
+    server_name api.yourdomain.com;
+
+    ssl_certificate /path/to/cert.pem;
+    ssl_certificate_key /path/to/key.pem;
+
+    location / {
+        proxy_pass http://localhost:8882;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+```
+
+**MongoDB Indexes (Required for Performance):**
+Create indexes for fields you want to filter:
+
+```javascript
+// In MongoDB shell
+db.sessions.createIndex({"session_id": 1});
+db.sessions.createIndex({"created_at": -1});
+db.sessions.createIndex({"metadata.status": 1});
+db.sessions.createIndex({"metadata.priority": 1});
+db.sessions.createIndex({"metadata.case_type": 1});
+```
+
+**Note:** Only indexed fields will be available for filtering in v0.1.19+
+
+#### 7. Monitoring
+
+```bash
+# Enable detailed health checks
+curl https://api.yourdomain.com/health
+
+# Monitor connection pool statistics
+# Check "connection_pool" section in health response
+```
+
+#### Production Environment Example
+
+Complete `.env` for production:
+
+```bash
+# MongoDB
+MONGODB_CONNECTION_STRING=mongodb+srv://prod_user:secure_pass@cluster.mongodb.net/
+DATABASE_NAME=production_sessions
+COLLECTION_NAME=sessions
+
+# Security
+BACKEND_PASSWORD=<your_production_password>
+
+# Server
+BACKEND_HOST=0.0.0.0
+BACKEND_PORT=8882
+
+# CORS (remember to update main.py!)
+ALLOWED_ORIGINS_STR=https://yourdomain.com,https://app.yourdomain.com
+
+# Connection Pool
+MAX_POOL_SIZE=200
+MIN_POOL_SIZE=20
+MAX_IDLE_TIME_MS=30000
+
+# Pagination
+DEFAULT_PAGE_SIZE=20
+MAX_PAGE_SIZE=50
+
+# Dynamic Filters
+ENUM_FIELDS_STR=metadata.status,metadata.priority,metadata.case_type
+ENUM_MAX_VALUES=50
+
+# Logging
+LOG_LEVEL=WARNING
+```
 
 ## Development
 
