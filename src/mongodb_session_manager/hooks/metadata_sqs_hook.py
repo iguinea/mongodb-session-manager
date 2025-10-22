@@ -22,7 +22,7 @@ Architecture:
     3. Extract relevant metadata fields for propagation
     4. Send changes to SQS queue asynchronously
     5. Handle both async/await and synchronous contexts automatically
-    
+
     The SQS messages can then be processed by a separate service that:
     - Reads messages from the queue
     - Propagates changes to connected SSE clients
@@ -32,20 +32,20 @@ Usage:
     ```python
     from mongodb_session_manager import MongoDBSessionManager
     from mongodb_session_manager.hooks.metadata_sqs_hook import create_metadata_hook
-    
+
     # Create the SQS hook with specific fields to propagate
     sqs_hook = create_metadata_hook(
         queue_url="https://sqs.eu-west-1.amazonaws.com/123456789/metadata-updates",
         metadata_fields=["status", "agent_state", "last_action", "priority"]
     )
-    
+
     # Create session manager with SQS propagation
     session_manager = MongoDBSessionManager(
         session_id="user-session-123",
         connection_string="mongodb://...",
         metadataHook=sqs_hook
     )
-    
+
     # Metadata changes are automatically sent to SQS
     session_manager.update_metadata({
         "status": "processing",
@@ -67,7 +67,7 @@ SQS Message Format:
         "timestamp": "2024-01-26T10:30:45.123456"
     }
     ```
-    
+
     Message Attributes:
         - session_id: String attribute with the session identifier
         - operation: String attribute with "update" or "delete"
@@ -170,7 +170,7 @@ class MetadataSQSHook:
             # Prepare the message
             message_data = {
                 "session_id": session_id,
-                "event_type": "metadata_update",
+                "event": "metadata_update",
                 "operation": operation,
                 "metadata": relevant_metadata,
                 "timestamp": datetime.now().isoformat(),
@@ -190,7 +190,7 @@ class MetadataSQSHook:
                 message_body=message_body,
                 message_attributes={
                     "session_id": {"DataType": "String", "StringValue": session_id},
-                    "event_type": {"DataType": "String", "StringValue": "metadata_update"},
+                    "event": {"DataType": "String", "StringValue": "metadata_update"},
                 },
             )
 

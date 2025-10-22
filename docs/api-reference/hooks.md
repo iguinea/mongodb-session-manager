@@ -767,7 +767,7 @@ def __init__(
 ```json
 {
     "session_id": "user-session-123",
-    "event_type": "metadata_update",
+    "event": "metadata_update",
     "operation": "update",
     "metadata": {
         "status": "processing",
@@ -779,7 +779,7 @@ def __init__(
 
 **Message Attributes**:
 - `session_id` (String): The session identifier
-- `event_type` (String): Always "metadata_update"
+- `event` (String): Always "metadata_update"
 
 ### Methods
 

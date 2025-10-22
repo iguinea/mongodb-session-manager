@@ -136,18 +136,18 @@ The `agent.stream_async()` generator yields events:
 
 ```python
 async for event in agent.stream_async(prompt):
-    event_type = event.get("type")
+    event = event.get("type")
 
-    if event_type == "content_block_delta":
+    if event == "content_block_delta":
         # Token data
         token = event.get("data", "")
         print(token, end="", flush=True)
 
-    elif event_type == "content_block_start":
+    elif event == "content_block_start":
         # Response started
         print("Assistant: ", end="", flush=True)
 
-    elif event_type == "message_stop":
+    elif event == "message_stop":
         # Response completed
         print("\n[Stream complete]")
 ```

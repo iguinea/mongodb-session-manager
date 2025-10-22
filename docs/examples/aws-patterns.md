@@ -371,7 +371,7 @@ When metadata is updated, SQS receives:
 ```json
 {
   "session_id": "sqs-demo-session",
-  "event_type": "metadata_update",
+  "event": "metadata_update",
   "operation": "update",
   "metadata": {
     "status": "processing",
@@ -387,7 +387,7 @@ When metadata is deleted:
 ```json
 {
   "session_id": "sqs-demo-session",
-  "event_type": "metadata_update",
+  "event": "metadata_update",
   "operation": "delete",
   "metadata": {
     "priority": null
@@ -969,7 +969,7 @@ def metadata_to_analytics(event):
         'session_id': session_id,
         'metadata': metadata,
         'timestamp': event['timestamp'],
-        'event_type': event['event_type']
+        'event': event['event']
     }
 
     # Send to Kinesis for real-time analytics

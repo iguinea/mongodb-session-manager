@@ -62,7 +62,7 @@ WebSocket Message Format:
     Message Body (JSON):
     ```json
     {
-        "event_type": "metadata_update",
+        "event": "metadata_update",
         "session_id": "user-session-123",
         "operation": "update",
         "metadata": {
@@ -231,7 +231,7 @@ class MetadataWebSocketHook:
 
             # Prepare the message
             message_data = {
-                "event_type": "metadata_update",
+                "event": "metadata_update",
                 "session_id": session_id,
                 "operation": operation,
                 "metadata": relevant_metadata,

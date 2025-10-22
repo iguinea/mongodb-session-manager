@@ -276,7 +276,7 @@ session_manager.update_metadata({
 ```json
 {
     "session_id": "user-session-123",
-    "event_type": "metadata_update",
+    "event": "metadata_update",
     "operation": "update",
     "metadata": {
         "status": "processing",
@@ -294,7 +294,7 @@ session_manager.update_metadata({
         "DataType": "String",
         "StringValue": "user-session-123"
     },
-    "event_type": {
+    "event": {
         "DataType": "String",
         "StringValue": "metadata_update"
     }

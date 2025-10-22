@@ -37,7 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **File**: `src/mongodb_session_manager/hooks/metadata_websocket_hook.py`
 - **Dependencies**: boto3 (already core dependency), botocore for ClientError handling
 - **AWS Service**: API Gateway Management API (`apigatewaymanagementapi` client)
-- **Message Format**: JSON with event_type, session_id, operation, metadata, timestamp
+- **Message Format**: JSON with event, session_id, operation, metadata, timestamp
 - **Error Handling**: GoneException (disconnected clients) logged as INFO, other errors as ERROR
 - **Performance**: Direct push to clients, no polling overhead, daemon threads for sync contexts
 
@@ -500,8 +500,8 @@ feedback_hook = create_feedback_sns_hook(
 
 ### Changed
 - **MetadataSQSHook**: Standardized SQS message format for better event handling
-  - Added `event_type: "metadata_update"` field to message body for consistent event categorization
-  - Updated message attributes to use `event_type` instead of `operation` for better downstream filtering
+  - Added `event: "metadata_update"` field to message body for consistent event categorization
+  - Updated message attributes to use `event` instead of `operation` for better downstream filtering
   - This change improves event processing consistency and aligns with event-driven architecture best practices
 
 ## [0.1.11] - 2025-01-19
