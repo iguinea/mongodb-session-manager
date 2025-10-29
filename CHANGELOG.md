@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.4] - 2025-10-29
+
+### Fixed
+- **Python Cache Issue**: Resolved import error with FeedbackSNSHook template parameters
+  - Error: `create_feedback_hook() got an unexpected keyword argument 'subject_prefix_good'`
+  - Root cause: Stale Python bytecode cache (`__pycache__`) from pre-v0.2.3 versions
+  - Solution: Cleared all `__pycache__` directories and `.pyc` files
+  - Package reinstallation now works correctly with `uv sync --reinstall`
+
+### Changed
+- **Hooks Package Exports**: Updated `/workspace/src/mongodb_session_manager/hooks/__init__.py`
+  - Added proper exports for all three hooks: FeedbackSNSHook, MetadataSQSHook, MetadataWebSocketHook
+  - Added unique aliases to avoid naming conflicts:
+    - `create_metadata_sqs_hook` (for SQS hook)
+    - `create_metadata_websocket_hook` (for WebSocket hook)
+  - Updated module docstring to document all available hooks
+  - Improved conditional imports with proper availability flags
+
+### Technical Details
+- All hook implementations were already correct in v0.2.3
+- Issue was purely runtime cache-related, not code-related
+- Hooks subpackage `__init__.py` now properly exports all hooks with correct function signatures
+- Comprehensive tests verify all import paths work correctly
+
+### Benefits
+- ✅ FeedbackSNSHook template parameters now work without cache issues
+- ✅ All three hooks (SNS, SQS, WebSocket) properly exported from hooks subpackage
+- ✅ Improved import path consistency across the package
+- ✅ Better developer experience with clear hook availability checks
+
 ## [0.2.3] - 2025-10-29
 
 ### Added
