@@ -201,7 +201,9 @@ class FeedbackSNSHook:
             f"good: {topic_arn_good}, bad: {topic_arn_bad}, neutral: {topic_arn_neutral}"
         )
 
-    def _apply_template(self, template: Optional[str], variables: Dict[str, str]) -> str:
+    def _apply_template(
+        self, template: Optional[str], variables: Dict[str, str]
+    ) -> str:
         """
         Apply variable substitution to a template string
 
@@ -267,15 +269,18 @@ class FeedbackSNSHook:
             body_prefix_text = self._apply_template(body_prefix, template_vars)
 
             # Create subject with prefix
-            base_subject = f"Virtual Agents Feedback {rating_text} on session {session_id}"
+            base_subject = f"on session {session_id}"
             subject = f"{subject_prefix_text}{base_subject}"
 
             # Format message with prefix
             base_message = f"Session: {session_id}\n\n{comment}"
             message = f"{body_prefix_text}{base_message}"
 
+            message = message.replace("_SESSION_ID_", session_id)
             # Log the message for debugging
-            logger.debug(f"Sending feedback notification to SNS topic {topic_arn}: {subject}")
+            logger.debug(
+                f"Sending feedback notification to SNS topic {topic_arn}: {subject}"
+            )
 
             # Send to SNS using asyncio.to_thread for non-blocking operation
             if topic_arn != "none":
@@ -295,8 +300,10 @@ class FeedbackSNSHook:
                     f"with rating: {rating_text}"
                 )
             else:
-                logger.info(f"Skipping feedback notification to SNS topic {topic_arn} for session {session_id} "
-                            f"with rating: {rating_text} because topic_arn is none")
+                logger.info(
+                    f"Skipping feedback notification to SNS topic {topic_arn} for session {session_id} "
+                    f"with rating: {rating_text} because topic_arn is none"
+                )
 
         except ImportError as e:
             logger.error(f"Import error in feedback SNS hook: {e}")
