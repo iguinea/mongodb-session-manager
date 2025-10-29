@@ -406,33 +406,71 @@ from mongodb_session_manager import (
 
 # Check if SNS hook is available
 if is_feedback_sns_hook_available():
-    # Create SNS hook with separate topics for different feedback types
+    # Basic usage: Create SNS hook with separate topics for different feedback types
     feedback_hook = create_feedback_sns_hook(
         topic_arn_good="arn:aws:sns:eu-west-1:123456789:feedback-good",
         topic_arn_bad="arn:aws:sns:eu-west-1:123456789:feedback-bad",
         topic_arn_neutral="arn:aws:sns:eu-west-1:123456789:feedback-neutral"
     )
 
+    # Advanced usage: With configurable message templates
+    feedback_hook_with_templates = create_feedback_sns_hook(
+        topic_arn_good="arn:aws:sns:eu-west-1:123456789:feedback-good",
+        topic_arn_bad="arn:aws:sns:eu-west-1:123456789:feedback-bad",
+        topic_arn_neutral="arn:aws:sns:eu-west-1:123456789:feedback-neutral",
+
+        # Subject prefixes for easy filtering
+        subject_prefix_good="[PROD] ✅ ",
+        subject_prefix_bad="[PROD] ⚠️ URGENT: ",
+        subject_prefix_neutral="[PROD] ℹ️ ",
+
+        # Body prefixes with template variables: {session_id}, {rating}, {timestamp}
+        body_prefix_bad=(
+            "🚨 NEGATIVE FEEDBACK ALERT 🚨\n"
+            "Environment: Production\n"
+            "Session: {session_id}\n"
+            "Timestamp: {timestamp}\n"
+            "---\n"
+        ),
+        body_prefix_good="Environment: Production\nSession: {session_id}\n---\n"
+    )
+
     session_manager = MongoDBSessionManager(
         session_id="user-session",
         connection_string="mongodb://...",
-        feedbackHook=feedback_hook
+        feedbackHook=feedback_hook_with_templates
     )
 
-    # Routes to topic_arn_bad
+    # Routes to topic_arn_bad with URGENT prefix
     session_manager.add_feedback({
         "rating": "down",
         "comment": "Response was incomplete"
     })
+    # SNS Subject: "[PROD] ⚠️ URGENT: Virtual Agents Feedback negative on session user-session"
+    # SNS Body:
+    #   🚨 NEGATIVE FEEDBACK ALERT 🚨
+    #   Environment: Production
+    #   Session: user-session
+    #   Timestamp: 2024-01-26T10:30:45.123456+00:00
+    #   ---
+    #   Session: user-session
+    #
+    #   Response was incomplete
 
-    # Routes to topic_arn_good
+    # Routes to topic_arn_good with ✅ prefix
     session_manager.add_feedback({
         "rating": "up",
         "comment": "Great response!"
     })
+    # SNS Subject: "[PROD] ✅ Virtual Agents Feedback positive on session user-session"
 else:
     print("SNS hook not available - install python-helpers package")
 ```
+
+**Template Variables Available:**
+- `{session_id}`: The session identifier
+- `{rating}`: Feedback rating as text ("positive", "negative", or "neutral")
+- `{timestamp}`: ISO 8601 timestamp when feedback was processed
 
 #### SQS Metadata Propagation
 ```python

@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3] - 2025-10-29
+
+### Added
+- **FeedbackSNSHook Message Templates**: Enhanced SNS hook with configurable message prefixes
+  - New optional parameters in `FeedbackSNSHook` constructor and `create_feedback_sns_hook()`:
+    - `subject_prefix_good`, `subject_prefix_bad`, `subject_prefix_neutral`: Prefix templates for SNS subject lines
+    - `body_prefix_good`, `body_prefix_bad`, `body_prefix_neutral`: Prefix templates for SNS message bodies
+  - Template variable substitution support with `{session_id}`, `{rating}`, and `{timestamp}`
+  - Different prefixes can be configured per feedback type (good/bad/neutral)
+  - Prefixes appear in both Subject and Body of SNS messages
+  - Fully backward compatible: all prefix parameters are optional
+  - Use cases:
+    - Environment identification: `[PROD]`, `[STAGING]`, `[DEV]`
+    - Priority indicators: `⚠️ URGENT:`, `✅`, `ℹ️`
+    - Context injection: Add session details, timestamps, environment info to notifications
+  - New example in `examples/example_feedback_hook.py` (Example 7) demonstrating template usage
+  - Updated documentation in `CLAUDE.md` and `README.md` with template examples
+
+### Changed
+- `FeedbackSNSHook.on_feedback_add()` now applies prefix templates before sending to SNS
+- New private method `_apply_template()` handles variable substitution with error handling
+- SNS message format now supports optional prefixes while maintaining backward compatibility
+
+### Documentation
+- Updated AWS Integration Patterns section in `CLAUDE.md` with template examples
+- Updated SNS Feedback Notifications section in `README.md` with advanced usage
+- Added comprehensive template usage example in `examples/example_feedback_hook.py`
+- Documented template variables: `{session_id}`, `{rating}`, `{timestamp}`
+- Added multi-environment pattern example for dev/staging/production setups
+
 ## [0.2.0] - 2025-10-22
 
 ### Added

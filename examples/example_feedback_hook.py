@@ -414,6 +414,144 @@ async def add_feedback(session_id: str, feedback_data: FeedbackRequest):
         raise HTTPException(status_code=500, detail="Internal server error")
 """)
     
+    # Example 7: SNS Hook with Configurable Templates
+    print_section("Example 7: SNS Hook with Configurable Templates (Demo)")
+
+    print("""
+# AWS SNS Integration with Custom Message Templates:
+#
+# This example shows how to use the FeedbackSNSHook with configurable
+# message prefixes for different environments and feedback types.
+
+from mongodb_session_manager import (
+    MongoDBSessionManager,
+    create_feedback_sns_hook,
+    is_feedback_sns_hook_available
+)
+
+# Check if SNS hook is available (requires python-helpers package)
+if is_feedback_sns_hook_available():
+    # Create SNS hook with custom templates for production environment
+    sns_hook = create_feedback_sns_hook(
+        topic_arn_good="arn:aws:sns:eu-west-1:123456789:feedback-good",
+        topic_arn_bad="arn:aws:sns:eu-west-1:123456789:feedback-bad",
+        topic_arn_neutral="arn:aws:sns:eu-west-1:123456789:feedback-neutral",
+
+        # Subject prefixes - short identifiers for filtering
+        subject_prefix_good="[PROD] ✅ ",
+        subject_prefix_bad="[PROD] ⚠️ URGENT: ",
+        subject_prefix_neutral="[PROD] ℹ️ ",
+
+        # Body prefixes - detailed context with template variables
+        body_prefix_good=(
+            "Environment: Production\\n"
+            "Session: {session_id}\\n"
+            "Timestamp: {timestamp}\\n"
+            "---\\n"
+        ),
+        body_prefix_bad=(
+            "🚨 NEGATIVE FEEDBACK ALERT 🚨\\n"
+            "Environment: Production\\n"
+            "Session: {session_id}\\n"
+            "Feedback Type: {rating}\\n"
+            "Timestamp: {timestamp}\\n"
+            "---\\n"
+            "IMMEDIATE ATTENTION REQUIRED\\n"
+            "---\\n"
+        ),
+        body_prefix_neutral=(
+            "Environment: Production\\n"
+            "Session: {session_id}\\n"
+            "Neutral feedback received at: {timestamp}\\n"
+            "---\\n"
+        )
+    )
+
+    # Create session manager with SNS notifications
+    session_manager = MongoDBSessionManager(
+        session_id="prod-session-123",
+        connection_string="mongodb://...",
+        feedbackHook=sns_hook
+    )
+
+    # Feedback will be sent to SNS with custom prefixes
+    # Rating "down" → Routed to topic_arn_bad with URGENT prefix
+    session_manager.add_feedback({
+        "rating": "down",
+        "comment": "The agent provided incorrect information about pricing"
+    })
+
+    # Rating "up" → Routed to topic_arn_good with ✅ prefix
+    session_manager.add_feedback({
+        "rating": "up",
+        "comment": "Excellent customer service!"
+    })
+
+    # SNS Message Examples:
+    #
+    # For negative feedback:
+    # Subject: "[PROD] ⚠️ URGENT: Virtual Agents Feedback negative on session prod-session-123"
+    # Body:
+    #   🚨 NEGATIVE FEEDBACK ALERT 🚨
+    #   Environment: Production
+    #   Session: prod-session-123
+    #   Feedback Type: negative
+    #   Timestamp: 2024-01-26T10:30:45.123456+00:00
+    #   ---
+    #   IMMEDIATE ATTENTION REQUIRED
+    #   ---
+    #   Session: prod-session-123
+    #
+    #   The agent provided incorrect information about pricing
+    #
+    # For positive feedback:
+    # Subject: "[PROD] ✅ Virtual Agents Feedback positive on session prod-session-123"
+    # Body:
+    #   Environment: Production
+    #   Session: prod-session-123
+    #   Timestamp: 2024-01-26T10:30:45.123456+00:00
+    #   ---
+    #   Session: prod-session-123
+    #
+    #   Excellent customer service!
+
+else:
+    print("SNS hook not available - install python-helpers package:")
+    print("pip install python-helpers")
+
+# Multi-Environment Pattern:
+# Configure different prefixes for dev/staging/prod environments
+
+def create_environment_sns_hook(environment: str):
+    \"\"\"Create SNS hook with environment-specific prefixes.\"\"\"
+
+    env_emoji = {
+        "dev": "🔧",
+        "staging": "🚀",
+        "production": "⚡"
+    }
+
+    return create_feedback_sns_hook(
+        topic_arn_good=f"arn:aws:sns:region:account:{environment}-feedback-good",
+        topic_arn_bad=f"arn:aws:sns:region:account:{environment}-feedback-bad",
+        topic_arn_neutral=f"arn:aws:sns:region:account:{environment}-feedback-neutral",
+        subject_prefix_good=f"[{environment.upper()}] {env_emoji[environment]} ",
+        subject_prefix_bad=f"[{environment.upper()}] ⚠️ ",
+        subject_prefix_neutral=f"[{environment.upper()}] ℹ️ ",
+        body_prefix_bad=(
+            f"Environment: {environment}\\n"
+            f"Session: {{session_id}}\\n"
+            f"Timestamp: {{timestamp}}\\n"
+            f"---\\n"
+        )
+    )
+
+# Usage:
+# dev_hook = create_environment_sns_hook("dev")
+# staging_hook = create_environment_sns_hook("staging")
+# prod_hook = create_environment_sns_hook("production")
+""")
+
     print_section("Summary")
     print("Demonstrated feedback hooks:")
     print("✓ Audit Hook - Logs all feedback operations")
@@ -422,6 +560,7 @@ async def add_feedback(session_id: str, feedback_data: FeedbackRequest):
     print("✓ Analytics Hook - Collects feedback metrics")
     print("✓ Combined Hooks - Chain multiple behaviors")
     print("✓ FastAPI Pattern - Integration with web endpoints")
+    print("✓ SNS Hook with Templates - AWS notifications with configurable prefixes")
 
 
 if __name__ == "__main__":

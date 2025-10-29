@@ -685,7 +685,7 @@ See `examples/example_feedback_hook.py` for comprehensive examples including:
 The library includes optional hooks for integrating with AWS services. These require the `custom_aws` package (python-helpers) to be installed.
 
 ### SNS Feedback Notifications
-Send real-time notifications to different topics based on feedback rating:
+Send real-time notifications to different topics based on feedback rating with configurable message templates:
 
 ```python
 from mongodb_session_manager import (
@@ -695,27 +695,48 @@ from mongodb_session_manager import (
 
 # Check if SNS integration is available
 if is_feedback_sns_hook_available():
-    # Create SNS hook with three separate topics for routing
+    # Basic usage: Create SNS hook with three separate topics
     feedback_hook = create_feedback_sns_hook(
         topic_arn_good="arn:aws:sns:eu-west-1:123456789:feedback-good",
         topic_arn_bad="arn:aws:sns:eu-west-1:123456789:feedback-bad",
         topic_arn_neutral="arn:aws:sns:eu-west-1:123456789:feedback-neutral"
     )
 
+    # Advanced: With configurable message templates for different environments
+    feedback_hook_prod = create_feedback_sns_hook(
+        topic_arn_good="arn:aws:sns:eu-west-1:123456789:feedback-good",
+        topic_arn_bad="arn:aws:sns:eu-west-1:123456789:feedback-bad",
+        topic_arn_neutral="arn:aws:sns:eu-west-1:123456789:feedback-neutral",
+
+        # Subject prefixes (added to SNS subject line)
+        subject_prefix_good="[PROD] ✅ ",
+        subject_prefix_bad="[PROD] ⚠️ URGENT: ",
+        subject_prefix_neutral="[PROD] ℹ️ ",
+
+        # Body prefixes with template variables: {session_id}, {rating}, {timestamp}
+        body_prefix_bad=(
+            "🚨 NEGATIVE FEEDBACK ALERT 🚨\n"
+            "Environment: Production\n"
+            "Session: {session_id}\n"
+            "Timestamp: {timestamp}\n"
+            "---\n"
+        )
+    )
+
     # Create session manager with SNS notifications
     session_manager = MongoDBSessionManager(
         session_id="user-session",
         connection_string="mongodb://...",
-        feedbackHook=feedback_hook
+        feedbackHook=feedback_hook_prod
     )
 
-    # Routes to topic_arn_bad
+    # Routes to topic_arn_bad with custom prefix
     session_manager.add_feedback({
         "rating": "down",
         "comment": "The answer was incorrect"
     })
 
-    # Routes to topic_arn_good
+    # Routes to topic_arn_good with custom prefix
     session_manager.add_feedback({
         "rating": "up",
         "comment": "Great response!"
@@ -724,6 +745,9 @@ if is_feedback_sns_hook_available():
 
 Features:
 - Automatic topic routing based on feedback rating
+- **Configurable message templates** with prefix support
+- **Template variables**: `{session_id}`, `{rating}`, `{timestamp}`
+- **Different prefixes per feedback type** (good/bad/neutral)
 - Real-time alerts with session context
 - Non-blocking async notifications
 - Rich message attributes for filtering
