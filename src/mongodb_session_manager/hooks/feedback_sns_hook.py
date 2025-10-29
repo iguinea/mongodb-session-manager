@@ -122,7 +122,7 @@ from typing import Dict, Any, Optional
 from datetime import datetime, timezone
 
 try:
-    from custom_aws.sns import publish_message
+    from .utils_sns import publish_message
 except ImportError:
     logging.warning(
         "custom_aws.sns not available. Please install python-helpers package."
