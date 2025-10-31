@@ -7,6 +7,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.7] - 2025-10-31
+
+### Added
+- **SNS Feedback Hook - Session Password Integration**: Session viewer password now included in SNS feedback notifications
+  - `FeedbackSNSHook` now receives `session_manager` instance to retrieve session viewer password
+  - Password automatically included in SNS message body for quick session access
+  - Enhanced message format: `Password: {session_viewer_password}\n\nSession: {session_id}\n\n{comment}`
+  - Enables direct Session Viewer access from feedback notifications
+  - Backward compatible: displays "N/A" if session_manager not available
+
+### Changed
+- **Feedback Hook Interface**: Enhanced to pass `session_manager` instance to hooks
+  - `_apply_feedback_hook()` now passes `session_manager=self` to hook functions
+  - `on_feedback_add()` method signature updated to accept `**kwargs` for session_manager
+  - `create_feedback_hook()` wrapper updated to forward session_manager parameter
+  - Hook wrapper docstrings updated to document new parameter
+
+### Technical Details
+- **File**: `src/mongodb_session_manager/mongodb_session_manager.py:416-417`
+  - Modified `_apply_feedback_hook()` to include `session_manager=self` in hook call
+  - Updated docstring to document session_manager parameter
+- **File**: `src/mongodb_session_manager/hooks/feedback_sns_hook.py`
+  - Line 229: Updated `on_feedback_add()` signature to accept `**kwargs`
+  - Lines 276-277: Added password retrieval from session_manager
+  - Lines 403-404, 412-413: Updated wrapper to pass session_manager in both async and sync contexts
+  - Updated docstrings to document session_manager parameter
+
+### Use Cases
+- Quick access to Session Viewer from SNS notification emails
+- Incident response: direct link to problematic sessions with password
+- Customer support: immediate session access when negative feedback received
+- Debugging: one-click access to session context from alerts
+
+### Example SNS Message Format
+```
+Subject: [PROD] ⚠️ URGENT: on session user-session-123
+
+Body:
+🚨 NEGATIVE FEEDBACK ALERT 🚨
+Environment: Production
+Session: user-session-123
+Timestamp: 2025-10-31T14:20:14Z
+---
+Password: b5nwmTymyFgs5ubyCRFzbKsEq2UTVXyY
+
+Session: user-session-123
+
+The response was incomplete
+```
+
+### Benefits
+- ✅ Zero-friction session access from notifications
+- ✅ No need to look up passwords separately
+- ✅ Faster incident response and debugging
+- ✅ Backward compatible with existing hooks
+- ✅ Non-breaking change for hook interface
+
 ## [0.2.6] - 2025-10-31
 
 ### Added

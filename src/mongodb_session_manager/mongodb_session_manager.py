@@ -403,17 +403,18 @@ class MongoDBSessionManager(RepositorySessionManager):
     
     def _apply_feedback_hook(self, hook: Callable) -> None:
         """Apply the feedback hook as a decorator to feedback methods.
-        
+
         The hook will be called with:
         - original_func: The original method being wrapped
         - action: "add" (only action for feedback)
         - session_id: The current session ID
-        - **kwargs: Additional arguments (feedback object)
+        - **kwargs: Additional arguments (feedback object, session_manager instance)
         """
         # Wrap add_feedback
         original_add = self.add_feedback
         def wrapped_add(feedback: Dict[str, Any]) -> None:
-            return hook(original_add, "add", self.session_id, feedback=feedback)
+            return hook(original_add, "add", self.session_id,
+                       session_manager=self, feedback=feedback)
         self.add_feedback = wrapped_add
     
     def add_feedback(self, feedback: Dict[str, Any]) -> None:

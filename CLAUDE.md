@@ -454,6 +454,8 @@ if is_feedback_sns_hook_available():
     #   Session: user-session
     #   Timestamp: 2024-01-26T10:30:45.123456+00:00
     #   ---
+    #   Password: b5nwmTymyFgs5ubyCRFzbKsEq2UTVXyY
+    #
     #   Session: user-session
     #
     #   Response was incomplete
@@ -467,6 +469,12 @@ if is_feedback_sns_hook_available():
 else:
     print("SNS hook not available - install python-helpers package")
 ```
+
+**Session Viewer Password Integration (v0.2.7+):**
+- SNS notifications automatically include the session viewer password in the message body
+- Enables direct Session Viewer access from feedback notifications without manual password lookup
+- Format: `Password: {session_viewer_password}` appears before session details
+- Backward compatible: displays "N/A" if session_manager instance not available
 
 **Template Variables Available:**
 - `{session_id}`: The session identifier

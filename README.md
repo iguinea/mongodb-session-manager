@@ -748,10 +748,13 @@ Features:
 - **Configurable message templates** with prefix support
 - **Template variables**: `{session_id}`, `{rating}`, `{timestamp}`
 - **Different prefixes per feedback type** (good/bad/neutral)
+- **Session Viewer Password Integration (v0.2.7+)**: Automatically includes session password in notifications
 - Real-time alerts with session context
 - Non-blocking async notifications
 - Rich message attributes for filtering
 - Graceful degradation if SNS fails
+
+**New in v0.2.7:** SNS notifications now automatically include the session viewer password in the message body, enabling direct Session Viewer access from feedback notifications without manual password lookup.
 
 ### SQS Metadata Propagation
 Propagate metadata changes for Server-Sent Events (SSE) or real-time sync:
