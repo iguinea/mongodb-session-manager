@@ -424,6 +424,19 @@ class MongoDBSessionManager(RepositorySessionManager):
         """Get all feedbacks for the session."""
         return self.session_repository.get_feedbacks(self.session_id)
 
+    def get_session_viewer_password(self) -> Optional[str]:
+        """Get the session viewer password for this session.
+
+        Returns:
+            The session viewer password string, or None if session not found
+
+        Example:
+            password = session_manager.get_session_viewer_password()
+            if password:
+                print(f"Session Viewer URL: http://localhost:8883?session_id={session_id}&password={password}")
+        """
+        return self.session_repository.get_session_viewer_password(self.session_id)
+
     def get_agent_config(self, agent_id: str) -> Optional[Dict[str, Any]]:
         """Get configuration (model and system_prompt) for a specific agent.
 

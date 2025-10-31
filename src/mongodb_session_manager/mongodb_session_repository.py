@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import json
 import logging
+import secrets
 from datetime import UTC, datetime
 from typing import Any, Dict, List, Optional
 
@@ -82,6 +82,7 @@ class MongoDBSessionRepository(SessionRepository):
             "_id": "session-id",
             "session_id": "session-id",
             "session_type": "default",
+            "session_viewer_password": "abc123...xyz789",
             "created_at": ISODate(),
             "updated_at": ISODate(),
             "metadata": {
@@ -106,6 +107,8 @@ class MongoDBSessionRepository(SessionRepository):
             }
         }
         ```
+
+        Note: session_viewer_password is automatically generated (32-char alphanumeric) on session creation.
 
     Example:
         ```python
@@ -197,11 +200,20 @@ class MongoDBSessionRepository(SessionRepository):
             logger.warning(f"Failed to create indexes: {e}")
 
     def create_session(self, session: Session, **kwargs: Any) -> Session:
-        """Create a new Session in MongoDB."""
+        """Create a new Session in MongoDB.
+
+        Automatically generates a secure 32-character alphanumeric password
+        for session viewer access stored in session_viewer_password field.
+        """
+        # Generate secure 32-character alphanumeric password
+        # secrets.token_urlsafe(24) generates ~32 chars in base64url encoding
+        session_viewer_password = secrets.token_urlsafe(24)
+
         session_doc = {
             "_id": session.session_id,
             "session_id": session.session_id,
             "session_type": session.session_type,
+            "session_viewer_password": session_viewer_password,
             "created_at": datetime.now(UTC),
             "updated_at": datetime.now(UTC),
             "agents": {},
@@ -215,7 +227,7 @@ class MongoDBSessionRepository(SessionRepository):
 
         try:
             self.collection.insert_one(session_doc)
-            logger.info(f"Created session: {session.session_id}")
+            logger.info(f"Created session: {session.session_id} with viewer password")
         except PyMongoError as e:
             logger.error(f"Failed to create session {session.session_id}: {e}")
             raise
@@ -655,12 +667,45 @@ class MongoDBSessionRepository(SessionRepository):
                 {"_id": session_id},
                 {"feedbacks": 1}
             )
-            
+
             if not doc:
                 logger.debug(f"Session not found: {session_id}")
                 return []
-            
+
             return doc.get("feedbacks", [])
         except PyMongoError as e:
             logger.error(f"Failed to get feedbacks for session {session_id}: {e}")
+            raise
+
+    def get_session_viewer_password(self, session_id: str) -> Optional[str]:
+        """Get the session viewer password for the session.
+
+        Args:
+            session_id: The session ID to retrieve the password for
+
+        Returns:
+            The session viewer password string, or None if session not found
+
+        Raises:
+            PyMongoError: If database operation fails
+        """
+        try:
+            doc = self.collection.find_one(
+                {"_id": session_id},
+                {"session_viewer_password": 1}
+            )
+
+            if not doc:
+                logger.debug(f"Session not found: {session_id}")
+                return None
+
+            password = doc.get("session_viewer_password")
+            if password:
+                logger.debug(f"Retrieved viewer password for session {session_id}")
+            else:
+                logger.warning(f"Session {session_id} has no viewer password (legacy session?)")
+
+            return password
+        except PyMongoError as e:
+            logger.error(f"Failed to get viewer password for session {session_id}: {e}")
             raise

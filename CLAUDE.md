@@ -169,7 +169,7 @@ mongodb-session-manager/
 Sessions are stored as single documents with embedded agents and messages:
 - Collection: Configurable (defaults to `collection_name` parameter)
 - Document structure:
-  - Root: session document with `_id`, `session_id`, `session_type`, timestamps
+  - Root: session document with `_id`, `session_id`, `session_type`, `session_viewer_password`, timestamps
   - Agents: Nested under `agents` object, keyed by agent_id
     - **agent_data**: Contains agent_id, state, conversation_manager_state, **model**, **system_prompt**, timestamps
   - Messages: Array within each agent, with auto-incrementing message_id
@@ -178,6 +178,7 @@ Sessions are stored as single documents with embedded agents and messages:
 - Indexes: Automatically created on `created_at` and `updated_at` fields
 
 **New in v0.1.14**: `model` and `system_prompt` fields in agent_data for configuration persistence
+**New in v0.2.6**: `session_viewer_password` field automatically generated (32-char alphanumeric) for session viewer access control
 
 ### Key Design Decisions
 

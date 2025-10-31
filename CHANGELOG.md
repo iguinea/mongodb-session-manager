@@ -7,6 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.6] - 2025-10-31
+
+### Added
+- **Session Viewer Password**: Automatic password generation for session viewer access control
+  - New `session_viewer_password` field automatically generated on session creation
+  - 32-character alphanumeric password using `secrets.token_urlsafe(24)` for cryptographic security
+  - New `get_session_viewer_password()` method in both `MongoDBSessionRepository` and `MongoDBSessionManager`
+  - Password stored at document root level (same level as `session_id`, `created_at`, etc.)
+  - Backward compatible: legacy sessions without password return `None` with warning log
+  - Designed for Session Viewer authentication to control access to sensitive conversation data
+
+### Changed
+- **MongoDB Schema**: Extended document structure with `session_viewer_password` field
+  - Field added automatically during `create_session()` operation
+  - Password persists across session reloads (not regenerated)
+  - Updated schema documentation in both `CLAUDE.md` and repository docstrings
+
+### Technical Details
+- **File**: `src/mongodb_session_manager/mongodb_session_repository.py`
+  - Added `import secrets` for cryptographic random generation
+  - Modified `create_session()` to generate and store password
+  - Added `get_session_viewer_password()` method with error handling
+- **File**: `src/mongodb_session_manager/mongodb_session_manager.py`
+  - Added `get_session_viewer_password()` wrapper method
+  - Included example usage in docstring
+- **Security**: Uses `secrets` module (not `random`) for cryptographically strong passwords
+- **Format**: Base64 URL-safe encoding (alphanumeric + `-_` characters)
+
+### Use Cases
+- Session Viewer authentication: restrict access to specific sessions
+- Shareable session links with password protection
+- API access control for session data
+- Multi-tenant session isolation
+
+### Example Usage
+```python
+# Create session (password auto-generated)
+session_manager = create_mongodb_session_manager(
+    session_id="user-session",
+    connection_string="mongodb://localhost:27017/"
+)
+
+# Retrieve password for Session Viewer link
+password = session_manager.get_session_viewer_password()
+print(f"Session Viewer URL: http://localhost:8883?session_id=user-session&password={password}")
+```
+
+## [0.2.5] - 2025-10-29
+
+### Changed
+- **SNS Message Publishing**: Moved `publish_message` function to new `utils_sns` module
+  - Refactored for better modularity and code organization
+  - Improved management of AWS SNS interactions
+  - No breaking changes to existing API
+
 ## [0.2.4] - 2025-10-29
 
 ### Fixed
