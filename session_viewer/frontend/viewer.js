@@ -76,9 +76,28 @@ class APIClient {
 
   /**
    * Get session detail by ID
+   * Optional sessionPasswordHash for session-specific authentication
    */
-  async getSessionDetail(sessionId) {
-    const response = await this.axios.get(`/sessions/${sessionId}`);
+  async getSessionDetail(sessionId, sessionPasswordHash = null) {
+    const headers = {};
+
+    if (sessionPasswordHash) {
+      headers['X-Session-Password'] = sessionPasswordHash;
+    }
+
+    const response = await this.axios.get(`/sessions/${sessionId}`, { headers });
+    return response.data;
+  }
+
+  /**
+   * Check password for specific session
+   * Returns {valid: bool, used_global: bool}
+   */
+  async checkSessionPassword(sessionId, passwordHash) {
+    const response = await this.axios.post(
+      `/sessions/${sessionId}/check_password`,
+      { password_hash: passwordHash }
+    );
     return response.data;
   }
 }
@@ -614,6 +633,7 @@ class SessionViewer {
   constructor() {
     this.apiClient = new APIClient();
     this.currentFilters = null;
+    this.sessionPasswordCache = {}; // Cache session passwords by session_id
 
     this.init();
   }
@@ -648,6 +668,73 @@ class SessionViewer {
 
     // Check URL parameters for direct session loading
     this.checkURLParameters();
+  }
+
+  /**
+   * Prompt user for session-specific password
+   * Returns Promise that resolves with password hash when validated
+   */
+  async promptSessionPassword(sessionId) {
+    return new Promise((resolve, reject) => {
+      const modal = document.getElementById('session-password-modal');
+      const form = document.getElementById('session-password-form');
+      const input = document.getElementById('session-password-input');
+      const error = document.getElementById('session-password-error');
+      const sessionIdDisplay = document.getElementById('session-password-session-id');
+
+      // Show session ID in modal
+      sessionIdDisplay.textContent = `Session ID: ${sessionId}`;
+
+      // Show modal
+      modal.style.display = 'flex';
+      input.value = '';
+      error.style.display = 'none';
+      input.focus();
+
+      // Handle form submission
+      form.onsubmit = async (e) => {
+        e.preventDefault();
+        const password = input.value;
+
+        if (!password) {
+          error.textContent = 'Por favor ingrese la contraseña';
+          error.style.display = 'block';
+          return;
+        }
+
+        const hash = sha256(password);
+
+        try {
+          // Validate against backend
+          const response = await this.apiClient.checkSessionPassword(sessionId, hash);
+
+          if (response.valid) {
+            // Store in cache
+            this.sessionPasswordCache[sessionId] = hash;
+
+            // Hide modal
+            modal.style.display = 'none';
+
+            // Log if global password was used
+            if (response.used_global) {
+              console.log(`Session ${sessionId}: Authenticated with global password (legacy fallback)`);
+            } else {
+              console.log(`Session ${sessionId}: Authenticated with session-specific password`);
+            }
+
+            resolve(hash);
+          } else {
+            error.textContent = 'Contraseña incorrecta';
+            error.style.display = 'block';
+            input.select();
+          }
+        } catch (err) {
+          console.error('Error validating session password:', err);
+          error.textContent = 'Error al validar contraseña. Intente nuevamente.';
+          error.style.display = 'block';
+        }
+      };
+    });
   }
 
   /**
@@ -770,9 +857,41 @@ class SessionViewer {
     this.sessionDetail.showLoading();
 
     try {
-      const sessionData = await this.apiClient.getSessionDetail(sessionId);
+      // Check if we already have global authentication (X-Password header)
+      const hasGlobalAuth = axios.defaults.headers.common['X-Password'];
+
+      // Get cached session password (if any)
+      let sessionPasswordHash = this.sessionPasswordCache[sessionId];
+
+      // Only prompt for session password if:
+      // - No global auth AND no cached session password
+      // This prevents unnecessary modal when user already authenticated globally
+      if (!hasGlobalAuth && !sessionPasswordHash) {
+        sessionPasswordHash = await this.promptSessionPassword(sessionId);
+      }
+
+      // Call API with optional session password
+      // If sessionPasswordHash is null/undefined, axios will send X-Password instead
+      const sessionData = await this.apiClient.getSessionDetail(
+        sessionId,
+        sessionPasswordHash  // null when using global auth
+      );
+
       this.sessionDetail.render(sessionData);
     } catch (error) {
+      if (error.response?.status === 403) {
+        // Global auth failed - prompt for session-specific password
+        delete this.sessionPasswordCache[sessionId];
+
+        console.log('Global authentication failed, requesting session-specific password');
+
+        // Show modal for session password
+        const sessionPasswordHash = await this.promptSessionPassword(sessionId);
+
+        // Retry with session password
+        return this.handleSessionSelect(sessionId);
+      }
+
       console.error('Error loading session:', error);
       alert('Error al cargar la sesión. Por favor, intenta de nuevo.');
       this.sessionDetail.hide();

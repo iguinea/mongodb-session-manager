@@ -119,7 +119,12 @@ app.add_middleware(
 
 @app.middleware("http")
 async def password_middleware(request: Request, call_next):
-    """Validate password for all requests except /health and /check_password."""
+    """Validate password for all requests except /health and /check_password endpoints.
+
+    Special handling for session detail endpoint:
+    - If X-Session-Password header is present, skip global password validation
+    - Session-specific validation will be handled by the endpoint itself
+    """
     # Allow OPTIONS requests (CORS preflight) to pass through
     if request.method == "OPTIONS":
         return await call_next(request)
@@ -127,10 +132,29 @@ async def password_middleware(request: Request, call_next):
     # Exclude authentication endpoints
     excluded_paths = ["/health", "/api/v1/check_password"]
 
+    # Check if path matches session-specific password check endpoint
+    # Pattern: /api/v1/sessions/{session_id}/check_password
+    if request.url.path.startswith("/api/v1/sessions/") and request.url.path.endswith("/check_password"):
+        return await call_next(request)
+
     if request.url.path in excluded_paths:
         return await call_next(request)
 
-    # Validate X-Password header
+    # Special handling for session detail endpoint with session-specific password
+    # Pattern: GET /api/v1/sessions/{session_id}
+    if request.method == "GET" and request.url.path.startswith("/api/v1/sessions/"):
+        # Check if this is the detail endpoint (not search)
+        # Path format: /api/v1/sessions/{session_id} (no trailing slash or additional segments)
+        path_parts = request.url.path.rstrip('/').split('/')
+        if len(path_parts) == 5:  # ['', 'api', 'v1', 'sessions', '{session_id}']
+            # Check if X-Session-Password header is present
+            session_password_hash = request.headers.get("X-Session-Password")
+            if session_password_hash:
+                # Allow request to proceed - validation will happen in endpoint
+                logger.info(f"Session detail request with X-Session-Password, bypassing global auth")
+                return await call_next(request)
+
+    # Validate X-Password header (global password)
     password_hash = request.headers.get("X-Password")
 
     if not password_hash:
@@ -150,6 +174,63 @@ async def password_middleware(request: Request, call_next):
         )
 
     return await call_next(request)
+
+
+# ============================================================================
+# Session Password Validation
+# ============================================================================
+
+async def validate_session_password(
+    collection,
+    session_id: str,
+    password_hash: str,
+    global_password_hash: str
+) -> dict:
+    """
+    Validate password against:
+    1. session_viewer_password of the specific session
+    2. BACKEND_PASSWORD global (fallback for legacy sessions)
+
+    Args:
+        collection: MongoDB collection instance
+        session_id: The session ID to validate against
+        password_hash: SHA-256 hash of the password to validate
+        global_password_hash: SHA-256 hash of the global BACKEND_PASSWORD
+
+    Returns:
+        dict: {"valid": bool, "used_global": bool}
+            - valid: True if password is correct
+            - used_global: True if global password was used (legacy fallback)
+    """
+    try:
+        # 1. Try to get session-specific password from MongoDB
+        session_doc = collection.find_one(
+            {"_id": session_id},
+            {"session_viewer_password": 1}
+        )
+
+        if session_doc and "session_viewer_password" in session_doc:
+            session_password = session_doc["session_viewer_password"]
+
+            # Hash session password and compare
+            session_hash = hashlib.sha256(session_password.encode()).hexdigest()
+
+            if password_hash == session_hash:
+                logger.info(f"Session {session_id}: Authenticated with session-specific password")
+                return {"valid": True, "used_global": False}
+
+        # 2. Fallback to global password (for legacy sessions without session_viewer_password)
+        if password_hash == global_password_hash:
+            logger.info(f"Session {session_id}: Authenticated with global password (legacy fallback)")
+            return {"valid": True, "used_global": True}
+
+        # 3. Both failed
+        logger.warning(f"Session {session_id}: Password validation failed")
+        return {"valid": False, "used_global": False}
+
+    except Exception as e:
+        logger.error(f"Error validating session password for {session_id}: {e}")
+        return {"valid": False, "used_global": False}
 
 
 # ============================================================================
@@ -608,8 +689,12 @@ async def search_sessions(
 
 
 @app.get("/api/v1/sessions/{session_id}", response_model=SessionDetail)
-async def get_session_detail(session_id: str):
+async def get_session_detail(session_id: str, request: Request):
     """Get complete session detail with unified timeline.
+
+    Supports session-specific password validation via X-Session-Password header.
+    If provided, validates against session's session_viewer_password field,
+    with fallback to global BACKEND_PASSWORD for legacy sessions.
 
     Returns:
     - Session metadata
@@ -618,6 +703,34 @@ async def get_session_detail(session_id: str):
     """
     try:
         collection = app.state.collection
+
+        # Check for session-specific password header
+        session_password_hash = request.headers.get("X-Session-Password")
+
+        if session_password_hash:
+            # Validate session-specific password
+            global_password = settings.backend_password
+            global_hash = hashlib.sha256(global_password.encode()).hexdigest()
+
+            validation = await validate_session_password(
+                collection,
+                session_id,
+                session_password_hash,
+                global_hash
+            )
+
+            if not validation["valid"]:
+                logger.warning(f"Invalid session password for {session_id}")
+                raise HTTPException(
+                    status_code=403,
+                    detail="Invalid session password"
+                )
+
+            logger.info(
+                f"Session {session_id} accessed with "
+                f"{'global password (legacy fallback)' if validation['used_global'] else 'session-specific password'}"
+            )
+        # If no X-Session-Password header, rely on global password validation from middleware
 
         # Find session document
         session_doc = collection.find_one({"_id": session_id})
@@ -767,6 +880,72 @@ async def check_password(request: Dict[str, Any]):
     except Exception as e:
         logger.error(f"Error checking password: {e}")
         return {"valid": False}
+
+
+@app.post("/api/v1/sessions/{session_id}/check_password")
+async def check_session_password(session_id: str, request: Dict[str, Any]):
+    """Validate password for a specific session.
+
+    Validates against:
+    1. Session-specific password (session_viewer_password field)
+    2. Global BACKEND_PASSWORD (fallback for legacy sessions)
+
+    This endpoint does NOT require global authentication (excluded from middleware).
+
+    Args:
+        session_id: The session ID to validate against
+        request: Dictionary with "password_hash" key containing SHA-256 hash
+
+    Returns:
+        {
+            "valid": bool,
+            "used_global": bool  # True if global password was used as fallback
+        }
+
+    Example:
+        POST /api/v1/sessions/abc123/check_password
+        {
+            "password_hash": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8"
+        }
+
+        Response:
+        {
+            "valid": true,
+            "used_global": false  # Session-specific password was used
+        }
+    """
+    try:
+        password_hash = request.get("password_hash")
+
+        if not password_hash:
+            logger.warning(f"No password_hash in request for session {session_id}")
+            return {"valid": False, "used_global": False}
+
+        # Get MongoDB collection
+        collection = app.state.collection
+
+        # Generate global password hash for fallback
+        global_password = settings.backend_password
+        global_hash = hashlib.sha256(global_password.encode()).hexdigest()
+
+        # Validate against session password (with global fallback)
+        result = await validate_session_password(
+            collection,
+            session_id,
+            password_hash,
+            global_hash
+        )
+
+        logger.info(
+            f"Session {session_id} password check: "
+            f"valid={result['valid']}, used_global={result['used_global']}"
+        )
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Error checking session password for {session_id}: {e}")
+        return {"valid": False, "used_global": False}
 
 
 # ============================================================================
