@@ -214,20 +214,51 @@ class MongoDBSessionManager(RepositorySessionManager):
         super().redact_latest_message(redact_message, agent, **kwargs)
 
     def sync_agent(self, agent: Agent, **kwargs: Any) -> None:
-        """Sync agent data and capture model/system_prompt."""
+        """Sync agent data and capture model/system_prompt.
+
+        Captures comprehensive metrics from the agent's event loop including:
+        - Token usage (input, output, total, cache read/write)
+        - Performance metrics (latency, time to first byte)
+        - Cycle metrics (count, durations, averages)
+        - Tool metrics (call counts, success/error rates, execution times)
+        """
         super().sync_agent(agent, **kwargs)
 
-        _latencyMs = agent.event_loop_metrics.accumulated_metrics["latencyMs"]
-        _inputTokens = agent.event_loop_metrics.accumulated_usage["inputTokens"]
-        _outputTokens = agent.event_loop_metrics.accumulated_usage["outputTokens"]
-        _totalTokens = agent.event_loop_metrics.accumulated_usage["totalTokens"]
+        # Get metrics using get_summary() for comprehensive data
+        metrics_summary = agent.event_loop_metrics.get_summary()
+
+        # Extract token usage metrics
+        accumulated_usage = metrics_summary.get("accumulated_usage", {})
+        _inputTokens = accumulated_usage.get("inputTokens", 0)
+        _outputTokens = accumulated_usage.get("outputTokens", 0)
+        _totalTokens = accumulated_usage.get("totalTokens", 0)
         # Cache metrics for AWS Bedrock prompt caching (optional, backwards compatible)
-        _cacheReadInputTokens = agent.event_loop_metrics.accumulated_usage.get(
-            "cacheReadInputTokens", 0
-        )
-        _cacheWriteInputTokens = agent.event_loop_metrics.accumulated_usage.get(
-            "cacheWriteInputTokens", 0
-        )
+        _cacheReadInputTokens = accumulated_usage.get("cacheReadInputTokens", 0)
+        _cacheWriteInputTokens = accumulated_usage.get("cacheWriteInputTokens", 0)
+
+        # Extract performance metrics
+        accumulated_metrics = metrics_summary.get("accumulated_metrics", {})
+        _latencyMs = accumulated_metrics.get("latencyMs", 0)
+        _timeToFirstByteMs = accumulated_metrics.get("timeToFirstByteMs", 0)
+
+        # Extract cycle metrics
+        _cycle_count = metrics_summary.get("total_cycles", 0)
+        _total_duration = metrics_summary.get("total_duration", 0.0)
+        _average_cycle_time = metrics_summary.get("average_cycle_time", 0.0)
+
+        # Extract tool metrics (simplified structure for storage)
+        tool_usage_raw = metrics_summary.get("tool_usage", {})
+        _tool_usage = {}
+        for tool_name, tool_data in tool_usage_raw.items():
+            exec_stats = tool_data.get("execution_stats", {})
+            _tool_usage[tool_name] = {
+                "call_count": exec_stats.get("call_count", 0),
+                "success_count": exec_stats.get("success_count", 0),
+                "error_count": exec_stats.get("error_count", 0),
+                "total_time": exec_stats.get("total_time", 0.0),
+                "average_time": exec_stats.get("average_time", 0.0),
+                "success_rate": exec_stats.get("success_rate", 0.0),
+            }
 
         if _latencyMs > 0:
 
@@ -245,6 +276,7 @@ class MongoDBSessionManager(RepositorySessionManager):
                     update_data = {
                         f"agents.{agent.agent_id}.messages.$.event_loop_metrics.accumulated_metrics": {
                             "latencyMs": _latencyMs,
+                            "timeToFirstByteMs": _timeToFirstByteMs,
                         },
                         f"agents.{agent.agent_id}.messages.$.event_loop_metrics.accumulated_usage": {
                             "inputTokens": _inputTokens,
@@ -253,6 +285,12 @@ class MongoDBSessionManager(RepositorySessionManager):
                             "cacheReadInputTokens": _cacheReadInputTokens,
                             "cacheWriteInputTokens": _cacheWriteInputTokens,
                         },
+                        f"agents.{agent.agent_id}.messages.$.event_loop_metrics.cycle_metrics": {
+                            "cycle_count": _cycle_count,
+                            "total_duration": _total_duration,
+                            "average_cycle_time": _average_cycle_time,
+                        },
+                        f"agents.{agent.agent_id}.messages.$.event_loop_metrics.tool_usage": _tool_usage,
                     }
                     self.session_repository.collection.update_one(
                         {

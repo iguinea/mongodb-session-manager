@@ -402,16 +402,74 @@ function renderTimelineMessage(item) {
   if (item.metrics) {
     const metrics = document.createElement('div');
     metrics.className = `mt-2 pt-2 border-t ${isUser ? 'border-primary-500' : 'border-gray-200'}`;
-    metrics.innerHTML = `
-      <div class="flex items-center space-x-3 text-xs ${isUser ? 'text-primary-100' : 'text-gray-500'}">
-        <span title="Tokens">
-          🔢 ${Format.number(item.metrics.accumulated_usage?.totalTokens || 0)}
+
+    // Build metrics HTML with all available data
+    const usage = item.metrics.accumulated_usage || {};
+    const perfMetrics = item.metrics.accumulated_metrics || {};
+    const cycleMetrics = item.metrics.cycle_metrics || {};
+    const toolUsage = item.metrics.tool_usage || {};
+
+    // Calculate cache hit rate if cache metrics exist
+    const cacheRead = usage.cacheReadInputTokens || 0;
+    const cacheWrite = usage.cacheWriteInputTokens || 0;
+    const totalCacheable = cacheRead + cacheWrite;
+    const cacheHitRate = totalCacheable > 0 ? Math.round((cacheRead / totalCacheable) * 100) : null;
+
+    // Build tool usage summary
+    const toolNames = Object.keys(toolUsage);
+    const totalToolCalls = toolNames.reduce((sum, name) => sum + (toolUsage[name]?.call_count || 0), 0);
+    const totalToolErrors = toolNames.reduce((sum, name) => sum + (toolUsage[name]?.error_count || 0), 0);
+
+    // First row: Tokens and Latency
+    let metricsHTML = `
+      <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs ${isUser ? 'text-primary-100' : 'text-gray-500'}">
+        <span title="Total Tokens (in: ${Format.number(usage.inputTokens || 0)}, out: ${Format.number(usage.outputTokens || 0)})">
+          🔢 ${Format.number(usage.totalTokens || 0)}
         </span>
-        <span title="Latencia">
-          ⏱️ ${item.metrics.accumulated_metrics?.latencyMs || 0}ms
-        </span>
-      </div>
-    `;
+        <span title="Latencia total">
+          ⏱️ ${perfMetrics.latencyMs || 0}ms
+        </span>`;
+
+    // Add Time to First Byte if available
+    if (perfMetrics.timeToFirstByteMs) {
+      metricsHTML += `
+        <span title="Time to First Byte">
+          ⚡ TTFB: ${perfMetrics.timeToFirstByteMs}ms
+        </span>`;
+    }
+
+    // Add cache metrics if available
+    if (cacheHitRate !== null) {
+      const cacheIcon = cacheHitRate > 50 ? '✅' : '📝';
+      metricsHTML += `
+        <span title="Cache: ${Format.number(cacheRead)} read, ${Format.number(cacheWrite)} write">
+          ${cacheIcon} Cache: ${cacheHitRate}%
+        </span>`;
+    }
+
+    // Add cycle metrics if available
+    if (cycleMetrics.cycle_count) {
+      metricsHTML += `
+        <span title="Cycles: ${cycleMetrics.cycle_count}, Total: ${(cycleMetrics.total_duration || 0).toFixed(2)}s, Avg: ${(cycleMetrics.average_cycle_time || 0).toFixed(2)}s">
+          🔄 ${cycleMetrics.cycle_count} cycle${cycleMetrics.cycle_count > 1 ? 's' : ''}
+        </span>`;
+    }
+
+    // Add tool usage summary if available
+    if (totalToolCalls > 0) {
+      const toolIcon = totalToolErrors > 0 ? '⚠️' : '🔧';
+      const toolTitle = toolNames.map(name => {
+        const t = toolUsage[name];
+        return `${name}: ${t.call_count} calls (${t.success_count}✓ ${t.error_count}✗) ${t.average_time?.toFixed(2) || 0}s avg`;
+      }).join('\\n');
+      metricsHTML += `
+        <span title="${toolTitle}">
+          ${toolIcon} ${totalToolCalls} tool${totalToolCalls > 1 ? 's' : ''}${totalToolErrors > 0 ? ` (${totalToolErrors} err)` : ''}
+        </span>`;
+    }
+
+    metricsHTML += `</div>`;
+    metrics.innerHTML = metricsHTML;
     bubble.appendChild(metrics);
   }
 

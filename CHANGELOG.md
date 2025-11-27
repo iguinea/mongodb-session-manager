@@ -7,6 +7,81 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2025-11-27
+
+### Added
+- **Comprehensive Metrics Capture**: `sync_agent()` now uses `get_summary()` from Strands SDK for complete metrics extraction
+  - **Performance Metrics**:
+    - `timeToFirstByteMs`: Time to first byte latency (streaming performance indicator)
+  - **Cycle Metrics** (new `cycle_metrics` field):
+    - `cycle_count`: Number of event loop cycles executed
+    - `total_duration`: Total duration of all cycles (seconds)
+    - `average_cycle_time`: Average time per cycle (seconds)
+  - **Tool Usage Metrics** (new `tool_usage` field):
+    - Per-tool statistics: `call_count`, `success_count`, `error_count`
+    - Performance: `total_time`, `average_time`
+    - Success rate: `success_rate` (0.0 to 1.0)
+
+### Changed
+- **Metrics Extraction Method**: Refactored from direct property access to `agent.event_loop_metrics.get_summary()`
+  - More robust and future-proof approach
+  - Automatically captures all available metrics from Strands SDK
+  - Simplified code structure with centralized metric extraction
+- **Session Viewer Frontend**: Enhanced metrics display in timeline
+  - Shows cache hit rate percentage with visual indicator (✅ >50%, 📝 ≤50%)
+  - Shows Time to First Byte (TTFB) when available
+  - Shows cycle count with hover details
+  - Shows tool usage summary with per-tool details on hover
+  - Improved token display with input/output breakdown on hover
+
+### Technical Details
+- **MongoDB Schema**: Extended `event_loop_metrics` structure:
+  ```json
+  {
+    "event_loop_metrics": {
+      "accumulated_metrics": {
+        "latencyMs": 1500,
+        "timeToFirstByteMs": 250
+      },
+      "accumulated_usage": {
+        "inputTokens": 500,
+        "outputTokens": 200,
+        "totalTokens": 700,
+        "cacheReadInputTokens": 450,
+        "cacheWriteInputTokens": 50
+      },
+      "cycle_metrics": {
+        "cycle_count": 3,
+        "total_duration": 4.5,
+        "average_cycle_time": 1.5
+      },
+      "tool_usage": {
+        "search_documents": {
+          "call_count": 5,
+          "success_count": 4,
+          "error_count": 1,
+          "total_time": 2.5,
+          "average_time": 0.5,
+          "success_rate": 0.8
+        }
+      }
+    }
+  }
+  ```
+- **Test Updates**: Comprehensive test suite in `test_cache_metrics.py` covering all new metrics
+- **Backwards Compatible**: All new fields use `.get()` with defaults for older data
+
+### Benefits
+- ✅ **Tool Performance Analysis**: Identify slow or error-prone tools
+- ✅ **Conversation Complexity**: Understand cycle patterns in multi-turn interactions
+- ✅ **Streaming Performance**: Monitor time-to-first-byte for UX optimization
+- ✅ **Cost Analysis**: Better token tracking including cache efficiency
+- ✅ **Debug Support**: Detailed per-message metrics for troubleshooting
+
+### References
+- [Strands Agents Metrics Documentation](https://strandsagents.com/latest/documentation/docs/user-guide/observability-evaluation/metrics/)
+- [EventLoopMetrics.get_summary()](https://github.com/strands-agents/sdk-python/blob/main/src/strands/telemetry/metrics.py)
+
 ## [0.2.8] - 2025-11-27
 
 ### Added
