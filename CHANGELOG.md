@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2025-11-27
+
+### Fixed
+- **manage_metadata Tool Validation Error**: Fixed Pydantic validation error when LLM sends metadata/keys as JSON strings
+  - Changed type hints from `Dict[str, Any]` and `List[str]` to `Any` to bypass Strands SDK's strict Pydantic validation
+  - Added JSON parsing inside the function to handle both string and native types
+  - Error was: `Input should be a valid dictionary [type=dict_type, input_value='{"..."}'`
+  - Root cause: LLMs sometimes serialize complex parameters as JSON strings instead of native objects
+
+### Technical Details
+- **File**: `src/mongodb_session_manager/mongodb_session_manager.py`
+  - Lines 372-376: Changed `metadata: Optional[Dict[str, Any]]` to `metadata: Optional[Any]`
+  - Lines 398-410: Added JSON parsing with error handling for both `metadata` and `keys` parameters
+- **Backwards Compatible**: Function still accepts native dict/list types as before
+
 ## [0.3.0] - 2025-11-27
 
 ### Added

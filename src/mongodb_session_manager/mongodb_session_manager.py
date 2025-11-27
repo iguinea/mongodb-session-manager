@@ -371,8 +371,8 @@ class MongoDBSessionManager(RepositorySessionManager):
         )
         def manage_metadata(
             action: str,
-            metadata: Optional[Dict[str, Any]] = None,
-            keys: Optional[List[str]] = None,
+            metadata: Optional[Any] = None,
+            keys: Optional[Any] = None,
         ) -> str:
             """
             Manage session metadata with get, set/update, or delete operations.
@@ -394,6 +394,20 @@ class MongoDBSessionManager(RepositorySessionManager):
             """
             try:
                 action = action.lower()
+
+                # Handle case where model sends metadata as JSON string instead of dict
+                if metadata is not None and isinstance(metadata, str):
+                    try:
+                        metadata = json.loads(metadata)
+                    except json.JSONDecodeError:
+                        return f"Error: metadata must be a valid JSON object, got: {metadata[:100]}..."
+
+                # Handle case where model sends keys as JSON string instead of list
+                if keys is not None and isinstance(keys, str):
+                    try:
+                        keys = json.loads(keys)
+                    except json.JSONDecodeError:
+                        return f"Error: keys must be a valid JSON array, got: {keys[:100]}..."
 
                 if action == "get":
                     # Retrieve metadata
