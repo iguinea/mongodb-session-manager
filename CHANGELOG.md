@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.8] - 2025-11-27
+
+### Added
+- **AWS Bedrock Prompt Caching Metrics**: `sync_agent()` now extracts and stores cache metrics from Strands Agent
+  - `cacheReadInputTokens`: Tokens read from cache (cache HIT)
+  - `cacheWriteInputTokens`: Tokens written to cache (cache MISS)
+  - Uses `.get()` with default 0 for backwards compatibility with older Strands versions
+  - Enables Session Viewer to display cache hit/miss rates
+
+### Technical Details
+- **File**: `src/mongodb_session_manager/mongodb_session_manager.py:224-230`
+  - Added extraction of `cacheReadInputTokens` and `cacheWriteInputTokens` from `agent.event_loop_metrics.accumulated_usage`
+  - Updated `update_data` dict to include cache metrics in MongoDB document
+- **New Test**: `test_cache_metrics.py`
+  - Unit tests for cache metrics extraction
+  - Tests for backwards compatibility when cache metrics are not present
+  - Tests for cache hit rate calculation
+
+### References
+- [AWS Bedrock Prompt Caching](https://docs.aws.amazon.com/bedrock/latest/userguide/prompt-caching.html)
+- [Strands Agents - Bedrock Caching](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/model-providers/amazon-bedrock/#caching)
+
 ## [0.2.7] - 2025-10-31
 
 ### Added

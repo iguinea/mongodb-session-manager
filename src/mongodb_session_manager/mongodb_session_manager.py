@@ -221,6 +221,13 @@ class MongoDBSessionManager(RepositorySessionManager):
         _inputTokens = agent.event_loop_metrics.accumulated_usage["inputTokens"]
         _outputTokens = agent.event_loop_metrics.accumulated_usage["outputTokens"]
         _totalTokens = agent.event_loop_metrics.accumulated_usage["totalTokens"]
+        # Cache metrics for AWS Bedrock prompt caching (optional, backwards compatible)
+        _cacheReadInputTokens = agent.event_loop_metrics.accumulated_usage.get(
+            "cacheReadInputTokens", 0
+        )
+        _cacheWriteInputTokens = agent.event_loop_metrics.accumulated_usage.get(
+            "cacheWriteInputTokens", 0
+        )
 
         if _latencyMs > 0:
 
@@ -243,6 +250,8 @@ class MongoDBSessionManager(RepositorySessionManager):
                             "inputTokens": _inputTokens,
                             "outputTokens": _outputTokens,
                             "totalTokens": _totalTokens,
+                            "cacheReadInputTokens": _cacheReadInputTokens,
+                            "cacheWriteInputTokens": _cacheWriteInputTokens,
                         },
                     }
                     self.session_repository.collection.update_one(
