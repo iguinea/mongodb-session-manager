@@ -578,6 +578,32 @@ class MongoDBSessionManager(RepositorySessionManager):
             logger.error(f"Failed to list agents for session {self.session_id}: {e}")
             return []
 
+    def get_message_count(self, agent_id: str) -> int:
+        """Get the count of messages for a specific agent.
+
+        Args:
+            agent_id: ID of the agent to count messages for
+
+        Returns:
+            Number of messages, or 0 if agent doesn't exist
+
+        Example:
+            count = session_manager.get_message_count("assistant-1")
+            if count == 0:
+                print("This is the first interaction")
+        """
+        try:
+            doc = self.session_repository.collection.find_one(
+                {"_id": self.session_id},
+                {f"agents.{agent_id}.messages": 1}
+            )
+            if doc and "agents" in doc and agent_id in doc["agents"]:
+                return len(doc["agents"][agent_id].get("messages", []))
+            return 0
+        except Exception as e:
+            logger.error(f"Failed to get message count for {agent_id}: {e}")
+            return 0
+
 
 # Convenience factory function
 def create_mongodb_session_manager(
