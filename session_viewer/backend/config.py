@@ -5,7 +5,6 @@ providing defaults for development and requiring explicit configuration
 for production deployments.
 """
 
-import os
 from typing import List
 from pydantic_settings import BaseSettings
 

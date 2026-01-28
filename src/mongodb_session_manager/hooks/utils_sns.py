@@ -7,7 +7,7 @@ permitiendo publicar mensajes a tópicos, suscribir endpoints y gestionar notifi
 
 import json
 import os
-from typing import Optional, Dict, Any, List, Union
+from typing import Optional, Dict, Any, Union
 import boto3
 from botocore.exceptions import ClientError, NoCredentialsError
 

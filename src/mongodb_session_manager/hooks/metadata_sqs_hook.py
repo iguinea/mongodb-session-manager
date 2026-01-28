@@ -80,7 +80,7 @@ Use Cases:
     - **Event-driven Architecture**: Enable reactive systems based on session state
 
 Requirements:
-    - custom_aws.sqs module (from python-helpers package)
+    - boto3 package for AWS SDK
     - AWS credentials configured with SQS SendMessage permissions
     - Valid SQS queue URL with appropriate access policies
     - Queue should have appropriate visibility timeout and retention settings
@@ -111,10 +111,10 @@ from datetime import datetime
 from typing import Dict, Any, List
 
 try:
-    from custom_aws.sqs import send_message
+    from .utils_sqs import send_message
 except ImportError:
     logging.warning(
-        "custom_aws.sqs not available. Please install python-helpers package."
+        "utils_sqs not available. Please ensure boto3 is installed."
     )
     send_message = None
 
@@ -133,8 +133,8 @@ class MetadataSQSHook:
         """
         if not send_message:
             raise ImportError(
-                "custom_aws.sqs module not available. "
-                "Please install python-helpers package: pip install python-helpers"
+                "SQS utilities not available. "
+                "Please ensure boto3 is installed: pip install boto3"
             )
 
         self.queue_url = queue_url

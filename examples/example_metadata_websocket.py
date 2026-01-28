@@ -143,7 +143,7 @@ def demo_websocket_hook():
     print("   Each update will be sent to the WebSocket connection\n")
 
     # Create a simple agent
-    agent = Agent(
+    Agent(
         agent_id="demo-agent",
         model="eu.anthropic.claude-sonnet-4-20250514-v1:0",
         session_manager=session_manager,

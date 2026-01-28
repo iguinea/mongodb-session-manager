@@ -16,7 +16,6 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pymongo.errors import PyMongoError
 
 # Add parent directory to path to access src module
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -25,7 +24,6 @@ from mongodb_session_manager import (
     MongoDBConnectionPool,
     initialize_global_factory,
     close_global_factory,
-    get_global_factory,
 )
 
 from config import settings
@@ -151,7 +149,7 @@ async def password_middleware(request: Request, call_next):
             session_password_hash = request.headers.get("X-Session-Password")
             if session_password_hash:
                 # Allow request to proceed - validation will happen in endpoint
-                logger.info(f"Session detail request with X-Session-Password, bypassing global auth")
+                logger.info("Session detail request with X-Session-Password, bypassing global auth")
                 return await call_next(request)
 
     # Validate X-Password header (global password)

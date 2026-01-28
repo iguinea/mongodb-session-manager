@@ -1,0 +1,11 @@
+name: ✅ Task
+description: Tarea simple
+labels: ["task"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Descripción
+      description: Describe la tarea (opcional)
+    validations:
+      required: false

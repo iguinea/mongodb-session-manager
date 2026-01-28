@@ -1,0 +1,30 @@
+name: 📝 Documentation
+description: Mejoras o correcciones en la documentación
+labels: ["documentation"]
+body:
+  - type: dropdown
+    id: type
+    attributes:
+      label: Tipo de cambio
+      options:
+        - Corrección de error
+        - Información faltante
+        - Clarificación necesaria
+        - Nueva sección
+    validations:
+      required: true
+  - type: textarea
+    id: location
+    attributes:
+      label: Ubicación
+      description: Qué archivo o sección necesita cambios
+      placeholder: "README.md, sección de instalación"
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Cambio sugerido
+      description: Qué debería decir o añadirse
+    validations:
+      required: true

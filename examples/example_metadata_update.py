@@ -97,7 +97,7 @@ async def main():
 
         # Retrieve and display updated metadata
         metadata = session_manager.get_metadata()
-        print(f"\nFull metadata after update:")
+        print("\nFull metadata after update:")
         if metadata and "metadata" in metadata:
             for key, value in metadata["metadata"].items():
                 print(f"  {key}: {value}")
@@ -118,7 +118,7 @@ async def main():
 
         # Show complete metadata
         metadata = session_manager.get_metadata()
-        print(f"\nComplete metadata:")
+        print("\nComplete metadata:")
         if metadata and "metadata" in metadata:
             for key, value in metadata["metadata"].items():
                 print(
@@ -134,7 +134,7 @@ async def main():
 
         # Show final metadata
         metadata = session_manager.get_metadata()
-        print(f"\nFinal metadata after deletion:")
+        print("\nFinal metadata after deletion:")
         if metadata and "metadata" in metadata:
             for key, value in metadata["metadata"].items():
                 print(
@@ -148,7 +148,7 @@ async def main():
         response = await agent.invoke_async(
             "What's my priority level and who is assigned to help me?"
         )
-        print(f"User: What's my priority level and who is assigned to help me?")
+        print("User: What's my priority level and who is assigned to help me?")
         print(f"Agent: {response}")
 
         # Update metadata based on conversation

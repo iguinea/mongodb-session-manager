@@ -1,0 +1,32 @@
+name: ⚙️ Dev Environment
+description: Cambios en configuración de entorno de desarrollo (CI/CD, Claude Code, tooling)
+labels: ["dev-env"]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Área afectada
+      options:
+        - GitHub Actions / CI/CD
+        - Claude Code (plugins, hooks, commands)
+        - Docker / Contenedores
+        - asdf / .tool-versions
+        - Pre-commit hooks
+        - IDE / Editor config
+        - Otro
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Descripción del cambio
+      description: Qué cambio de configuración se necesita
+      placeholder: "Actualizar workflow de CI para añadir job de seguridad..."
+    validations:
+      required: true
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Motivación
+      description: Por qué se necesita este cambio
+      placeholder: "Actualmente no validamos vulnerabilidades en deps..."

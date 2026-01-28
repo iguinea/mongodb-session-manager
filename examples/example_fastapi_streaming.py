@@ -20,15 +20,13 @@ import asyncio
 import signal
 import sys
 
-from fastapi import FastAPI, Header, HTTPException, Depends, Request, Query
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from uvicorn.logging import DefaultFormatter
 from strands import Agent
-from typing import Optional
 from contextlib import asynccontextmanager
 from builtins import Exception, str, dict, print, max, min, KeyboardInterrupt
-from enum import Enum
 
 
 from session_context import set_session_context_id

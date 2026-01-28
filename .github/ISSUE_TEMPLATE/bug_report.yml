@@ -1,0 +1,39 @@
+name: 🐛 Bug Report
+description: Reportar un error o comportamiento inesperado
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: "Gracias por reportar este bug. Por favor, completa la información."
+  - type: textarea
+    id: description
+    attributes:
+      label: Descripción del bug
+      description: Describe claramente qué está fallando
+      placeholder: "Cuando hago X, ocurre Y en lugar de Z..."
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Pasos para reproducir
+      description: Lista los pasos para reproducir el problema
+      placeholder: |
+        1. Crear session manager con...
+        2. Llamar a sync_agent()...
+        3. Ver error
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Comportamiento esperado
+      description: Qué debería haber pasado
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Entorno
+      description: Sistema operativo, versión de Python, versión de MongoDB, etc.
+      placeholder: "OS: macOS 14.0, Python: 3.12.8, MongoDB: 7.0, strands-agents: 1.12.0"
