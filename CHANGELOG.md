@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2025-01-28
+
+### Changed
+- **Updated all dependencies to latest stable versions**:
+  - `boto3`: >=1.35.0 → >=1.42.0
+  - `fastapi`: >=0.116.1 → >=0.128.0
+  - `pydantic-settings`: >=2.11.0 → >=2.12.0
+  - `pymongo`: >=4.13.2 → >=4.16.0
+  - `strands-agents`: >=1.12.0 → >=1.23.0
+  - `strands-agents-tools`: >=0.2.11 → >=0.2.19
+  - `uvicorn`: >=0.37.0 → >=0.40.0
+  - `uvloop`: >=0.21.0 → >=0.22.0
+  - `pytest`: >=7.4.0 → >=8.0.0
+  - `pytest-cov`: >=4.1.0 → >=6.0.0
+  - `pytest-mock`: >=3.11.0 → >=3.14.0
+  - `pytest-asyncio`: >=0.21.0 → >=1.0.0
+
+### Documentation
+- Added Testing section to `CLAUDE.md` with MongoDB connection details
+
 ## [0.4.0] - 2025-01-28
 
 ### Changed
