@@ -71,12 +71,14 @@ cd session_viewer/frontend && make run  # Port 8883
 Sessions stored as single documents with embedded data:
 ```
 {
-  session_id, session_viewer_password, created_at, updated_at,
+  session_id, application_name, session_viewer_password, created_at, updated_at,
   agents: { agent_id: { agent_data: {model, system_prompt, state}, messages: [...] } },
   metadata: {...},
   feedbacks: [{rating, comment, created_at}]
 }
 ```
+
+**Note:** `application_name` is a top-level immutable field set at session creation. Use it to categorize sessions by application (e.g., "customer-support-bot", "sales-assistant").
 
 Messages include `event_loop_metrics` with: `accumulated_usage` (tokens, cache), `accumulated_metrics` (latency, TTFB), `cycle_metrics`, `tool_usage`
 
@@ -89,19 +91,33 @@ from mongodb_session_manager import create_mongodb_session_manager
 manager = create_mongodb_session_manager(
     session_id="test",
     connection_string="mongodb://...",
-    database_name="my_db"
+    database_name="my_db",
+    application_name="my-bot"  # Optional: categorize sessions
 )
+
+# Read application_name (immutable, read-only)
+app_name = manager.get_application_name()
 ```
 
 ### Factory Pattern (Recommended for FastAPI)
 ```python
 from mongodb_session_manager import initialize_global_factory, get_global_factory
 
-# At startup
-factory = initialize_global_factory(connection_string="mongodb://...", maxPoolSize=100)
+# At startup - set default application_name for all sessions
+factory = initialize_global_factory(
+    connection_string="mongodb://...",
+    application_name="my-fastapi-app",  # Default for all sessions
+    maxPoolSize=100
+)
 
-# Per request
+# Per request - uses factory default application_name
 manager = get_global_factory().create_session_manager(session_id)
+
+# Or override per session
+manager = get_global_factory().create_session_manager(
+    session_id,
+    application_name="special-app"  # Override factory default
+)
 ```
 
 ### Metadata Tool for Agents

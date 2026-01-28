@@ -146,6 +146,7 @@ class MongoDBSessionRepository(SessionRepository):
         collection_name: str = "collection_name",
         client: Optional[MongoClient] = None,
         metadata_fields: Optional[List[str]] = None,
+        application_name: Optional[str] = None,
         **kwargs: Any,
     ) -> None:
         """Initialize MongoDB Session Repository.
@@ -155,8 +156,10 @@ class MongoDBSessionRepository(SessionRepository):
             database_name: Name of the database
             collection_name: Name of the collection for sessions
             client: Optional pre-configured MongoClient to use
+            application_name: Application name for session categorization (immutable after creation)
             **kwargs: Additional arguments for MongoClient (ignored if client is provided)
         """
+        self.application_name = application_name
         if client is not None:
             # Use provided client
             self.client: MongoClient = client
@@ -194,6 +197,8 @@ class MongoDBSessionRepository(SessionRepository):
             if self.metadata_fields:
                 for field in self.metadata_fields:
                     self.collection.create_index("metadata." + field)
+            # Index on application_name for filtering sessions by application
+            self.collection.create_index("application_name")
 
             logger.info("MongoDB indexes created successfully")
         except PyMongoError as e:
@@ -212,6 +217,7 @@ class MongoDBSessionRepository(SessionRepository):
         session_doc = {
             "_id": session.session_id,
             "session_id": session.session_id,
+            "application_name": self.application_name,
             "session_type": session.session_type,
             "session_viewer_password": session_viewer_password,
             "created_at": datetime.now(UTC),
@@ -708,4 +714,33 @@ class MongoDBSessionRepository(SessionRepository):
             return password
         except PyMongoError as e:
             logger.error(f"Failed to get viewer password for session {session_id}: {e}")
+            raise
+
+    def get_application_name(self, session_id: str) -> Optional[str]:
+        """Get the application_name for the session (read-only).
+
+        The application_name is immutable and set at session creation time.
+
+        Args:
+            session_id: The session ID to retrieve the application name for
+
+        Returns:
+            The application name string, or None if session not found or not set
+
+        Raises:
+            PyMongoError: If database operation fails
+        """
+        try:
+            doc = self.collection.find_one(
+                {"_id": session_id},
+                {"application_name": 1}
+            )
+
+            if not doc:
+                logger.debug(f"Session not found: {session_id}")
+                return None
+
+            return doc.get("application_name")
+        except PyMongoError as e:
+            logger.error(f"Failed to get application_name for session {session_id}: {e}")
             raise

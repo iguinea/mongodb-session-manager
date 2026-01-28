@@ -104,6 +104,7 @@ class MongoDBSessionManager(RepositorySessionManager):
         metadata_fields: Optional[List[str]] = None,
         metadataHook: Optional[Callable[[Dict[str, Any]], None]] = None,
         feedbackHook: Optional[Callable[[Dict[str, Any]], None]] = None,
+        application_name: Optional[str] = None,
         **kwargs: Any,
     ) -> None:
         """Initialize Itzulbira Session Manager.
@@ -117,6 +118,7 @@ class MongoDBSessionManager(RepositorySessionManager):
             metadata_fields: List of fields to be indexed in the metadata
             metadataHook: Hook to be called when metadata is updated, deleted or retrieved
             feedbackHook: Hook to be called when feedback is added
+            application_name: Application name for session categorization (immutable after creation)
             **kwargs: Additional arguments passed to parent class and MongoClient
         """
         # Extract MongoDB client kwargs
@@ -156,6 +158,7 @@ class MongoDBSessionManager(RepositorySessionManager):
             collection_name=collection_name,
             client=client,
             metadata_fields=metadata_fields,
+            application_name=application_name,
             **mongo_kwargs,
         )
 
@@ -499,6 +502,21 @@ class MongoDBSessionManager(RepositorySessionManager):
         """
         return self.session_repository.get_session_viewer_password(self.session_id)
 
+    def get_application_name(self) -> Optional[str]:
+        """Get the application_name for this session (read-only, immutable).
+
+        The application_name is set at session creation time and cannot be modified.
+
+        Returns:
+            The application name string, or None if session not found or not set
+
+        Example:
+            app_name = session_manager.get_application_name()
+            if app_name:
+                print(f"Application: {app_name}")
+        """
+        return self.session_repository.get_application_name(self.session_id)
+
     def get_agent_config(self, agent_id: str) -> Optional[Dict[str, Any]]:
         """Get configuration (model and system_prompt) for a specific agent.
 
@@ -664,6 +682,7 @@ def create_mongodb_session_manager(
     database_name: str = "database_name",
     collection_name: str = "collection_name",
     client: Optional[MongoClient] = None,
+    application_name: Optional[str] = None,
     **kwargs: Any,
 ) -> MongoDBSessionManager:
     """Create an Itzulbira Session Manager with default settings.
@@ -674,6 +693,7 @@ def create_mongodb_session_manager(
         database_name: Name of the database
         collection_name: Name of the collection for sessions
         client: Optional pre-configured MongoClient to use
+        application_name: Application name for session categorization (immutable after creation)
         **kwargs: Additional arguments passed to MongoDBSessionManager
 
     Returns:
@@ -685,5 +705,6 @@ def create_mongodb_session_manager(
         database_name=database_name,
         collection_name=collection_name,
         client=client,
+        application_name=application_name,
         **kwargs,
     )
