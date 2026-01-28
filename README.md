@@ -47,7 +47,8 @@ from mongodb_session_manager import create_mongodb_session_manager
 session_manager = create_mongodb_session_manager(
     session_id="customer-12345",
     connection_string="mongodb://user:pass@host:27017/",
-    database_name="my_database"
+    database_name="my_database",
+    application_name="customer-support-bot"  # Optional: categorize sessions by app
 )
 
 # Create agent with session persistence
@@ -63,6 +64,9 @@ response = agent("Hello, can you help me?")
 
 # Sync agent to persist state and metrics
 session_manager.sync_agent(agent)
+
+# Read application name (immutable, set at creation)
+app_name = session_manager.get_application_name()
 
 # Clean up
 session_manager.close()
@@ -87,6 +91,7 @@ async def lifespan(app: FastAPI):
     initialize_global_factory(
         connection_string="mongodb://localhost:27017/",
         database_name="my_database",
+        application_name="my-fastapi-app",  # Default for all sessions
         maxPoolSize=100,
         minPoolSize=10
     )
@@ -147,6 +152,7 @@ Main class extending `RepositorySessionManager` from Strands SDK.
 | `get_metadata_tool()` | Get Strands tool for agent metadata management |
 | `add_feedback(feedback)` | Store user feedback with rating and comment |
 | `get_feedbacks()` | Retrieve all feedback for the session |
+| `get_application_name()` | Get session's application name (read-only, immutable) |
 | `close()` | Close database connections |
 
 #### `MongoDBSessionManagerFactory`
@@ -284,6 +290,7 @@ Sessions are stored as nested documents:
 {
     "_id": "session-id",
     "session_id": "session-id",
+    "application_name": "my-app",
     "created_at": "2024-01-15T09:00:00Z",
     "updated_at": "2024-01-22T14:30:00Z",
     "agents": {

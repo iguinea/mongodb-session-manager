@@ -27,6 +27,7 @@ class MongoDBSessionManagerFactory:
         collection_name: str = "collection_name",
         client: Optional[MongoClient] = None,
         metadata_fields: Optional[List[str]] = None,
+        application_name: Optional[str] = None,
         **client_kwargs: Any,
     ) -> None:
         """Initialize the session manager factory.
@@ -37,11 +38,13 @@ class MongoDBSessionManagerFactory:
             collection_name: Default collection name for sessions
             client: Pre-configured MongoClient (takes precedence over connection_string)
             metadata_fields: List of fields to include in metadata
+            application_name: Default application name for all sessions created by this factory
             **client_kwargs: Additional arguments for MongoClient configuration
         """
         self.database_name = database_name
         self.collection_name = collection_name
         self.metadata_fields = metadata_fields
+        self.application_name = application_name
 
         if client is not None:
             # Use provided client
@@ -67,6 +70,7 @@ class MongoDBSessionManagerFactory:
         database_name: Optional[str] = None,
         collection_name: Optional[str] = None,
         metadata_fields: Optional[List[str]] = None,
+        application_name: Optional[str] = None,
         **kwargs: Any,
     ) -> MongoDBSessionManager:
         """Create a new session manager instance.
@@ -76,6 +80,7 @@ class MongoDBSessionManagerFactory:
             database_name: Override default database name
             collection_name: Override default collection name
             metadata_fields: Override default metadata fields
+            application_name: Override default application name for this session
             **kwargs: Additional arguments for MongoDBSessionManager (including hooks)
 
         Returns:
@@ -84,6 +89,8 @@ class MongoDBSessionManagerFactory:
         db_name = database_name or self.database_name
         coll_name = collection_name or self.collection_name
         meta_fields = metadata_fields or self.metadata_fields
+        # Use provided application_name or fall back to factory default
+        app_name = application_name if application_name is not None else self.application_name
 
         # Create session manager with shared client
         manager = MongoDBSessionManager(
@@ -92,6 +99,7 @@ class MongoDBSessionManagerFactory:
             collection_name=coll_name,
             client=self._client,
             metadata_fields=meta_fields,
+            application_name=app_name,
             **kwargs,
         )
 
@@ -129,6 +137,7 @@ def initialize_global_factory(
     database_name: str = "database_name",
     collection_name: str = "virtualagent_sessions",
     metadata_fields: Optional[List[str]] = None,
+    application_name: Optional[str] = None,
     **client_kwargs: Any,
 ) -> MongoDBSessionManagerFactory:
     """Initialize the global factory instance.
@@ -139,6 +148,8 @@ def initialize_global_factory(
         connection_string: MongoDB connection string
         database_name: Default database name
         collection_name: Default collection name
+        metadata_fields: Default metadata fields to index
+        application_name: Default application name for all sessions
         **client_kwargs: Additional MongoDB client configuration
 
     Returns:
@@ -155,6 +166,7 @@ def initialize_global_factory(
         database_name=database_name,
         collection_name=collection_name,
         metadata_fields=metadata_fields,
+        application_name=application_name,
         **client_kwargs,
     )
 
