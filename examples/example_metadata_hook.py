@@ -24,7 +24,7 @@ import json
 import logging
 import time
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional
+from typing import Callable
 from mongodb_session_manager import MongoDBSessionManager
 from strands import Agent
 import os
@@ -274,14 +274,14 @@ async def main():
     
     # First call - cache miss
     session_manager.update_metadata({"data": "initial"})
-    metadata1 = session_manager.get_metadata()  # Cache miss
+    session_manager.get_metadata()  # Cache miss
     
     # Second call - cache hit
-    metadata2 = session_manager.get_metadata()  # Cache hit
+    session_manager.get_metadata()  # Cache hit
     
     # Update invalidates cache
     session_manager.update_metadata({"data": "updated"})
-    metadata3 = session_manager.get_metadata()  # Cache miss
+    session_manager.get_metadata()  # Cache miss
     
     session_manager.close()
     

@@ -36,7 +36,6 @@ async def main():
     print("=" * 60)
     
     # Create session manager with MongoDB mock for demo
-    from unittest.mock import patch, MagicMock
   
     # Create session manager
     session_manager = create_mongodb_session_manager(

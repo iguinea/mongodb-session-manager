@@ -24,9 +24,8 @@ import json
 import logging
 import time
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict
 from mongodb_session_manager import MongoDBSessionManager
-from strands import Agent
 import os
 
 # Configure logging

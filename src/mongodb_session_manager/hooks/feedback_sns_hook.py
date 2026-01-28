@@ -97,7 +97,7 @@ SNS Message Format:
         - rating=None → topic_arn_neutral (with subject_prefix_neutral and body_prefix_neutral)
 
 Requirements:
-    - custom_aws.sns module (from python-helpers package)
+    - boto3 package for AWS SDK
     - AWS credentials configured with SNS publish permissions
     - Three valid SNS topic ARNs (for good, bad, and neutral feedback)
 
@@ -125,7 +125,7 @@ try:
     from .utils_sns import publish_message
 except ImportError:
     logging.warning(
-        "custom_aws.sns not available. Please install python-helpers package."
+        "utils_sns not available. Please ensure boto3 is installed."
     )
     publish_message = None
 
@@ -180,8 +180,8 @@ class FeedbackSNSHook:
         """
         if not publish_message:
             raise ImportError(
-                "custom_aws.sns module not available. "
-                "Please install python-helpers package: pip install python-helpers"
+                "SNS utilities not available. "
+                "Please ensure boto3 is installed: pip install boto3"
             )
 
         self.topic_arn_good = topic_arn_good

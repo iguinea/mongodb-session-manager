@@ -9,8 +9,7 @@ Available Hooks:
     - metadata_sqs_hook: Propagate metadata changes to AWS SQS for SSE
     - metadata_websocket_hook: Push metadata changes to WebSocket clients via API Gateway
 
-Note: SNS and SQS hooks require the `custom_aws` package (python-helpers) to be installed.
-      WebSocket hook requires `boto3` to be installed.
+Note: All AWS hooks require `boto3` to be installed.
 """
 
 # Import hook creators if available

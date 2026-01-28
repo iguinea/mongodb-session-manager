@@ -15,7 +15,6 @@ This example demonstrates how to use the connection pooling
 for high-performance stateless API endpoints.
 """
 
-import asyncio
 import logging
 from contextlib import asynccontextmanager
 from typing import Dict, Any
@@ -32,7 +31,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from mongodb_session_manager import (
     initialize_global_factory,
-    get_global_factory,
     close_global_factory,
     MongoDBConnectionPool,
 )

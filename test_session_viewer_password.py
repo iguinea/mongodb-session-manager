@@ -33,7 +33,7 @@ def test_session_viewer_password():
     password = session_manager.get_session_viewer_password()
 
     if password:
-        print(f"   ✓ Password generated successfully!")
+        print("   ✓ Password generated successfully!")
         print(f"   Password: {password}")
         print(f"   Length: {len(password)} characters")
 
@@ -42,13 +42,13 @@ def test_session_viewer_password():
         print(f"   Alphanumeric (base64url): {is_alphanumeric}")
 
         # Example usage
-        print(f"\n3. Example Session Viewer URL:")
+        print("\n3. Example Session Viewer URL:")
         print(f"   http://localhost:8883?session_id={session_id}&password={password}")
     else:
         print("   ✗ ERROR: No password was generated!")
 
     # Test with existing session (should return same password)
-    print(f"\n4. Testing password persistence...")
+    print("\n4. Testing password persistence...")
     session_manager2 = create_mongodb_session_manager(
         session_id=session_id,
         connection_string=MONGODB_CONNECTION_STRING,
@@ -59,10 +59,10 @@ def test_session_viewer_password():
     password2 = session_manager2.get_session_viewer_password()
 
     if password == password2:
-        print(f"   ✓ Password persisted correctly (same on reload)")
+        print("   ✓ Password persisted correctly (same on reload)")
         print(f"   Password: {password2}")
     else:
-        print(f"   ✗ ERROR: Password changed on reload!")
+        print("   ✗ ERROR: Password changed on reload!")
         print(f"   Original: {password}")
         print(f"   New: {password2}")
 

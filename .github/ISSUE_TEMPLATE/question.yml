@@ -1,0 +1,16 @@
+name: ❓ Question
+description: Hacer una pregunta sobre el proyecto
+labels: ["question"]
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: Tu pregunta
+      description: Qué necesitas saber
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Contexto adicional
+      description: Información relevante para entender tu pregunta

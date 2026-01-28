@@ -77,7 +77,7 @@ async def main():
             "Set my name as 'Alice', language preference as 'English', "
             "and conversation topic as 'AI Technology'."
         )
-        print(f"User: Please set up initial metadata...")
+        print("User: Please set up initial metadata...")
         print(f"Agent: {response}")
         
         # Step 2: Agent retrieves metadata
@@ -86,7 +86,7 @@ async def main():
         response = await agent.invoke_async(
             "Can you check what metadata we have stored so far?"
         )
-        print(f"User: Can you check what metadata we have stored so far?")
+        print("User: Can you check what metadata we have stored so far?")
         print(f"Agent: {response}")
         
         # Step 3: Agent updates specific fields
@@ -96,7 +96,7 @@ async def main():
             "I'd like to change my language preference to Spanish and "
             "add a new field for timezone set to 'UTC-5'."
         )
-        print(f"User: I'd like to change my language preference...")
+        print("User: I'd like to change my language preference...")
         print(f"Agent: {response}")
         
         # Step 4: Agent retrieves specific keys
@@ -105,7 +105,7 @@ async def main():
         response = await agent.invoke_async(
             "What are my current language preference and timezone?"
         )
-        print(f"User: What are my current language preference and timezone?")
+        print("User: What are my current language preference and timezone?")
         print(f"Agent: {response}")
         
         # Step 5: Agent uses metadata in conversation
@@ -115,7 +115,7 @@ async def main():
             "Based on what you know about me from the metadata, "
             "can you greet me appropriately?"
         )
-        print(f"User: Based on what you know about me...")
+        print("User: Based on what you know about me...")
         print(f"Agent: {response}")
         
         # Step 6: Agent cleans up metadata
@@ -125,7 +125,7 @@ async def main():
             "Please remove the conversation topic from metadata as we're "
             "finishing up, but keep my name and preferences."
         )
-        print(f"User: Please remove the conversation topic...")
+        print("User: Please remove the conversation topic...")
         print(f"Agent: {response}")
         
         # Step 7: Final metadata check
@@ -134,7 +134,7 @@ async def main():
         response = await agent.invoke_async(
             "Show me the final state of our metadata."
         )
-        print(f"User: Show me the final state of our metadata.")
+        print("User: Show me the final state of our metadata.")
         print(f"Agent: {response}")
         
         # Sync agent to persist everything

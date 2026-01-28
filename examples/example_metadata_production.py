@@ -220,7 +220,7 @@ async def main():
             "Hi, I'm having trouble with my API integration. "
             "I'm getting 401 errors even though my API key is correct."
         )
-        print(f"Customer: I'm having trouble with my API integration...")
+        print("Customer: I'm having trouble with my API integration...")
         print(f"Agent: {response[:100]}...")
 
         # Categorize based on the issue

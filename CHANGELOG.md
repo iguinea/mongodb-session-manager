@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2025-01-28
+
+### Changed
+- **Remove python-helpers dependency**: Internalized AWS utilities directly into the package
+  - Created `hooks/utils_sqs.py` with `send_message` function
+  - `utils_sns.py` was already internalized in previous versions
+  - Added `boto3>=1.35.0` as direct dependency
+  - Updated import paths in `metadata_sqs_hook.py` and `feedback_sns_hook.py`
+
+### Added
+- **GitHub configuration**: Added issue templates, PR template, CODEOWNERS, and dependabot.yml
+- **Code quality tooling**: Added `.qlty/` configuration for code quality checks
+- **Version management**: Added `.tool-versions` for asdf compatibility
+
+### Fixed
+- Removed unused imports across examples and session_viewer modules
+- Fixed f-strings without placeholders (converted to regular strings)
+
+### Documentation
+- Simplified and updated `CLAUDE.md` with clearer project structure
+
 ## [0.3.1] - 2025-11-27
 
 ### Fixed
