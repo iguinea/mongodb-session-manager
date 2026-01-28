@@ -1,6 +1,6 @@
 [project]
 name = "mongodb-session-manager"
-version = "0.4.0"
+version = "0.4.1"
 description = "MongoDB session management for Strands Agents"
 readme = "README.md"
 requires-python = ">=3.13"
