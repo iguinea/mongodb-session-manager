@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2025-01-28
+
+### Added
+- **Application Name Field**: New `application_name` parameter for session categorization
+  - Immutable top-level field in MongoDB documents (set only at session creation)
+  - Automatic index creation for efficient filtering by application
+  - New `get_application_name()` method in `MongoDBSessionManager` (read-only)
+  - Supported in all creation patterns:
+    - `create_mongodb_session_manager(application_name="my-app")`
+    - `MongoDBSessionManager(application_name="my-app")`
+    - `MongoDBSessionManagerFactory(application_name="default-app")` with per-session override
+    - `initialize_global_factory(application_name="my-app")`
+  - New test file: `test_application_name.py` with 15 tests (unit + integration)
+
+### Changed
+- **MongoDB Schema**: Extended document structure with `application_name` field at root level
+  ```json
+  {
+    "_id": "session-id",
+    "session_id": "session-id",
+    "application_name": "my-app",  // NEW
+    "session_type": "default",
+    ...
+  }
+  ```
+
+### Documentation
+- Updated `README.md` with application_name examples
+- Updated `CLAUDE.md` with new schema and usage patterns
+
+### Benefits
+- ✅ **Multi-application Support**: Categorize sessions by application for filtering
+- ✅ **Session Viewer Integration**: Filter sessions by application in UI
+- ✅ **Analytics**: Analyze usage patterns per application
+- ✅ **Backward Compatible**: Existing sessions work with `application_name: null`
+
 ## [0.4.1] - 2025-01-28
 
 ### Changed
