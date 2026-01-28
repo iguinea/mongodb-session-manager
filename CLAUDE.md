@@ -17,9 +17,9 @@ uv sync
 # Run any example
 uv run python examples/example_calculator_tool.py
 
-# Run tests
-uv run pytest tests/
-uv run pytest tests/test_cache_metrics.py -v  # Single test file
+# Run tests (requires MongoDB - see Testing section below)
+uv run pytest test_*.py -v
+uv run pytest test_cache_metrics.py -v  # Single test file
 
 # Linting/formatting
 uv run ruff check .
@@ -163,3 +163,17 @@ Current version: **0.4.0**
 - **Changelog**: Update CHANGELOG.md after validated fixes/features (ask user for confirmation first)
 - **Feature Plans**: Save accepted plans to `features/<n>_<short_description>/plan.md`
 - **Documentation Index**: See `docs/README.md` for full documentation structure
+
+## Testing
+
+Tests require a MongoDB connection. Set the environment variable before running:
+
+```bash
+export MONGODB_CONNECTION_STRING="mongodb://<user>:<pass>@localhost:8550/"
+uv run pytest test_*.py -v
+```
+
+**Default credentials for local development:**
+- Host: `localhost:8550` (or `host.docker.internal:8550` from Docker)
+- User: `mongodb`
+- Password: `mongodb`
