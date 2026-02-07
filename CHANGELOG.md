@@ -1,5 +1,13 @@
 # Changelog
 
+## [2026-02-07] PR #14 - Update: migrate Session Viewer with security, rate limiting, and tabbed UI (@iguinea)
+
+- chore: add CI workflow, GitHub docs, and dev philosophy
+- Update: migrate Session Viewer with security, rate limiting, and tabb…
+- Fix: address qlty issues - non-root Docker user, --no-install-recomme…
+- Fix: resolve remaining qlty issues - reduce cognitive complexity, fix…
+- Refactor: extract buildToolUsageSpan and simplify buildMetricsHTML to…
+
 All notable changes to the MongoDB Session Manager project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
