@@ -68,8 +68,38 @@ const Format = {
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#039;');
+  },
+
+  feedbackLabel(rating) {
+    const labels = { up: 'Positivo', down: 'Negativo' };
+    return labels[rating] || 'Neutral';
   }
 };
+
+/**
+ * Render metadata badges for a session card.
+ */
+function renderMetadataBadges(metadata) {
+  const keys = Object.keys(metadata);
+  if (keys.length === 0) return '';
+
+  const badges = Object.entries(metadata).slice(0, 3).map(([key, value]) => `
+    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-700">
+      <span class="font-medium">${Format.escapeHtml(key)}:</span>
+      <span class="ml-1">${Format.escapeHtml(Format.truncate(String(value), 20))}</span>
+    </span>
+  `).join('');
+
+  const overflow = keys.length > 3
+    ? `<span class="inline-flex items-center px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-500">+${keys.length - 3} más</span>`
+    : '';
+
+  return `
+    <div class="mt-2 pt-2 border-t border-gray-100">
+      <div class="flex flex-wrap gap-1">${badges}${overflow}</div>
+    </div>
+  `;
+}
 
 /**
  * Session Card Component
@@ -120,23 +150,7 @@ function renderSessionCard(session) {
       ` : ''}
     </div>
 
-    ${Object.keys(session.metadata).length > 0 ? `
-      <div class="mt-2 pt-2 border-t border-gray-100">
-        <div class="flex flex-wrap gap-1">
-          ${Object.entries(session.metadata).slice(0, 3).map(([key, value]) => `
-            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-700">
-              <span class="font-medium">${Format.escapeHtml(key)}:</span>
-              <span class="ml-1">${Format.escapeHtml(Format.truncate(String(value), 20))}</span>
-            </span>
-          `).join('')}
-          ${Object.keys(session.metadata).length > 3 ? `
-            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-500">
-              +${Object.keys(session.metadata).length - 3} más
-            </span>
-          ` : ''}
-        </div>
-      </div>
-    ` : ''}
+    ${renderMetadataBadges(session.metadata)}
   `;
 
   return card;
@@ -660,7 +674,7 @@ function renderTimelineFeedback(item) {
           <div class="flex-1 min-w-0">
             <div class="flex items-center justify-between mb-1">
               <span class="text-sm font-medium text-gray-900">
-                Feedback ${rating === 'up' ? 'Positivo' : rating === 'down' ? 'Negativo' : 'Neutral'}
+                Feedback ${Format.feedbackLabel(rating)}
               </span>
               <span class="text-xs text-gray-500">
                 ${Format.date(item.timestamp, 'HH:mm:ss')}
@@ -825,7 +839,7 @@ function renderDynamicFilter(fieldInfos = []) {
     let newInput;
 
     switch (fieldType) {
-      case 'enum':
+      case 'enum': {
         // Dropdown with predefined values
         newInput = document.createElement('select');
         newInput.className = 'filter-value w-full px-2 py-1 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-primary-500 focus:border-transparent';
@@ -847,6 +861,7 @@ function renderDynamicFilter(fieldInfos = []) {
           });
         }
         break;
+      }
 
       case 'date':
         // Date picker

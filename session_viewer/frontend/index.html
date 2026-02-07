@@ -1468,7 +1468,7 @@
     /**
      * Initialize application with authentication
      */
-    document.addEventListener('DOMContentLoaded', () => {
+    document.addEventListener('DOMContentLoaded', async () => {
       // Check if this is a direct session access via ?session_id=...
       const urlParams = new URLSearchParams(window.location.search);
       const sessionId = urlParams.get('session_id');
@@ -1482,7 +1482,7 @@
         authModal.remove();
 
         // Initialize app with session_id (will prompt for session password)
-        window.app = new SessionViewer(sessionId);
+        window.app = await SessionViewer.create(sessionId);
         window.panelResizer = new PanelResizer();
         setupPromptModal();
 
@@ -1542,7 +1542,7 @@
             authModal.remove();
 
             // Initialize application (no session_id = normal mode)
-            window.app = new SessionViewer();
+            window.app = await SessionViewer.create();
             window.panelResizer = new PanelResizer();
 
             console.log('Authentication successful');
