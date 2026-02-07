@@ -105,6 +105,10 @@ logger = logging.getLogger(__name__)
 # Security Helpers (CWE-209, CWE-532)
 # ============================================================================
 
+REGEX_KEY = REGEX_KEY
+REGEX_OPTIONS_KEY = REGEX_OPTIONS_KEY
+
+
 def sanitize_query_for_logging(query: Dict[str, Any]) -> Dict[str, Any]:
     """Sanitize MongoDB query for safe logging.
 
@@ -118,14 +122,12 @@ def sanitize_query_for_logging(query: Dict[str, Any]) -> Dict[str, Any]:
     safe_query = copy.deepcopy(query)
 
     for key, value in safe_query.items():
-        if isinstance(value, dict):
-            if "$regex" in value:
-                pattern = value["$regex"]
-                if len(pattern) > 20:
-                    value["$regex"] = pattern[:20] + "..."
-        elif isinstance(value, str):
-            if len(value) > 20:
-                safe_query[key] = value[:20] + "..."
+        if isinstance(value, dict) and REGEX_KEY in value:
+            pattern = value[REGEX_KEY]
+            if len(pattern) > 20:
+                value[REGEX_KEY] = pattern[:20] + "..."
+        elif isinstance(value, str) and len(value) > 20:
+            safe_query[key] = value[:20] + "..."
 
     return safe_query
 
@@ -349,7 +351,7 @@ async def password_middleware(request: Request, call_next):
         if len(path_parts) >= 6 and path_parts[1] == "api" and path_parts[2] == "session_viewer" and path_parts[3] == "v1" and path_parts[4] == "sessions":
             session_id = path_parts[5]
 
-            is_valid, used_global = validate_session_password(session_id, session_password_hash)
+            is_valid, _used_global = validate_session_password(session_id, session_password_hash)
             if is_valid:
                 logger.debug(f"Session password authentication successful for {session_id}")
                 return await call_next(request)
@@ -436,7 +438,7 @@ def build_search_query(
             for key, value in filters_dict.items():
                 if key.startswith("metadata."):
                     safe_value = re.escape(str(value))
-                    query[key] = {"$regex": safe_value, "$options": "i"}
+                    query[key] = {REGEX_KEY: safe_value, REGEX_OPTIONS_KEY: "i"}
                 else:
                     query[key] = str(value)
         except json.JSONDecodeError:
@@ -444,7 +446,7 @@ def build_search_query(
 
     if session_id:
         safe_session_id = re.escape(session_id)
-        query["session_id"] = {"$regex": safe_session_id, "$options": "i"}
+        query["session_id"] = {REGEX_KEY: safe_session_id, REGEX_OPTIONS_KEY: "i"}
 
     if created_at_start or created_at_end:
         query["created_at"] = {}

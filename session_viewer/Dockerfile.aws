@@ -4,18 +4,17 @@ FROM --platform=linux/amd64 python:3.13-slim
 WORKDIR /app
 
 # Install system dependencies
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     build-essential \
     ca-certificates \
     git \
-    wget \
     && rm -rf /var/lib/apt/lists/*
 
 RUN update-ca-certificates
 
 # Download AWS RDS CA certificate bundle for DocumentDB TLS connections
-RUN wget https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem -O /etc/ssl/certs/rds-ca-bundle.pem
+RUN curl -sL https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem -o /etc/ssl/certs/rds-ca-bundle.pem
 
 # Configure SSL environment variables for AWS services:
 # - SSL_CERT_FILE: RDS bundle for DocumentDB/MongoDB
@@ -58,6 +57,10 @@ EXPOSE 8882
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
   CMD curl -f http://localhost:8882/health || exit 1
+
+# Run as non-root user
+RUN useradd --create-home appuser
+USER appuser
 
 # Start FastAPI server
 CMD ["python", "main.py"]

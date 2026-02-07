@@ -3,7 +3,7 @@ FROM python:3.13-slim
 WORKDIR /app
 
 # Install system dependencies
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
@@ -26,6 +26,10 @@ EXPOSE 8882
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
   CMD curl -f http://localhost:8882/health || exit 1
+
+# Run as non-root user
+RUN useradd --create-home appuser
+USER appuser
 
 # Start FastAPI server
 CMD ["python", "main.py"]
