@@ -233,6 +233,23 @@ def create_metadata_hooks(queue_url: str) -> Dict[str, Any]:
         return {}
 
 
+def _dispatch_async(coro, error_context: str) -> None:
+    """Dispatch an async coroutine in the current event loop or a new thread."""
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(coro)
+    except RuntimeError:
+        import threading
+
+        def run_in_thread():
+            asyncio.run(coro)
+
+        thread = threading.Thread(target=run_in_thread, daemon=True)
+        thread.start()
+    except Exception as e:
+        logger.error(f"Error {error_context}: {e}")
+
+
 def create_metadata_hook(queue_url: str, metadata_fields: List[str] = None):
     """
     Create a single metadata hook function for mongodb-session-manager
@@ -250,72 +267,21 @@ def create_metadata_hook(queue_url: str, metadata_fields: List[str] = None):
         def metadata_hook_wrapper(
             original_func, action: str, session_id: str, **kwargs
         ):
-            """
-            Wrapper that adapts to mongodb-session-manager hook interface
-
-            Args:
-                original_func: The original method being wrapped
-                action: "update", "get", or "delete"
-                session_id: The current session ID
-                **kwargs: Additional arguments (metadata for update, keys for delete)
-            """
-            # Call the original function first
+            """Wrapper that adapts to mongodb-session-manager hook interface."""
             if action == "update" and "metadata" in kwargs:
                 result = original_func(kwargs["metadata"])
-                # Get the updated metadata from the result to ensure we have the latest state
-                try:
-                    # Get current event loop if available, otherwise create a new one
-                    try:
-                        loop = asyncio.get_running_loop()
-                        # We're in an async context, create task
-                        loop.create_task(
-                            sqs_hook.on_metadata_change(
-                                session_id, kwargs["metadata"], action
-                            )
-                        )
-                    except RuntimeError:
-                        # No running loop, run in a new thread to avoid blocking
-                        import threading
-
-                        def run_hook():
-                            asyncio.run(
-                                sqs_hook.on_metadata_change(
-                                    session_id, kwargs["metadata"], action
-                                )
-                            )
-
-                        thread = threading.Thread(target=run_hook, daemon=True)
-                        thread.start()
-                except Exception as e:
-                    logger.error(f"Error sending metadata update to SQS: {e}")
+                _dispatch_async(
+                    sqs_hook.on_metadata_change(session_id, kwargs["metadata"], action),
+                    "sending metadata update to SQS",
+                )
             elif action == "delete" and "keys" in kwargs:
                 result = original_func(kwargs["keys"])
-                # For delete, send empty metadata for deleted keys
                 deleted_metadata = {key: None for key in kwargs["keys"]}
-                try:
-                    try:
-                        loop = asyncio.get_running_loop()
-                        loop.create_task(
-                            sqs_hook.on_metadata_change(
-                                session_id, deleted_metadata, action
-                            )
-                        )
-                    except RuntimeError:
-                        import threading
-
-                        def run_hook():
-                            asyncio.run(
-                                sqs_hook.on_metadata_change(
-                                    session_id, deleted_metadata, action
-                                )
-                            )
-
-                        thread = threading.Thread(target=run_hook, daemon=True)
-                        thread.start()
-                except Exception as e:
-                    logger.error(f"Error sending metadata delete to SQS: {e}")
+                _dispatch_async(
+                    sqs_hook.on_metadata_change(session_id, deleted_metadata, action),
+                    "sending metadata delete to SQS",
+                )
             else:
-                # For "get" or other operations, just call original
                 result = original_func()
 
             return result

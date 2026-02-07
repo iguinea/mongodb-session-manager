@@ -73,6 +73,43 @@ async def set_state(
         raise RuntimeError(f"Error actualizando estado: {str(e)}") from e
 
 
+def _get_all_state(agent: Agent) -> str:
+    """Get entire agent state as formatted string."""
+    state = agent.state.get()
+    if not state:
+        return "El agente no tiene estado configurado"
+    return "Estado del agente:\n" + json.dumps(state, indent=2, ensure_ascii=False)
+
+
+def _get_single_key(agent: Agent, key: str) -> str:
+    """Get a single key from agent state."""
+    value = agent.state.get(key)
+    if value is not None:
+        return f"{key}: {value}"
+    return f"La clave '{key}' no existe en el estado"
+
+
+def _get_multiple_keys(agent: Agent, keys: List[str]) -> str:
+    """Get multiple keys from agent state."""
+    result = {}
+    missing_keys = []
+    for key in keys:
+        value = agent.state.get(key)
+        if value is not None:
+            result[key] = value
+        else:
+            missing_keys.append(key)
+
+    response_parts = []
+    if result:
+        response_parts.append("Valores encontrados:")
+        response_parts.extend(f"  - {k}: {v}" for k, v in result.items())
+    if missing_keys:
+        response_parts.append(f"\nClaves no encontradas: {', '.join(missing_keys)}")
+
+    return "\n".join(response_parts) if response_parts else "No se encontraron claves"
+
+
 @tool
 async def get_state(
     keys: Optional[Union[str, List[str]]] = None, agent: Agent = None
@@ -100,60 +137,16 @@ async def get_state(
 
     try:
         if keys is None:
-            # Get entire state
-            state = agent.state.get()
-            if not state:
-                return "El agente no tiene estado configurado"
-            return "Estado del agente:\n" + json.dumps(
-                state, indent=2, ensure_ascii=False
-            )
-
-        elif isinstance(keys, str):
-            # Get single key
-            value = agent.state.get(keys)
-            if value is not None:
-                return f"{keys}: {value}"
-            else:
-                return f"La clave '{keys}' no existe en el estado"
-
-        elif isinstance(keys, list):
-            # Get multiple keys
-            result = {}
-            missing_keys = []
-
-            for key in keys:
-                value = agent.state.get(key)
-                if value is not None:
-                    result[key] = value
-                else:
-                    missing_keys.append(key)
-
-            # Build response
-            response_parts = []
-
-            if result:
-                response_parts.append("Valores encontrados:")
-                for k, v in result.items():
-                    response_parts.append(f"  - {k}: {v}")
-
-            if missing_keys:
-                response_parts.append(
-                    f"\nClaves no encontradas: {', '.join(missing_keys)}"
-                )
-
-            return (
-                "\n".join(response_parts)
-                if response_parts
-                else "No se encontraron claves"
-            )
-
-        else:
-            raise ValueError(
-                "El par�metro debe ser None, una cadena o una lista de cadenas"
-            )
+            return _get_all_state(agent)
+        if isinstance(keys, str):
+            return _get_single_key(agent, keys)
+        if isinstance(keys, list):
+            return _get_multiple_keys(agent, keys)
+        raise ValueError(
+            "El parámetro debe ser None, una cadena o una lista de cadenas"
+        )
 
     except ValueError:
-        # Re-raise ValueError as is (validation errors)
         raise
     except Exception as e:
         logging.error(f"Error getting agent state: {e}")

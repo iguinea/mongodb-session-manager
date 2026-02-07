@@ -288,6 +288,35 @@ class MetadataWebSocketHook:
             )
 
 
+def _dispatch_async(coro, error_context: str) -> None:
+    """Dispatch an async coroutine in the current event loop or a new thread."""
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(coro)
+    except RuntimeError:
+        import threading
+
+        def run_in_thread():
+            asyncio.run(coro)
+
+        thread = threading.Thread(target=run_in_thread, daemon=True)
+        thread.start()
+    except Exception as e:
+        logger.error(f"Error {error_context}: {e}")
+
+
+def _build_delete_metadata(original_func, keys: List) -> Dict[str, Any]:
+    """Build metadata dict for delete operations, preserving connection_id."""
+    try:
+        current_metadata = original_func.__self__.get_metadata()
+        return {
+            "connection_id": current_metadata.get("connection_id"),
+            **{key: None for key in keys},
+        }
+    except Exception:
+        return {key: None for key in keys}
+
+
 def create_metadata_hook(
     api_gateway_endpoint: str,
     metadata_fields: Optional[List[str]] = None,
@@ -329,82 +358,21 @@ def create_metadata_hook(
         def metadata_hook_wrapper(
             original_func, action: str, session_id: str, **kwargs
         ):
-            """
-            Wrapper that adapts to mongodb-session-manager hook interface
-
-            Args:
-                original_func: The original method being wrapped
-                action: "update", "get", or "delete"
-                session_id: The current session ID
-                **kwargs: Additional arguments (metadata for update, keys for delete)
-            """
-            # Call the original function first
+            """Wrapper that adapts to mongodb-session-manager hook interface."""
             if action == "update" and "metadata" in kwargs:
                 result = original_func(kwargs["metadata"])
-                # Get the updated metadata from the result to ensure we have the latest state
-                try:
-                    # Get current event loop if available, otherwise create a new one
-                    try:
-                        loop = asyncio.get_running_loop()
-                        # We're in an async context, create task
-                        loop.create_task(
-                            websocket_hook.on_metadata_change(
-                                session_id, kwargs["metadata"], action
-                            )
-                        )
-                    except RuntimeError:
-                        # No running loop, run in a new thread to avoid blocking
-                        import threading
-
-                        def run_hook():
-                            asyncio.run(
-                                websocket_hook.on_metadata_change(
-                                    session_id, kwargs["metadata"], action
-                                )
-                            )
-
-                        thread = threading.Thread(target=run_hook, daemon=True)
-                        thread.start()
-                except Exception as e:
-                    logger.error(f"Error sending metadata update to WebSocket: {e}")
-
+                _dispatch_async(
+                    websocket_hook.on_metadata_change(session_id, kwargs["metadata"], action),
+                    "sending metadata update to WebSocket",
+                )
             elif action == "delete" and "keys" in kwargs:
                 result = original_func(kwargs["keys"])
-                # For delete, send empty metadata for deleted keys
-                # But we still need the connection_id from current metadata
-                # We'll need to get current metadata first
-                try:
-                    # Get current metadata to extract connection_id
-                    current_metadata = original_func.__self__.get_metadata()
-                    deleted_metadata = {
-                        "connection_id": current_metadata.get("connection_id"),
-                        **{key: None for key in kwargs["keys"]},
-                    }
-
-                    try:
-                        loop = asyncio.get_running_loop()
-                        loop.create_task(
-                            websocket_hook.on_metadata_change(
-                                session_id, deleted_metadata, action
-                            )
-                        )
-                    except RuntimeError:
-                        import threading
-
-                        def run_hook():
-                            asyncio.run(
-                                websocket_hook.on_metadata_change(
-                                    session_id, deleted_metadata, action
-                                )
-                            )
-
-                        thread = threading.Thread(target=run_hook, daemon=True)
-                        thread.start()
-                except Exception as e:
-                    logger.error(f"Error sending metadata delete to WebSocket: {e}")
-
+                deleted_metadata = _build_delete_metadata(original_func, kwargs["keys"])
+                _dispatch_async(
+                    websocket_hook.on_metadata_change(session_id, deleted_metadata, action),
+                    "sending metadata delete to WebSocket",
+                )
             else:
-                # For "get" or other operations, just call original
                 result = original_func()
 
             return result
