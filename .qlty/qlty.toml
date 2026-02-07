@@ -76,7 +76,7 @@ mode = "comment"
 
 [[plugin]]
 name = "ripgrep"
-mode = "comment"
+mode = "disabled"
 
 [[plugin]]
 name = "ruff"
@@ -92,3 +92,17 @@ drivers = [
 
 [[plugin]]
 name = "trufflehog"
+
+# Ignore bandit B101 (assert_used) in test files - standard in pytest
+[[triage]]
+match.plugins = ["bandit"]
+match.rules = ["bandit:B101"]
+match.file_patterns = ["test_*.py", "*_test.py"]
+set.ignored = true
+
+# Ignore bandit B104 (hardcoded_bind_all_interfaces) in examples - intentional in dev
+[[triage]]
+match.plugins = ["bandit"]
+match.rules = ["bandit:B104"]
+match.file_patterns = ["examples/*.py"]
+set.ignored = true
