@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import warnings
 from typing import Any, Dict, List, Optional, Callable
 
 from pymongo import MongoClient
@@ -102,8 +103,8 @@ class MongoDBSessionManager(RepositorySessionManager):
         collection_name: str = "collection_name",
         client: Optional[MongoClient] = None,
         metadata_fields: Optional[List[str]] = None,
-        metadataHook: Optional[Callable[[Dict[str, Any]], None]] = None,
-        feedbackHook: Optional[Callable[[Dict[str, Any]], None]] = None,
+        metadata_hook: Optional[Callable[[Dict[str, Any]], None]] = None,
+        feedback_hook: Optional[Callable[[Dict[str, Any]], None]] = None,
         application_name: Optional[str] = None,
         **kwargs: Any,
     ) -> None:
@@ -116,11 +117,26 @@ class MongoDBSessionManager(RepositorySessionManager):
             collection_name: Name of the collection for sessions
             client: Optional pre-configured MongoClient to use
             metadata_fields: List of fields to be indexed in the metadata
-            metadataHook: Hook to be called when metadata is updated, deleted or retrieved
-            feedbackHook: Hook to be called when feedback is added
+            metadata_hook: Hook to be called when metadata is updated, deleted or retrieved
+            feedback_hook: Hook to be called when feedback is added
             application_name: Application name for session categorization (immutable after creation)
             **kwargs: Additional arguments passed to parent class and MongoClient
         """
+        # Support deprecated camelCase parameter names (metadataHook, feedbackHook)
+        if "metadataHook" in kwargs:
+            warnings.warn(
+                "metadataHook is deprecated, use metadata_hook instead",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            metadata_hook = metadata_hook or kwargs.pop("metadataHook")
+        if "feedbackHook" in kwargs:
+            warnings.warn(
+                "feedbackHook is deprecated, use feedback_hook instead",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            feedback_hook = feedback_hook or kwargs.pop("feedbackHook")
         # Extract MongoDB client kwargs
         mongo_kwargs = {}
         parent_kwargs = {}
@@ -170,12 +186,12 @@ class MongoDBSessionManager(RepositorySessionManager):
         )
         
         # Apply metadata hook if provided
-        if metadataHook:
-            self._apply_metadata_hook(metadataHook)
-        
+        if metadata_hook:
+            self._apply_metadata_hook(metadata_hook)
+
         # Apply feedback hook if provided
-        if feedbackHook:
-            self._apply_feedback_hook(feedbackHook)
+        if feedback_hook:
+            self._apply_feedback_hook(feedback_hook)
 
         logger.info(f"Initialized Itzulbira session manager for session: {session_id}")
     

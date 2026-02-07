@@ -36,7 +36,7 @@ class MongoDBSessionRepository(SessionRepository):
         - Thread-safe operations with proper error handling
 
     Methods:
-        __init__(connection_string, database_name, collection_name, client, metadata_fields, metadataHook, **kwargs):
+        __init__(connection_string, database_name, collection_name, client, metadata_fields, metadata_hook, **kwargs):
             Initialize repository with MongoDB connection and configuration.
 
         create_session(session, **kwargs):

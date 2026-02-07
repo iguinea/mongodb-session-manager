@@ -233,13 +233,13 @@ class TestUpdateDataStructure:
     def test_update_data_includes_all_metrics(self):
         """Test that update_data dict includes all metrics fields."""
         # Simulate what sync_agent() builds
-        _inputTokens = 500
-        _outputTokens = 200
-        _totalTokens = 700
-        _cacheReadInputTokens = 450
-        _cacheWriteInputTokens = 50
-        _latencyMs = 100
-        _timeToFirstByteMs = 25
+        _input_tokens = 500
+        _output_tokens = 200
+        _total_tokens = 700
+        _cache_read_input_tokens = 450
+        _cache_write_input_tokens = 50
+        _latency_ms = 100
+        _time_to_first_byte_ms = 25
         _cycle_count = 2
         _total_duration = 3.5
         _average_cycle_time = 1.75
@@ -257,15 +257,15 @@ class TestUpdateDataStructure:
 
         update_data = {
             f"agents.{agent_id}.messages.$.event_loop_metrics.accumulated_metrics": {
-                "latencyMs": _latencyMs,
-                "timeToFirstByteMs": _timeToFirstByteMs,
+                "latencyMs": _latency_ms,
+                "timeToFirstByteMs": _time_to_first_byte_ms,
             },
             f"agents.{agent_id}.messages.$.event_loop_metrics.accumulated_usage": {
-                "inputTokens": _inputTokens,
-                "outputTokens": _outputTokens,
-                "totalTokens": _totalTokens,
-                "cacheReadInputTokens": _cacheReadInputTokens,
-                "cacheWriteInputTokens": _cacheWriteInputTokens,
+                "inputTokens": _input_tokens,
+                "outputTokens": _output_tokens,
+                "totalTokens": _total_tokens,
+                "cacheReadInputTokens": _cache_read_input_tokens,
+                "cacheWriteInputTokens": _cache_write_input_tokens,
             },
             f"agents.{agent_id}.messages.$.event_loop_metrics.cycle_metrics": {
                 "cycle_count": _cycle_count,
