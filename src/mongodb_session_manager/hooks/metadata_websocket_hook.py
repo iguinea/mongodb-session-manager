@@ -172,7 +172,7 @@ class MetadataWebSocketHook:
         """
         if not boto3:
             raise ImportError(
-                "boto3 module not available. " "Please install boto3: pip install boto3"
+                "boto3 module not available. Please install boto3: pip install boto3"
             )
 
         self.api_gateway_endpoint = api_gateway_endpoint
