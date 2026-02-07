@@ -97,7 +97,7 @@ name = "trufflehog"
 [[triage]]
 match.plugins = ["bandit"]
 match.rules = ["bandit:B101"]
-match.file_patterns = ["test_*.py", "*_test.py"]
+match.file_patterns = ["**/test_*.py", "**/*_test.py", "**/conftest.py"]
 set.ignored = true
 
 # Ignore bandit B104 (hardcoded_bind_all_interfaces) in examples - intentional in dev
@@ -105,4 +105,17 @@ set.ignored = true
 match.plugins = ["bandit"]
 match.rules = ["bandit:B104"]
 match.file_patterns = ["examples/*.py"]
+set.ignored = true
+
+# Ignore radarlint parameter count in test fixtures - conftest factories need many params
+[[triage]]
+match.plugins = ["radarlint-python"]
+match.rules = ["radarlint-python:python:S107"]
+match.file_patterns = ["**/conftest.py"]
+set.ignored = true
+
+# Ignore trufflehog in README/docs - example credentials for local development
+[[triage]]
+match.plugins = ["trufflehog"]
+match.file_patterns = ["README.md", "CLAUDE.md", "docs/**/*.md"]
 set.ignored = true

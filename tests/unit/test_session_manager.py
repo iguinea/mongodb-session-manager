@@ -98,7 +98,7 @@ class TestSessionManagerInit:
         hook.assert_called_once()
 
     @patch("mongodb_session_manager.mongodb_session_manager.MongoDBSessionRepository")
-    def test_deprecation_warning_camelCase_metadataHook(self, mock_repo_cls):
+    def test_deprecation_warning_camel_case_metadata_hook(self, mock_repo_cls):
         mock_repo_cls.return_value = MagicMock(
             read_session=MagicMock(return_value=None)
         )
@@ -115,7 +115,7 @@ class TestSessionManagerInit:
         )
 
     @patch("mongodb_session_manager.mongodb_session_manager.MongoDBSessionRepository")
-    def test_deprecation_warning_camelCase_feedbackHook(self, mock_repo_cls):
+    def test_deprecation_warning_camel_case_feedback_hook(self, mock_repo_cls):
         mock_repo_cls.return_value = MagicMock(
             read_session=MagicMock(return_value=None)
         )
@@ -695,7 +695,8 @@ class TestCacheHitRateCalculation:
         assert rate == pytest.approx(90.0)
 
     def test_cache_hit_rate_zero_when_no_cache(self):
-        rate = (0 / 1 * 100) if 0 > 0 else 0
+        cache_read = 0
+        rate = (cache_read / 1 * 100) if cache_read > 0 else 0
         assert rate == 0
 
     def test_cache_miss_first_request(self):
