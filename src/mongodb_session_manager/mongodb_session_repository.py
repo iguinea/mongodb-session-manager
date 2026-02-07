@@ -16,6 +16,8 @@ from strands.types.session import Session, SessionAgent, SessionMessage
 
 logger = logging.getLogger(__name__)
 
+TIMEZONE_UTC_SUFFIX = "+00:00"
+
 
 class MongoDBSessionRepository(SessionRepository):
     """MongoDB implementation of SessionRepository interface for persistent session storage.
@@ -271,11 +273,11 @@ class MongoDBSessionRepository(SessionRepository):
         agent_data = session_agent.__dict__
 
         agent_data["created_at"] = datetime.fromisoformat(
-            session_agent.created_at.replace("Z", "+00:00")
+            session_agent.created_at.replace("Z", TIMEZONE_UTC_SUFFIX)
         )
 
         agent_data["updated_at"] = datetime.fromisoformat(
-            session_agent.updated_at.replace("Z", "+00:00")
+            session_agent.updated_at.replace("Z", TIMEZONE_UTC_SUFFIX)
         )
 
         agent_doc = {
@@ -344,11 +346,11 @@ class MongoDBSessionRepository(SessionRepository):
         agent_data = session_agent.__dict__
 
         agent_data["created_at"] = datetime.fromisoformat(
-            session_agent.created_at.replace("Z", "+00:00")
+            session_agent.created_at.replace("Z", TIMEZONE_UTC_SUFFIX)
         )
 
         agent_data["updated_at"] = datetime.fromisoformat(
-            session_agent.updated_at.replace("Z", "+00:00")
+            session_agent.updated_at.replace("Z", TIMEZONE_UTC_SUFFIX)
         )
 
         try:
