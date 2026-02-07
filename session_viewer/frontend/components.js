@@ -198,7 +198,7 @@ function extractSessionData(text) {
 
   // Pattern: <SESSION_DATA> ... </SESSION_DATA>
   const sessionDataRegex = /<SESSION_DATA>([\s\S]*?)<\/SESSION_DATA>/;
-  const match = text.match(sessionDataRegex);
+  const match = sessionDataRegex.exec(text);
 
   if (!match) return null;
 
@@ -452,6 +452,124 @@ function renderToolResult(toolResult, isUser) {
 }
 
 /**
+ * Create a zero-md element with markdown content and optional styles
+ */
+async function createMarkdownElement(text, isUser, includeStyles = true) {
+  const zeroMd = await createZeroMdElement();
+  const script = document.createElement('script');
+  script.type = 'text/markdown';
+  script.textContent = text;
+  zeroMd.appendChild(script);
+  if (includeStyles) {
+    zeroMd.appendChild(createZeroMdStyles(isUser));
+  }
+  return zeroMd;
+}
+
+/**
+ * Render a text content part, handling SESSION_DATA blocks
+ */
+async function renderTextPart(part, isUser, bubble) {
+  const sessionData = extractSessionData(part.content);
+
+  if (!sessionData) {
+    bubble.appendChild(await createMarkdownElement(part.content, isUser));
+    return;
+  }
+
+  if (sessionData.textBefore.trim()) {
+    bubble.appendChild(await createMarkdownElement(sessionData.textBefore, isUser));
+  }
+
+  bubble.appendChild(renderSessionDataBlock(sessionData, isUser));
+
+  if (sessionData.textAfter.trim()) {
+    bubble.appendChild(await createMarkdownElement(sessionData.textAfter, isUser));
+  }
+}
+
+/**
+ * Render content parts into a bubble element
+ */
+async function renderContentParts(contentParts, isUser, bubble) {
+  if (contentParts.length === 0) {
+    bubble.appendChild(await createMarkdownElement('*Sin contenido*', isUser, false));
+    return;
+  }
+
+  for (let index = 0; index < contentParts.length; index++) {
+    const part = contentParts[index];
+
+    if (part.type === 'text') {
+      await renderTextPart(part, isUser, bubble);
+    } else if (part.type === 'tool_use') {
+      bubble.appendChild(renderToolUse(part, isUser));
+    } else if (part.type === 'tool_result') {
+      bubble.appendChild(renderToolResult(part, isUser));
+    }
+
+    if (index < contentParts.length - 1) {
+      const spacer = document.createElement('div');
+      spacer.className = 'mt-3';
+      bubble.appendChild(spacer);
+    }
+  }
+}
+
+/**
+ * Build metrics HTML string from message metrics data
+ */
+function buildMetricsHTML(itemMetrics, isUser) {
+  const usage = itemMetrics.accumulated_usage || {};
+  const perfMetrics = itemMetrics.accumulated_metrics || {};
+  const cycleMetrics = itemMetrics.cycle_metrics || {};
+  const toolUsage = itemMetrics.tool_usage || {};
+
+  const cacheRead = usage.cacheReadInputTokens || 0;
+  const cacheWrite = usage.cacheWriteInputTokens || 0;
+  const totalCacheable = cacheRead + cacheWrite;
+  const cacheHitRate = totalCacheable > 0 ? Math.round((cacheRead / totalCacheable) * 100) : null;
+
+  const toolNames = Object.keys(toolUsage);
+  const totalToolCalls = toolNames.reduce((sum, name) => sum + (toolUsage[name]?.call_count || 0), 0);
+  const totalToolErrors = toolNames.reduce((sum, name) => sum + (toolUsage[name]?.error_count || 0), 0);
+
+  let html = `
+    <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs ${isUser ? 'text-primary-100' : 'text-gray-500'}">
+      <span title="Total Tokens (in: ${Format.number(usage.inputTokens || 0)}, out: ${Format.number(usage.outputTokens || 0)})">
+        🔢 ${Format.number(usage.totalTokens || 0)}
+      </span>
+      <span title="Latencia total">
+        ⏱️ ${perfMetrics.latencyMs || 0}ms
+      </span>`;
+
+  if (perfMetrics.timeToFirstByteMs) {
+    html += `<span title="Time to First Byte">⚡ TTFB: ${perfMetrics.timeToFirstByteMs}ms</span>`;
+  }
+
+  if (cacheHitRate !== null) {
+    const cacheIcon = cacheHitRate > 50 ? '✅' : '📝';
+    html += `<span title="Cache: ${Format.number(cacheRead)} read (hits), ${Format.number(cacheWrite)} write (miss)">${cacheIcon} Cache: ${cacheHitRate}%</span>`;
+  }
+
+  if (cycleMetrics.cycle_count) {
+    html += `<span title="Cycles: ${cycleMetrics.cycle_count}, Total: ${(cycleMetrics.total_duration || 0).toFixed(2)}s, Avg: ${(cycleMetrics.average_cycle_time || 0).toFixed(2)}s">🔄 ${cycleMetrics.cycle_count} cycle${cycleMetrics.cycle_count > 1 ? 's' : ''}</span>`;
+  }
+
+  if (totalToolCalls > 0) {
+    const toolIcon = totalToolErrors > 0 ? '⚠️' : '🔧';
+    const toolTitle = toolNames.map(name => {
+      const t = toolUsage[name];
+      return `${name}: ${t.call_count} calls (${t.success_count}✓ ${t.error_count}✗) ${t.average_time?.toFixed(2) || 0}s avg`;
+    }).join('\\n');
+    html += `<span title="${toolTitle}">${toolIcon} ${totalToolCalls} tool${totalToolCalls > 1 ? 's' : ''}${totalToolErrors > 0 ? ` (${totalToolErrors} err)` : ''}</span>`;
+  }
+
+  html += `</div>`;
+  return html;
+}
+
+/**
  * Timeline Message Component
  * Renders a message in the timeline
  */
@@ -460,14 +578,9 @@ async function renderTimelineMessage(item) {
   const container = document.createElement('div');
   container.className = `flex ${isUser ? 'justify-end' : 'justify-start'} fade-in`;
 
-  // Parse message content
-  const contentParts = parseMessageContent(item.content);
-
-  // Create wrapper div
   const wrapper = document.createElement('div');
   wrapper.className = `max-w-[85%] ${isUser ? 'ml-auto' : 'mr-auto'}`;
 
-  // Add agent badge and timestamp for assistant messages
   if (!isUser) {
     const header = document.createElement('div');
     header.className = 'flex items-center space-x-2 mb-1';
@@ -475,180 +588,29 @@ async function renderTimelineMessage(item) {
       <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-primary-100 text-primary-800">
         ${Format.escapeHtml(item.agent_id)}
       </span>
-      <span class="text-xs text-gray-500">
-        ${Format.date(item.timestamp)}
-      </span>
+      <span class="text-xs text-gray-500">${Format.date(item.timestamp)}</span>
     `;
     wrapper.appendChild(header);
   }
 
-  // Create message bubble container
   const bubble = document.createElement('div');
   bubble.className = `rounded-lg px-4 py-3 ${isUser ? 'bg-primary-600 text-white user-message' : 'bg-gray-100 text-gray-900 assistant-message'}`;
 
-  // Render each content part
-  if (contentParts.length === 0) {
-    // No content - show placeholder
-    const zeroMd = await createZeroMdElement();
-    const script = document.createElement('script');
-    script.type = 'text/markdown';
-    script.textContent = '*Sin contenido*';
-    zeroMd.appendChild(script);
-    bubble.appendChild(zeroMd);
-  } else {
-    // Use for...of instead of forEach to support await
-    for (let index = 0; index < contentParts.length; index++) {
-      const part = contentParts[index];
-      if (part.type === 'text') {
-        // Check for SESSION_DATA blocks that can cause zero-md to hang
-        const sessionData = extractSessionData(part.content);
+  await renderContentParts(parseMessageContent(item.content), isUser, bubble);
 
-        if (sessionData) {
-          // Render text before SESSION_DATA (if any) with zero-md
-          if (sessionData.textBefore.trim()) {
-            const zeroMdBefore = await createZeroMdElement();
-            const scriptBefore = document.createElement('script');
-            scriptBefore.type = 'text/markdown';
-            scriptBefore.textContent = sessionData.textBefore;
-            zeroMdBefore.appendChild(scriptBefore);
-            zeroMdBefore.appendChild(createZeroMdStyles(isUser));
-            bubble.appendChild(zeroMdBefore);
-          }
-
-          // Render SESSION_DATA as collapsible JSON viewer (not zero-md)
-          const sessionDataEl = renderSessionDataBlock(sessionData, isUser);
-          bubble.appendChild(sessionDataEl);
-
-          // Render text after SESSION_DATA (if any) with zero-md
-          if (sessionData.textAfter.trim()) {
-            const zeroMdAfter = await createZeroMdElement();
-            const scriptAfter = document.createElement('script');
-            scriptAfter.type = 'text/markdown';
-            scriptAfter.textContent = sessionData.textAfter;
-            zeroMdAfter.appendChild(scriptAfter);
-            zeroMdAfter.appendChild(createZeroMdStyles(isUser));
-            bubble.appendChild(zeroMdAfter);
-          }
-        } else {
-          // Normal text content - render with zero-md
-          const zeroMd = await createZeroMdElement();
-
-          // Add markdown content
-          const script = document.createElement('script');
-          script.type = 'text/markdown';
-          script.textContent = part.content;
-          zeroMd.appendChild(script);
-
-          // Add custom styles to zero-md
-          zeroMd.appendChild(createZeroMdStyles(isUser));
-
-          bubble.appendChild(zeroMd);
-        }
-      } else if (part.type === 'tool_use') {
-        // Render tool call
-        const toolUseEl = renderToolUse(part, isUser);
-        bubble.appendChild(toolUseEl);
-      } else if (part.type === 'tool_result') {
-        // Render tool result
-        const toolResultEl = renderToolResult(part, isUser);
-        bubble.appendChild(toolResultEl);
-      }
-
-      // Add spacing between parts (except for the last one)
-      if (index < contentParts.length - 1) {
-        const spacer = document.createElement('div');
-        spacer.className = 'mt-3';
-        bubble.appendChild(spacer);
-      }
-    }
-  }
-
-  // Add metrics if available
   if (item.metrics) {
     const metrics = document.createElement('div');
     metrics.className = `mt-2 pt-2 border-t ${isUser ? 'border-primary-500' : 'border-gray-200'}`;
-
-    // Build metrics HTML with all available data
-    const usage = item.metrics.accumulated_usage || {};
-    const perfMetrics = item.metrics.accumulated_metrics || {};
-    const cycleMetrics = item.metrics.cycle_metrics || {};
-    const toolUsage = item.metrics.tool_usage || {};
-
-    // Extract cache metrics
-    const cacheRead = usage.cacheReadInputTokens || 0;
-    const cacheWrite = usage.cacheWriteInputTokens || 0;
-    const totalCacheable = cacheRead + cacheWrite;
-    const cacheHitRate = totalCacheable > 0 ? Math.round((cacheRead / totalCacheable) * 100) : null;
-
-    // Build tool usage summary
-    const toolNames = Object.keys(toolUsage);
-    const totalToolCalls = toolNames.reduce((sum, name) => sum + (toolUsage[name]?.call_count || 0), 0);
-    const totalToolErrors = toolNames.reduce((sum, name) => sum + (toolUsage[name]?.error_count || 0), 0);
-
-    // First row: Tokens and Latency
-    let metricsHTML = `
-      <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs ${isUser ? 'text-primary-100' : 'text-gray-500'}">
-        <span title="Total Tokens (in: ${Format.number(usage.inputTokens || 0)}, out: ${Format.number(usage.outputTokens || 0)})">
-          🔢 ${Format.number(usage.totalTokens || 0)}
-        </span>
-        <span title="Latencia total">
-          ⏱️ ${perfMetrics.latencyMs || 0}ms
-        </span>`;
-
-    // Add Time to First Byte if available
-    if (perfMetrics.timeToFirstByteMs) {
-      metricsHTML += `
-        <span title="Time to First Byte">
-          ⚡ TTFB: ${perfMetrics.timeToFirstByteMs}ms
-        </span>`;
-    }
-
-    // Add cache metrics if available
-    if (cacheHitRate !== null) {
-      const cacheIcon = cacheHitRate > 50 ? '✅' : '📝';
-      metricsHTML += `
-        <span title="Cache: ${Format.number(cacheRead)} read (hits), ${Format.number(cacheWrite)} write (miss)">
-          ${cacheIcon} Cache: ${cacheHitRate}%
-        </span>`;
-    }
-
-    // Add cycle metrics if available
-    if (cycleMetrics.cycle_count) {
-      metricsHTML += `
-        <span title="Cycles: ${cycleMetrics.cycle_count}, Total: ${(cycleMetrics.total_duration || 0).toFixed(2)}s, Avg: ${(cycleMetrics.average_cycle_time || 0).toFixed(2)}s">
-          🔄 ${cycleMetrics.cycle_count} cycle${cycleMetrics.cycle_count > 1 ? 's' : ''}
-        </span>`;
-    }
-
-    // Add tool usage summary if available
-    if (totalToolCalls > 0) {
-      const toolIcon = totalToolErrors > 0 ? '⚠️' : '🔧';
-      const toolTitle = toolNames.map(name => {
-        const t = toolUsage[name];
-        return `${name}: ${t.call_count} calls (${t.success_count}✓ ${t.error_count}✗) ${t.average_time?.toFixed(2) || 0}s avg`;
-      }).join('\\n');
-      metricsHTML += `
-        <span title="${toolTitle}">
-          ${toolIcon} ${totalToolCalls} tool${totalToolCalls > 1 ? 's' : ''}${totalToolErrors > 0 ? ` (${totalToolErrors} err)` : ''}
-        </span>`;
-    }
-
-    metricsHTML += `</div>`;
-    metrics.innerHTML = metricsHTML;
+    metrics.innerHTML = buildMetricsHTML(item.metrics, isUser);
     bubble.appendChild(metrics);
   }
 
   wrapper.appendChild(bubble);
 
-  // Add timestamp for user messages
   if (isUser) {
     const footer = document.createElement('div');
     footer.className = 'text-right mt-1';
-    footer.innerHTML = `
-      <span class="text-xs text-gray-500">
-        ${Format.date(item.timestamp)}
-      </span>
-    `;
+    footer.innerHTML = `<span class="text-xs text-gray-500">${Format.date(item.timestamp)}</span>`;
     wrapper.appendChild(footer);
   }
 

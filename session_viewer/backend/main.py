@@ -105,8 +105,8 @@ logger = logging.getLogger(__name__)
 # Security Helpers (CWE-209, CWE-532)
 # ============================================================================
 
-REGEX_KEY = REGEX_KEY
-REGEX_OPTIONS_KEY = REGEX_OPTIONS_KEY
+REGEX_KEY = "$regex"
+REGEX_OPTIONS_KEY = "$options"
 
 
 def sanitize_query_for_logging(query: Dict[str, Any]) -> Dict[str, Any]:

@@ -159,8 +159,8 @@ class Settings(BaseSettings):
 
         # Use default development connection string if nothing else worked
         if not self.mongodb_connection_string:
-            self.mongodb_connection_string = (  # noqa: S105
-                "mongodb://mongodb:mongodb@localhost:8550/"
+            self.mongodb_connection_string = (
+                "mongodb://localhost:27017/"
             )
             print("Using default development MongoDB connection string")
 
