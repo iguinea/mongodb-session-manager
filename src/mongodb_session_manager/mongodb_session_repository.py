@@ -404,9 +404,6 @@ class MongoDBSessionRepository(SessionRepository):
         """Create a new Message for the Agent."""
 
         message_data = session_message.__dict__
-        # message_data = self._serialize_datetime(
-        #     message_data, exclude_fields=["created_at", "updated_at"]
-        # )
         message_data["created_at"] = datetime.now(UTC)
         message_data["updated_at"] = datetime.now(UTC)
 
@@ -450,10 +447,6 @@ class MongoDBSessionRepository(SessionRepository):
             # Find message by ID
             for msg_data in messages:
                 if msg_data.get("message_id") == message_id:
-                    # logger.warning(f"msg_data1: {msg_data}")
-                    # msg_data = self._deserialize_datetime(msg_data)
-                    # logger.warning(f"msg_data2: {msg_data}")
-
                     # Filter out metrics fields that SessionMessage doesn't accept
                     # event_loop_metrics is the custom metrics we store
                     # latency_ms, input_tokens, output_tokens are no longer accepted in strands-agents 1.12.0+
@@ -480,9 +473,6 @@ class MongoDBSessionRepository(SessionRepository):
         """Update a Message (usually for redaction)."""
 
         message_data = session_message.__dict__
-        # message_data = self._serialize_datetime(
-        #     message_data, exclude_fields=["created_at", "updated_at"]
-        # )
 
         try:
             # First, get the current messages to find the index
@@ -573,8 +563,6 @@ class MongoDBSessionRepository(SessionRepository):
             result = []
             for i, msg_data in enumerate(messages):
                 try:
-                    # msg_data = self._deserialize_datetime(msg_data)
-                    # Log the structure before conversion
                     logger.debug(f"Message {i} structure: {list(msg_data.keys())}")
 
                     # Filter out metrics fields that SessionMessage doesn't accept

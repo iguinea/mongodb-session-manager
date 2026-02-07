@@ -109,17 +109,7 @@ async def lifespan(app: FastAPI):
 
 
 # Create FastAPI app with lifespan handler
-app = FastAPI(
-    # title="Virtual Agent API with Optimized Session Management",
-    # description="This API demonstrates optimized session management using MongoDB with connection pooling and caching.",
-    # version="1.0.0",
-    # contact={
-    #     "name": "Iñaki Guinea Beristain",
-    #     "email": "iguinea@gmail.com"
-    # },
-    # license_info={"name": "MIT License"},
-    lifespan=lifespan
-)
+app = FastAPI(lifespan=lifespan)
 
 # --- Middleware CORS ---
 # Esencial en una arquitectura de 2 servidores para permitir la comunicación
@@ -227,25 +217,6 @@ async def chat(request: Request, data: dict, session_id: str = Header(...)):
 
 
 # # --- New endpoints for session management features ---
-# @app.get("/sessions/{session_id}")
-# async def get_session_details(session_id: str, _: str = Depends(verify_api_key)):
-#     """Get session data and metadata."""
-#     session_store = get_session_store()
-#     if not session_store:
-#         raise HTTPException(status_code=503, detail="Session store not initialized")
-#     session_data = await session_store.get_session(session_id)
-#     if not session_data:
-#         raise HTTPException(status_code=404, detail="Session not found")
-
-#     metadata = await session_store.get_session_metadata(session_id)
-
-#     return {
-#         "session_id": session_id,
-#         "data": session_data,
-#         "metadata": metadata
-#     }
-
-
 @app.get("/case-types")
 async def get_case_types():
     """Get available case types."""
@@ -278,12 +249,6 @@ async def health_check():
     except Exception as e:
         return {"status": "unhealthy", "error": str(e)}
 
-    # session_store = get_session_store()
-    # if not session_store:
-    #     return {"status": "unhealthy", "reason": "Session store not initialized"}
-    # health = await session_store.get_service_health()
-    # return health
-
 
 @app.get("/metrics")
 async def get_metrics():
@@ -298,13 +263,6 @@ async def get_metrics():
     except Exception as e:
         logging.error(f"Error getting metrics: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-    # """Get session store metrics."""
-    # session_store = get_session_store()
-    # if not session_store:
-    #     raise HTTPException(status_code=503, detail="Session store not initialized")
-    # metrics = await session_store.get_system_metrics()
-    # return metrics
 
 
 # Add this to handle running with uvicorn programmatically
