@@ -1,0 +1,56 @@
+name: Update Changelog
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+jobs:
+  changelog:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Generate changelog entry
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          DATE=$(date +%Y-%m-%d)
+
+          # Get commits from the merged PR
+          COMMITS=$(gh pr view "$PR_NUMBER" --json commits --jq '.commits[].messageHeadline' | grep -v '^Co-Authored-By:')
+
+          # Build changelog entry
+          ENTRY="## [$DATE] PR #${PR_NUMBER} - ${PR_TITLE} (@${PR_AUTHOR})\n"
+          while IFS= read -r commit; do
+            [ -z "$commit" ] && continue
+            ENTRY="${ENTRY}\n- ${commit}"
+          done <<< "$COMMITS"
+          ENTRY="${ENTRY}\n"
+
+          # Prepend to CHANGELOG.md (create if doesn't exist)
+          if [ -f CHANGELOG.md ]; then
+            # Insert after the header line
+            HEADER=$(head -n 2 CHANGELOG.md)
+            BODY=$(tail -n +3 CHANGELOG.md)
+            printf "%s\n\n%b\n%s" "$HEADER" "$ENTRY" "$BODY" > CHANGELOG.md
+          else
+            printf "# Changelog\n\n%b\n" "$ENTRY" > CHANGELOG.md
+          fi
+
+      - name: Commit changelog
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          git diff --staged --quiet || git commit -m "Docs: update CHANGELOG.md for PR #${{ github.event.pull_request.number }}"
+          git push
