@@ -3,12 +3,15 @@
 # Default target
 .DEFAULT_GOAL := help
 
+# Configurable port
+PORT ?= 8882
+
 # Backend server
 run: ## Start the backend server
 	uv run python main.py
 
 dev: ## Start backend in development mode with auto-reload
-	uv run uvicorn main:app --reload --host 0.0.0.0 --port 8882 --log-level info
+	uv run uvicorn main:app --reload --host 0.0.0.0 --port $(PORT) --log-level info
 
 # Code quality
 format: ## Format code with ruff

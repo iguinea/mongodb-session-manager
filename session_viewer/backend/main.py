@@ -8,14 +8,18 @@ unified timeline visualization of multi-agent conversations.
 import logging
 import sys
 import hashlib
+import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 # Add parent directory to path to access src module
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -41,12 +45,124 @@ from models import (
     ConnectionPoolStats,
 )
 
-# Configure logging
-logging.basicConfig(
-    level=getattr(logging, settings.log_level.upper()),
-    format="%(levelname)s:     %(message)s"
-)
+
+# ============================================================================
+# Structured Logging Configuration
+# ============================================================================
+
+def configure_logging():
+    """Configure logging based on settings.
+
+    Supports two formats:
+    - "json": Structured JSON logging for CloudWatch Insights (production)
+    - "text": Human-readable format for development
+    """
+    log_level = getattr(logging, settings.log_level.upper())
+
+    if settings.log_format.lower() == "json":
+        from pythonjsonlogger import jsonlogger
+
+        class CustomJsonFormatter(jsonlogger.JsonFormatter):
+            """Custom JSON formatter with service context."""
+
+            def add_fields(self, log_record, record, message_dict):
+                super().add_fields(log_record, record, message_dict)
+                log_record['timestamp'] = datetime.now(timezone.utc).isoformat()
+                log_record['service'] = settings.log_service_name
+                log_record['environment'] = settings.log_environment
+                log_record['level'] = record.levelname
+                log_record.pop('levelname', None)
+
+        handler = logging.StreamHandler(sys.stdout)
+        handler.setFormatter(CustomJsonFormatter(
+            '%(timestamp)s %(level)s %(name)s %(message)s'
+        ))
+
+        root_logger = logging.getLogger()
+        root_logger.handlers.clear()
+        root_logger.addHandler(handler)
+        root_logger.setLevel(log_level)
+
+        for logger_name in ["uvicorn", "uvicorn.access", "uvicorn.error"]:
+            uvicorn_logger = logging.getLogger(logger_name)
+            uvicorn_logger.handlers.clear()
+            uvicorn_logger.addHandler(handler)
+
+    else:
+        logging.basicConfig(
+            level=log_level,
+            format="%(levelname)s:     %(message)s",
+            force=True
+        )
+
+
+# Initialize logging
+configure_logging()
 logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# Security Helpers (CWE-209, CWE-532)
+# ============================================================================
+
+def sanitize_query_for_logging(query: Dict[str, Any]) -> Dict[str, Any]:
+    """Sanitize MongoDB query for safe logging.
+
+    Prevents sensitive data exposure in logs (CWE-532).
+    """
+    import copy
+
+    if not query:
+        return {}
+
+    safe_query = copy.deepcopy(query)
+
+    for key, value in safe_query.items():
+        if isinstance(value, dict):
+            if "$regex" in value:
+                pattern = value["$regex"]
+                if len(pattern) > 20:
+                    value["$regex"] = pattern[:20] + "..."
+        elif isinstance(value, str):
+            if len(value) > 20:
+                safe_query[key] = value[:20] + "..."
+
+    return safe_query
+
+
+def truncate_session_id(session_id: str) -> str:
+    """Truncate session ID for safe logging (CWE-532)."""
+    if not session_id:
+        return "<empty>"
+    if len(session_id) <= 8:
+        return session_id
+    return session_id[:8] + "..."
+
+
+def generate_error_response(
+    status_code: int,
+    error: Exception,
+    context: str = "operation"
+) -> tuple[str, str]:
+    """Generate safe error response with request ID for correlation (CWE-209)."""
+    request_id = str(uuid.uuid4())[:8]
+
+    logger.error(
+        f"[{request_id}] Error in {context}: {type(error).__name__}: {error}",
+        exc_info=True
+    )
+
+    messages = {
+        400: "Invalid request parameters",
+        401: "Authentication required",
+        403: "Access denied",
+        404: "Resource not found",
+        500: "An internal error occurred. Please try again later.",
+    }
+
+    generic_message = messages.get(status_code, "An error occurred")
+
+    return request_id, generic_message
 
 
 # ============================================================================
@@ -56,10 +172,8 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Handle application startup and shutdown."""
-    # Startup
     logger.info("Starting Session Viewer Backend...")
 
-    # Initialize the global MongoDB connection factory
     factory = initialize_global_factory(
         connection_string=settings.mongodb_connection_string,
         database_name=settings.database_name,
@@ -67,12 +181,10 @@ async def lifespan(app: FastAPI):
         maxPoolSize=settings.max_pool_size,
         minPoolSize=settings.min_pool_size,
         maxIdleTimeMS=settings.max_idle_time_ms,
+        retryWrites=False,
     )
 
-    # Store factory in app state
     app.state.factory = factory
-
-    # Get direct database access for queries
     app.state.collection = factory._client[settings.database_name][settings.collection_name]
 
     logger.info(
@@ -81,9 +193,8 @@ async def lifespan(app: FastAPI):
         f"Collection: {settings.collection_name}"
     )
 
-    yield  # Application runs
+    yield
 
-    # Shutdown
     logger.info("Shutting down Session Viewer Backend...")
     close_global_factory()
     logger.info("Cleanup complete")
@@ -96,19 +207,119 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Session Viewer API",
     description="REST API for viewing and analyzing MongoDB session data",
-    version="0.1.19",
+    version="0.2.0",
     lifespan=lifespan,
 )
 
-# CORS Middleware - DESARROLLO: Permitir todos los orígenes
-# Para producción, cambiar allow_origins=["*"] por settings.allowed_origins
+# CORS Middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,  # Debe ser False cuando allow_origins=["*"]
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=settings.allowed_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
+    max_age=3600,
 )
+
+# ============================================================================
+# Security Headers Middleware (CWE-693 Prevention)
+# ============================================================================
+
+if settings.security_headers_enabled:
+    @app.middleware("http")
+    async def add_security_headers(request: Request, call_next):
+        """Add security headers to all HTTP responses."""
+        response = await call_next(request)
+
+        response.headers["X-Frame-Options"] = settings.x_frame_options
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Content-Security-Policy"] = settings.content_security_policy
+        response.headers["Referrer-Policy"] = settings.referrer_policy
+        response.headers["Permissions-Policy"] = settings.permissions_policy
+
+        if "server" in response.headers:
+            del response.headers["server"]
+
+        return response
+
+    logger.info("Security headers middleware enabled")
+else:
+    logger.warning("Security headers middleware DISABLED - not recommended for production")
+
+
+# ============================================================================
+# Rate Limiting (CWE-307 Prevention)
+# ============================================================================
+
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+logger.info(
+    f"Rate limiting configured - Auth: {settings.rate_limit_auth}, "
+    f"Search: {settings.rate_limit_search}, Read: {settings.rate_limit_read}, "
+    f"Metadata: {settings.rate_limit_metadata}"
+)
+
+
+# ============================================================================
+# Frontend Static Files (Served via Endpoints)
+# ============================================================================
+
+frontend_path = Path(__file__).parent.parent / "frontend"
+
+
+def get_frontend_file_path(filename: str) -> Optional[Path]:
+    """Get safe path to frontend file, validating it exists within frontend directory."""
+    file_path = (frontend_path / filename).resolve()
+    if not str(file_path).startswith(str(frontend_path.resolve())):
+        return None
+    return file_path if file_path.exists() else None
+
+
+@app.get("/")
+async def serve_index():
+    """Serve index.html at root path."""
+    try:
+        file_path = get_frontend_file_path("index.html")
+        if not file_path:
+            raise HTTPException(status_code=404, detail="index.html not found")
+        return FileResponse(str(file_path), media_type="text/html")
+    except Exception as e:
+        logger.error(f"Error serving index.html: {e}")
+        raise HTTPException(status_code=500, detail="Failed to serve index.html")
+
+
+@app.get("/components.js")
+async def serve_components_js():
+    """Serve components.js JavaScript file."""
+    try:
+        file_path = get_frontend_file_path("components.js")
+        if not file_path:
+            raise HTTPException(status_code=404, detail="components.js not found")
+        return FileResponse(str(file_path), media_type="application/javascript")
+    except Exception as e:
+        logger.error(f"Error serving components.js: {e}")
+        raise HTTPException(status_code=500, detail="Failed to serve components.js")
+
+
+@app.get("/viewer.js")
+async def serve_viewer_js():
+    """Serve viewer.js JavaScript file."""
+    try:
+        file_path = get_frontend_file_path("viewer.js")
+        if not file_path:
+            raise HTTPException(status_code=404, detail="viewer.js not found")
+        return FileResponse(str(file_path), media_type="application/javascript")
+    except Exception as e:
+        logger.error(f"Error serving viewer.js: {e}")
+        raise HTTPException(status_code=500, detail="Failed to serve viewer.js")
+
+
+if frontend_path.exists():
+    logger.info(f"Frontend files will be served via endpoints from {frontend_path}")
+else:
+    logger.warning(f"Frontend directory not found at {frontend_path}")
 
 
 # ============================================================================
@@ -117,42 +328,42 @@ app.add_middleware(
 
 @app.middleware("http")
 async def password_middleware(request: Request, call_next):
-    """Validate password for all requests except /health and /check_password endpoints.
+    """Validate password for all requests except /health, /check_password, and frontend routes.
 
-    Special handling for session detail endpoint:
-    - If X-Session-Password header is present, skip global password validation
-    - Session-specific validation will be handled by the endpoint itself
+    Supports dual authentication:
+    1. X-Session-Password: Session-specific password for direct access
+    2. X-Password: Global password for authenticated access
     """
-    # Allow OPTIONS requests (CORS preflight) to pass through
     if request.method == "OPTIONS":
         return await call_next(request)
 
-    # Exclude authentication endpoints
-    excluded_paths = ["/health", "/api/v1/check_password"]
+    excluded_paths = ["/health", "/api/session_viewer/v1/check_password", "/", "/components.js", "/viewer.js"]
 
-    # Check if path matches session-specific password check endpoint
-    # Pattern: /api/v1/sessions/{session_id}/check_password
-    if request.url.path.startswith("/api/v1/sessions/") and request.url.path.endswith("/check_password"):
+    if request.url.path in excluded_paths or request.url.path.endswith("/check_password"):
         return await call_next(request)
 
-    if request.url.path in excluded_paths:
-        return await call_next(request)
+    session_password_hash = request.headers.get("X-Session-Password")
+    if session_password_hash:
+        path_parts = request.url.path.split("/")
 
-    # Special handling for session detail endpoint with session-specific password
-    # Pattern: GET /api/v1/sessions/{session_id}
-    if request.method == "GET" and request.url.path.startswith("/api/v1/sessions/"):
-        # Check if this is the detail endpoint (not search)
-        # Path format: /api/v1/sessions/{session_id} (no trailing slash or additional segments)
-        path_parts = request.url.path.rstrip('/').split('/')
-        if len(path_parts) == 5:  # ['', 'api', 'v1', 'sessions', '{session_id}']
-            # Check if X-Session-Password header is present
-            session_password_hash = request.headers.get("X-Session-Password")
-            if session_password_hash:
-                # Allow request to proceed - validation will happen in endpoint
-                logger.info("Session detail request with X-Session-Password, bypassing global auth")
+        if len(path_parts) >= 6 and path_parts[1] == "api" and path_parts[2] == "session_viewer" and path_parts[3] == "v1" and path_parts[4] == "sessions":
+            session_id = path_parts[5]
+
+            is_valid, used_global = validate_session_password(session_id, session_password_hash)
+            if is_valid:
+                logger.debug(f"Session password authentication successful for {session_id}")
                 return await call_next(request)
+            else:
+                return JSONResponse(
+                    status_code=401,
+                    content={"detail": "Invalid session password"}
+                )
+        else:
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "Session password only grants access to specific session"}
+            )
 
-    # Validate X-Password header (global password)
     password_hash = request.headers.get("X-Password")
 
     if not password_hash:
@@ -161,7 +372,6 @@ async def password_middleware(request: Request, call_next):
             content={"detail": "Missing password header"}
         )
 
-    # Generate expected hash from environment variable
     expected_password = settings.backend_password
     expected_hash = hashlib.sha256(expected_password.encode()).hexdigest()
 
@@ -175,65 +385,35 @@ async def password_middleware(request: Request, call_next):
 
 
 # ============================================================================
-# Session Password Validation
-# ============================================================================
-
-async def validate_session_password(
-    collection,
-    session_id: str,
-    password_hash: str,
-    global_password_hash: str
-) -> dict:
-    """
-    Validate password against:
-    1. session_viewer_password of the specific session
-    2. BACKEND_PASSWORD global (fallback for legacy sessions)
-
-    Args:
-        collection: MongoDB collection instance
-        session_id: The session ID to validate against
-        password_hash: SHA-256 hash of the password to validate
-        global_password_hash: SHA-256 hash of the global BACKEND_PASSWORD
-
-    Returns:
-        dict: {"valid": bool, "used_global": bool}
-            - valid: True if password is correct
-            - used_global: True if global password was used (legacy fallback)
-    """
-    try:
-        # 1. Try to get session-specific password from MongoDB
-        session_doc = collection.find_one(
-            {"_id": session_id},
-            {"session_viewer_password": 1}
-        )
-
-        if session_doc and "session_viewer_password" in session_doc:
-            session_password = session_doc["session_viewer_password"]
-
-            # Hash session password and compare
-            session_hash = hashlib.sha256(session_password.encode()).hexdigest()
-
-            if password_hash == session_hash:
-                logger.info(f"Session {session_id}: Authenticated with session-specific password")
-                return {"valid": True, "used_global": False}
-
-        # 2. Fallback to global password (for legacy sessions without session_viewer_password)
-        if password_hash == global_password_hash:
-            logger.info(f"Session {session_id}: Authenticated with global password (legacy fallback)")
-            return {"valid": True, "used_global": True}
-
-        # 3. Both failed
-        logger.warning(f"Session {session_id}: Password validation failed")
-        return {"valid": False, "used_global": False}
-
-    except Exception as e:
-        logger.error(f"Error validating session password for {session_id}: {e}")
-        return {"valid": False, "used_global": False}
-
-
-# ============================================================================
 # Helper Functions
 # ============================================================================
+
+def validate_session_password(session_id: str, password_hash: str) -> tuple[bool, bool]:
+    """Validate session-specific password with fallback to global password."""
+    try:
+        collection = app.state.collection
+
+        session_doc = collection.find_one({"_id": session_id}, {"session_viewer_password": 1})
+
+        if session_doc and "session_viewer_password" in session_doc:
+            expected_hash = hashlib.sha256(session_doc["session_viewer_password"].encode()).hexdigest()
+            if password_hash == expected_hash:
+                logger.debug(f"Session password validated for {session_id}")
+                return (True, False)
+
+        expected_password = settings.backend_password
+        expected_hash = hashlib.sha256(expected_password.encode()).hexdigest()
+
+        if password_hash == expected_hash:
+            logger.debug(f"Global password used for session {session_id}")
+            return (True, True)
+
+        return (False, False)
+
+    except Exception as e:
+        logger.error(f"Error validating session password for {truncate_session_id(session_id)}: {e}")
+        return (False, False)
+
 
 def build_search_query(
     filters: Optional[str],
@@ -243,37 +423,29 @@ def build_search_query(
 ) -> Dict[str, Any]:
     """Build MongoDB query from search parameters.
 
-    Args:
-        filters: JSON string with metadata filters
-        session_id: Session ID for partial matching
-        created_at_start: Start date for date range
-        created_at_end: End date for date range
-
-    Returns:
-        MongoDB query dictionary
+    All regex values are sanitized with re.escape() to prevent NoSQL injection.
     """
     import json
+    import re
 
     query = {}
 
-    # Parse and apply dynamic metadata filters
     if filters:
         try:
             filters_dict = json.loads(filters)
             for key, value in filters_dict.items():
                 if key.startswith("metadata."):
-                    # Case-insensitive partial matching for metadata fields
-                    query[key] = {"$regex": str(value), "$options": "i"}
+                    safe_value = re.escape(str(value))
+                    query[key] = {"$regex": safe_value, "$options": "i"}
                 else:
-                    query[key] = value
+                    query[key] = str(value)
         except json.JSONDecodeError:
             logger.warning(f"Invalid JSON in filters parameter: {filters}")
 
-    # Session ID partial matching
     if session_id:
-        query["session_id"] = {"$regex": session_id, "$options": "i"}
+        safe_session_id = re.escape(session_id)
+        query["session_id"] = {"$regex": safe_session_id, "$options": "i"}
 
-    # Date range filtering
     if created_at_start or created_at_end:
         query["created_at"] = {}
         if created_at_start:
@@ -285,25 +457,13 @@ def build_search_query(
 
 
 def build_unified_timeline(session_doc: Dict[str, Any]) -> List[TimelineItem]:
-    """Build unified chronological timeline from session document.
-
-    Merges messages from all agents and feedbacks into a single
-    chronologically ordered timeline.
-
-    Args:
-        session_doc: MongoDB session document
-
-    Returns:
-        List of timeline items (messages and feedbacks) sorted by timestamp
-    """
+    """Build unified chronological timeline from session document."""
     timeline = []
 
-    # Extract messages from all agents
     agents = session_doc.get("agents", {})
     for agent_id, agent_data in agents.items():
         messages = agent_data.get("messages", [])
         for msg in messages:
-            # Extract message data
             message_data = msg.get("message", {})
             role = message_data.get("role")
             content = message_data.get("content", [])
@@ -318,7 +478,6 @@ def build_unified_timeline(session_doc: Dict[str, Any]) -> List[TimelineItem]:
             )
             timeline.append(timeline_msg)
 
-    # Extract feedbacks
     feedbacks = session_doc.get("feedbacks", [])
     for feedback in feedbacks:
         timeline_feedback = TimelineFeedback(
@@ -328,28 +487,13 @@ def build_unified_timeline(session_doc: Dict[str, Any]) -> List[TimelineItem]:
         )
         timeline.append(timeline_feedback)
 
-    # Sort chronologically by timestamp
     timeline.sort(key=lambda x: x.timestamp)
 
     return timeline
 
 
 def get_indexed_fields(collection: Any) -> List[str]:
-    """Extract field names from MongoDB collection indexes.
-
-    This function queries all indexes on the collection and extracts
-    the field names, excluding system indexes (_id, _fts, etc.).
-
-    Args:
-        collection: MongoDB collection object
-
-    Returns:
-        List of unique indexed field names
-
-    Example:
-        >>> get_indexed_fields(my_collection)
-        ['session_id', 'created_at', 'metadata.status', 'metadata.priority']
-    """
+    """Extract field names from MongoDB collection indexes."""
     indexed_fields = []
 
     try:
@@ -358,18 +502,13 @@ def get_indexed_fields(collection: Any) -> List[str]:
         for index in indexes:
             index_name = index.get("name", "")
 
-            # Skip system indexes
             if index_name.startswith("_"):
                 continue
 
-            # Extract field names from index keys
-            # index["key"] is like: {"metadata.status": 1, "created_at": -1}
             for field_name, _ in index.get("key", {}).items():
-                # Skip internal fields
                 if field_name not in ["_id", "_fts", "_ftsx"]:
                     indexed_fields.append(field_name)
 
-        # Remove duplicates and return
         unique_fields = list(set(indexed_fields))
         logger.info(f"Found {len(unique_fields)} unique indexed fields")
         return unique_fields
@@ -380,32 +519,10 @@ def get_indexed_fields(collection: Any) -> List[str]:
 
 
 def detect_field_type(collection: Any, field_name: str) -> str:
-    """Detect field data type by sampling documents.
-
-    Analyzes up to 100 random documents to determine the most common
-    data type for the field. Uses heuristics for type detection:
-    - Convention-based: fields with "date" or "at" suffix → date
-    - Sample-based: analyze actual values in documents
-
-    Args:
-        collection: MongoDB collection
-        field_name: Full field name (e.g., "metadata.status")
-
-    Returns:
-        Type string: "string", "date", "number", "boolean"
-        Priority order: boolean > number > date > string
-
-    Example:
-        >>> detect_field_type(collection, "metadata.priority")
-        "string"
-        >>> detect_field_type(collection, "created_at")
-        "date"
-    """
-    # Convention-based detection for dates
+    """Detect field data type by sampling documents."""
     if "date" in field_name.lower() or field_name.endswith("_at"):
         return "date"
 
-    # Sample documents to analyze actual values
     try:
         pipeline = [
             {"$match": {field_name: {"$exists": True, "$ne": None}}},
@@ -416,13 +533,11 @@ def detect_field_type(collection: Any, field_name: str) -> str:
         samples = list(collection.aggregate(pipeline))
 
         if not samples:
-            return "string"  # Default if no samples
+            return "string"
 
-        # Analyze types found in samples
         types_found = set()
 
         for doc in samples:
-            # Navigate nested fields (e.g., "metadata.status")
             value = doc
             for part in field_name.split("."):
                 if isinstance(value, dict):
@@ -434,7 +549,6 @@ def detect_field_type(collection: Any, field_name: str) -> str:
             if value is None:
                 continue
 
-            # Determine Python type
             if isinstance(value, bool):
                 types_found.add("boolean")
             elif isinstance(value, (int, float)):
@@ -444,7 +558,6 @@ def detect_field_type(collection: Any, field_name: str) -> str:
             else:
                 types_found.add("string")
 
-        # Return most specific type (priority order)
         if "boolean" in types_found:
             return "boolean"
         elif "number" in types_found:
@@ -456,7 +569,7 @@ def detect_field_type(collection: Any, field_name: str) -> str:
 
     except Exception as e:
         logger.warning(f"Error detecting type for {field_name}: {e}")
-        return "string"  # Safe default
+        return "string"
 
 
 def get_enum_values(
@@ -464,32 +577,10 @@ def get_enum_values(
     field_name: str,
     max_values: int
 ) -> Optional[List[Any]]:
-    """Get distinct values for a field to use as enum options.
-
-    Retrieves all unique values for the field. If the count exceeds
-    max_values, returns None (too many values, not suitable for enum).
-
-    Args:
-        collection: MongoDB collection
-        field_name: Full field name (e.g., "metadata.status")
-        max_values: Maximum number of values allowed for enum
-
-    Returns:
-        Sorted list of distinct values if count <= max_values
-        None if too many values or error
-
-    Example:
-        >>> get_enum_values(collection, "metadata.status", 50)
-        ["active", "completed", "failed", "pending"]
-
-        >>> get_enum_values(collection, "metadata.customer_id", 50)
-        None  # Too many unique customer IDs
-    """
+    """Get distinct values for a field to use as enum options."""
     try:
-        # Get distinct values for the field
         distinct_values = collection.distinct(field_name)
 
-        # Check if count is within limit
         if len(distinct_values) > max_values:
             logger.info(
                 f"Field {field_name} has {len(distinct_values)} values "
@@ -497,8 +588,6 @@ def get_enum_values(
             )
             return None
 
-        # Sort values for consistent display
-        # Convert to string for sorting to handle mixed types
         sorted_values = sorted(distinct_values, key=lambda x: str(x))
 
         logger.debug(f"Field {field_name} enum values: {sorted_values}")
@@ -510,51 +599,17 @@ def get_enum_values(
 
 
 def get_metadata_fields(collection: Any) -> MetadataFieldsResponse:
-    """Get indexed fields with type information and enum values.
-
-    This function replaces the old aggregation-based approach with
-    an index-based approach that:
-    1. Lists all indexes on the collection
-    2. Extracts field names from indexes
-    3. Detects data type for each field
-    4. Retrieves enum values for configured enum fields
-
-    Args:
-        collection: MongoDB collection
-
-    Returns:
-        MetadataFieldsResponse with FieldInfo objects
-
-    Raises:
-        HTTPException: If unable to retrieve field information
-
-    Example Response:
-        {
-          "fields": [
-            {"field": "session_id", "type": "string"},
-            {"field": "created_at", "type": "date"},
-            {
-              "field": "metadata.status",
-              "type": "enum",
-              "values": ["active", "completed"]
-            }
-          ]
-        }
-    """
+    """Get indexed fields with type information and enum values."""
     try:
-        # Step 1: Get indexed fields
         indexed_fields = get_indexed_fields(collection)
 
         logger.info(f"Found {len(indexed_fields)} indexed fields")
 
-        # Step 2: Build FieldInfo for each indexed field
         field_infos = []
 
         for field_name in indexed_fields:
-            # Detect base type
             field_type = detect_field_type(collection, field_name)
 
-            # Check if field should be treated as enum
             values = None
             if field_name in settings.enum_fields:
                 logger.info(f"Checking enum values for configured field: {field_name}")
@@ -564,7 +619,6 @@ def get_metadata_fields(collection: Any) -> MetadataFieldsResponse:
                     settings.enum_max_values
                 )
 
-                # Only set type to enum if values were successfully retrieved
                 if values:
                     field_type = "enum"
                     logger.info(
@@ -577,7 +631,6 @@ def get_metadata_fields(collection: Any) -> MetadataFieldsResponse:
                         f"many values or error, treating as {field_type}"
                     )
 
-            # Create FieldInfo object
             field_info = FieldInfo(
                 field=field_name,
                 type=field_type,
@@ -585,7 +638,6 @@ def get_metadata_fields(collection: Any) -> MetadataFieldsResponse:
             )
             field_infos.append(field_info)
 
-        # Sort fields alphabetically by field name for better UX
         field_infos.sort(key=lambda f: f.field.lower())
 
         logger.info(f"Returning {len(field_infos)} fields with type information")
@@ -593,10 +645,10 @@ def get_metadata_fields(collection: Any) -> MetadataFieldsResponse:
         return MetadataFieldsResponse(fields=field_infos)
 
     except Exception as e:
-        logger.error(f"Error getting metadata fields: {e}")
+        request_id, message = generate_error_response(500, e, "get_metadata_fields")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to retrieve metadata fields: {str(e)}"
+            detail=f"{message} [ref: {request_id}]"
         )
 
 
@@ -604,8 +656,10 @@ def get_metadata_fields(collection: Any) -> MetadataFieldsResponse:
 # API Endpoints
 # ============================================================================
 
-@app.get("/api/v1/sessions/search", response_model=SessionSearchResponse)
+@app.get("/api/session_viewer/v1/sessions/search", response_model=SessionSearchResponse)
+@limiter.limit(settings.rate_limit_search)
 async def search_sessions(
+    request: Request,
     filters: Optional[str] = Query(None, description="JSON string with metadata filters"),
     session_id: Optional[str] = Query(None, description="Session ID for partial matching"),
     created_at_start: Optional[datetime] = Query(None, description="Start date for filtering"),
@@ -613,41 +667,21 @@ async def search_sessions(
     limit: int = Query(settings.default_page_size, ge=1, le=settings.max_page_size),
     offset: int = Query(0, ge=0),
 ):
-    """Search sessions with dynamic filters and pagination.
-
-    Supports:
-    - Dynamic metadata field filtering with partial matching
-    - Session ID partial matching
-    - Date range filtering
-    - Pagination with configurable page size
-
-    Example filters JSON:
-    ```json
-    {
-        "metadata.case_type": "IP_REAPERTURA",
-        "metadata.customer_phone": "604"
-    }
-    ```
-    """
+    """Search sessions with dynamic filters and pagination."""
     try:
         collection = app.state.collection
 
-        # Build MongoDB query
         query = build_search_query(filters, session_id, created_at_start, created_at_end)
 
-        logger.info(f"Searching sessions with query: {query}")
+        logger.info(f"Searching sessions with query: {sanitize_query_for_logging(query)}")
 
-        # Get total count
         total = collection.count_documents(query)
 
-        # Execute query with pagination
         cursor = collection.find(query).skip(offset).limit(limit).sort("created_at", -1)
         documents = list(cursor)
 
-        # Build session previews
         sessions = []
         for doc in documents:
-            # Count agents, messages, and feedbacks
             agents = doc.get("agents", {})
             agents_count = len(agents)
 
@@ -682,64 +716,24 @@ async def search_sessions(
         )
 
     except Exception as e:
-        logger.error(f"Error searching sessions: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        request_id, message = generate_error_response(500, e, "search_sessions")
+        raise HTTPException(status_code=500, detail=f"{message} [ref: {request_id}]")
 
 
-@app.get("/api/v1/sessions/{session_id}", response_model=SessionDetail)
-async def get_session_detail(session_id: str, request: Request):
-    """Get complete session detail with unified timeline.
-
-    Supports session-specific password validation via X-Session-Password header.
-    If provided, validates against session's session_viewer_password field,
-    with fallback to global BACKEND_PASSWORD for legacy sessions.
-
-    Returns:
-    - Session metadata
-    - Unified chronological timeline of all messages and feedbacks
-    - Summary of all agents with their configurations
-    """
+@app.get("/api/session_viewer/v1/sessions/{session_id}", response_model=SessionDetail)
+@limiter.limit(settings.rate_limit_read)
+async def get_session_detail(request: Request, session_id: str):
+    """Get complete session detail with unified timeline."""
     try:
         collection = app.state.collection
 
-        # Check for session-specific password header
-        session_password_hash = request.headers.get("X-Session-Password")
-
-        if session_password_hash:
-            # Validate session-specific password
-            global_password = settings.backend_password
-            global_hash = hashlib.sha256(global_password.encode()).hexdigest()
-
-            validation = await validate_session_password(
-                collection,
-                session_id,
-                session_password_hash,
-                global_hash
-            )
-
-            if not validation["valid"]:
-                logger.warning(f"Invalid session password for {session_id}")
-                raise HTTPException(
-                    status_code=403,
-                    detail="Invalid session password"
-                )
-
-            logger.info(
-                f"Session {session_id} accessed with "
-                f"{'global password (legacy fallback)' if validation['used_global'] else 'session-specific password'}"
-            )
-        # If no X-Session-Password header, rely on global password validation from middleware
-
-        # Find session document
         session_doc = collection.find_one({"_id": session_id})
 
         if not session_doc:
             raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
 
-        # Build unified timeline
         timeline = build_unified_timeline(session_doc)
 
-        # Build agents summary
         agents_summary = {}
         agents = session_doc.get("agents", {})
         for agent_id, agent_data in agents.items():
@@ -766,34 +760,14 @@ async def get_session_detail(session_id: str, request: Request):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error getting session detail: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        request_id, message = generate_error_response(500, e, "get_session_detail")
+        raise HTTPException(status_code=500, detail=f"{message} [ref: {request_id}]")
 
 
-@app.get("/api/v1/metadata-fields", response_model=MetadataFieldsResponse)
-async def list_metadata_fields():
-    """Get indexed fields with type information.
-
-    Returns all fields that have MongoDB indexes, along with their
-    detected data types and enum values (if configured).
-
-    This endpoint now returns structured FieldInfo objects instead of
-    plain field names. Frontend uses this to render appropriate input
-    controls (text, date, number, enum dropdown).
-
-    Configuration:
-    - ENUM_FIELDS_STR: Comma-separated list of fields to treat as enums
-    - ENUM_MAX_VALUES: Maximum distinct values for enum detection
-
-    Example Response:
-        {
-          "fields": [
-            {"field": "session_id", "type": "string"},
-            {"field": "created_at", "type": "date"},
-            {"field": "metadata.status", "type": "enum", "values": ["active", "completed"]}
-          ]
-        }
-    """
+@app.get("/api/session_viewer/v1/metadata-fields", response_model=MetadataFieldsResponse)
+@limiter.limit(settings.rate_limit_metadata)
+async def list_metadata_fields(request: Request):
+    """Get indexed fields with type information."""
     try:
         collection = app.state.collection
         return get_metadata_fields(collection)
@@ -801,24 +775,17 @@ async def list_metadata_fields():
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error listing metadata fields: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        request_id, message = generate_error_response(500, e, "list_metadata_fields")
+        raise HTTPException(status_code=500, detail=f"{message} [ref: {request_id}]")
 
 
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
-    """Health check endpoint.
-
-    Verifies:
-    - MongoDB connection status
-    - Connection pool statistics
-    """
+    """Health check endpoint."""
     try:
-        # Test MongoDB connection
         collection = app.state.collection
         collection.find_one({}, {"_id": 1})
 
-        # Get connection pool stats
         pool_stats = MongoDBConnectionPool.get_pool_stats()
 
         return HealthResponse(
@@ -840,110 +807,50 @@ async def health_check():
         )
 
 
-@app.post("/api/v1/check_password")
-async def check_password(request: Dict[str, Any]):
-    """Validate password hash.
-
-    Accepts a SHA-256 hash of the password and validates it against
-    the configured PASSWORD environment variable.
-
-    Args:
-        request: Dictionary with "password_hash" key containing SHA-256 hash
-
-    Returns:
-        {"valid": True} if password is correct, {"valid": False} otherwise
-    """
+@app.post("/api/session_viewer/v1/sessions/{session_id}/check_password")
+@limiter.limit(settings.rate_limit_auth)
+async def check_session_password(request: Request, session_id: str, body: Dict[str, Any]):
+    """Validate session-specific password for direct session access."""
     try:
-        password_hash = request.get("password_hash")
+        password_hash = body.get("password_hash")
+
+        if not password_hash:
+            logger.warning(f"No password_hash in request for session {truncate_session_id(session_id)}")
+            return {"valid": False, "used_global": False}
+
+        is_valid, used_global = validate_session_password(session_id, password_hash)
+
+        return {
+            "valid": is_valid,
+            "used_global": used_global
+        }
+
+    except Exception as e:
+        logger.error(f"Error checking session password for {truncate_session_id(session_id)}: {e}")
+        return {"valid": False, "used_global": False}
+
+
+@app.post("/api/session_viewer/v1/check_password")
+@limiter.limit(settings.rate_limit_auth)
+async def check_password(request: Request, body: Dict[str, Any]):
+    """Validate password hash."""
+    try:
+        password_hash = body.get("password_hash")
 
         if not password_hash:
             logger.warning("No password_hash in request")
             return {"valid": False}
 
-        # Generate expected hash from environment variable
         expected_password = settings.backend_password
         expected_hash = hashlib.sha256(expected_password.encode()).hexdigest()
 
-        # Debug logging
-        #logger.info(f"Received hash: {password_hash}")
-        #logger.info(f"Expected hash: {expected_hash}")
-        #logger.info(f"Expected password from env: {expected_password}")
-
         is_valid = password_hash == expected_hash
-
-        # logger.info(f"Password validation: {'success' if is_valid else 'failed'}")
 
         return {"valid": is_valid}
 
     except Exception as e:
         logger.error(f"Error checking password: {e}")
         return {"valid": False}
-
-
-@app.post("/api/v1/sessions/{session_id}/check_password")
-async def check_session_password(session_id: str, request: Dict[str, Any]):
-    """Validate password for a specific session.
-
-    Validates against:
-    1. Session-specific password (session_viewer_password field)
-    2. Global BACKEND_PASSWORD (fallback for legacy sessions)
-
-    This endpoint does NOT require global authentication (excluded from middleware).
-
-    Args:
-        session_id: The session ID to validate against
-        request: Dictionary with "password_hash" key containing SHA-256 hash
-
-    Returns:
-        {
-            "valid": bool,
-            "used_global": bool  # True if global password was used as fallback
-        }
-
-    Example:
-        POST /api/v1/sessions/abc123/check_password
-        {
-            "password_hash": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8"
-        }
-
-        Response:
-        {
-            "valid": true,
-            "used_global": false  # Session-specific password was used
-        }
-    """
-    try:
-        password_hash = request.get("password_hash")
-
-        if not password_hash:
-            logger.warning(f"No password_hash in request for session {session_id}")
-            return {"valid": False, "used_global": False}
-
-        # Get MongoDB collection
-        collection = app.state.collection
-
-        # Generate global password hash for fallback
-        global_password = settings.backend_password
-        global_hash = hashlib.sha256(global_password.encode()).hexdigest()
-
-        # Validate against session password (with global fallback)
-        result = await validate_session_password(
-            collection,
-            session_id,
-            password_hash,
-            global_hash
-        )
-
-        logger.info(
-            f"Session {session_id} password check: "
-            f"valid={result['valid']}, used_global={result['used_global']}"
-        )
-
-        return result
-
-    except Exception as e:
-        logger.error(f"Error checking session password for {session_id}: {e}")
-        return {"valid": False, "used_global": False}
 
 
 # ============================================================================

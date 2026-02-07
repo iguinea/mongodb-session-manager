@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+pymongo
+pydantic
+pydantic-settings
+python-dotenv
+slowapi>=0.1.9
+python-json-logger>=2.0.0

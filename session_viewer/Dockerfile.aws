@@ -1,0 +1,63 @@
+# Build for x86_64 architecture (AWS App Runner only supports AMD64/x86_64)
+FROM --platform=linux/amd64 python:3.13-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    build-essential \
+    ca-certificates \
+    git \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN update-ca-certificates
+
+# Download AWS RDS CA certificate bundle for DocumentDB TLS connections
+RUN wget https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem -O /etc/ssl/certs/rds-ca-bundle.pem
+
+# Configure SSL environment variables for AWS services:
+# - SSL_CERT_FILE: RDS bundle for DocumentDB/MongoDB
+# - AWS_CA_BUNDLE: System CA certificates for AWS public services (SQS, Secrets Manager, etc.)
+ENV SSL_CERT_FILE=/etc/ssl/certs/rds-ca-bundle.pem
+ENV AWS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+
+# Copy requirements.txt first (for better Docker layer caching)
+COPY backend/requirements.txt /app/requirements.txt
+
+# Install Python dependencies
+RUN pip install --no-cache-dir --only-binary=:all: -r /app/requirements.txt
+
+# Copy backend and frontend code
+COPY backend/ /app/backend/
+COPY frontend/ /app/frontend/
+
+# Download DocumentDB CA certificate for TLS connections
+RUN curl -o /app/rds-combined-ca-bundle.pem \
+    https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
+
+# Optional: git credential mounting for private repos
+RUN --mount=type=secret,id=netrc,target=/root/.netrc,required=false \
+    --mount=type=secret,id=gitcreds,target=/run/secrets/git-credentials,required=false \
+    <<'BASH'
+set -euxo pipefail
+
+if [ -f /run/secrets/git-credentials ]; then
+    git config --global credential.helper "store --file=/run/secrets/git-credentials"
+fi
+
+BASH
+
+# Set working directory to backend
+WORKDIR /app/backend
+
+# Expose port
+EXPOSE 8882
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+  CMD curl -f http://localhost:8882/health || exit 1
+
+# Start FastAPI server
+CMD ["python", "main.py"]

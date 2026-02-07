@@ -14,7 +14,7 @@
  * Handles all HTTP communication with the backend
  */
 class APIClient {
-  constructor(baseURL = 'http://localhost:8882/api/v1') {
+  constructor(baseURL = '/api/session_viewer/v1') {
     this.baseURL = baseURL;
     this.axios = axios.create({
       baseURL: this.baseURL,
@@ -30,7 +30,7 @@ class APIClient {
    * Check backend health
    */
   async checkHealth() {
-    const response = await this.axios.get('/health', { baseURL: 'http://localhost:8882' });
+    const response = await this.axios.get('/health', { baseURL: '/' });
     return response.data;
   }
 
@@ -76,28 +76,13 @@ class APIClient {
 
   /**
    * Get session detail by ID
-   * Optional sessionPasswordHash for session-specific authentication
+   * @param {string} sessionId - Session ID to retrieve
+   * @param {Object} additionalHeaders - Optional additional headers to include
    */
-  async getSessionDetail(sessionId, sessionPasswordHash = null) {
-    const headers = {};
-
-    if (sessionPasswordHash) {
-      headers['X-Session-Password'] = sessionPasswordHash;
-    }
-
-    const response = await this.axios.get(`/sessions/${sessionId}`, { headers });
-    return response.data;
-  }
-
-  /**
-   * Check password for specific session
-   * Returns {valid: bool, used_global: bool}
-   */
-  async checkSessionPassword(sessionId, passwordHash) {
-    const response = await this.axios.post(
-      `/sessions/${sessionId}/check_password`,
-      { password_hash: passwordHash }
-    );
+  async getSessionDetail(sessionId, additionalHeaders = {}) {
+    const response = await this.axios.get(`/sessions/${sessionId}`, {
+      headers: additionalHeaders
+    });
     return response.data;
   }
 }
@@ -368,7 +353,7 @@ class ResultsList {
 
 /**
  * Session Detail Class
- * Displays complete session with timeline
+ * Displays complete session with timeline using tabbed interface
  */
 class SessionDetail {
   constructor(container) {
@@ -379,17 +364,17 @@ class SessionDetail {
     this.detailContainer = document.getElementById('detail-container');
 
     this.sessionIdDisplay = document.getElementById('detail-session-id');
-    this.metadataContent = document.getElementById('metadata-content');
     this.metadataDisplay = document.getElementById('metadata-display');
     this.agentsSummary = document.getElementById('agents-summary');
     this.timelineContainer = document.getElementById('timeline-container');
+    this.tokenSummaryContainer = document.getElementById('token-summary-container');
 
     this.closeBtn = document.getElementById('close-detail-btn');
-    this.toggleMetadataBtn = document.getElementById('toggle-metadata-btn');
-    this.metadataChevron = document.getElementById('metadata-chevron');
-    this.metadataControls = document.getElementById('metadata-controls');
-    this.expandAllMetadataBtn = document.getElementById('expand-all-metadata-btn');
-    this.collapseAllMetadataBtn = document.getElementById('collapse-all-metadata-btn');
+
+    // Tab elements
+    this.tabs = document.querySelectorAll('.session-tab');
+    this.tabPanels = document.querySelectorAll('.tab-panel');
+    this.activeTab = 'timeline';
 
     this.init();
   }
@@ -398,12 +383,47 @@ class SessionDetail {
     // Bind close button
     this.closeBtn.addEventListener('click', () => this.hide());
 
-    // Bind metadata toggle
-    this.toggleMetadataBtn.addEventListener('click', () => this.toggleMetadata());
+    // Initialize tab switching
+    this.initTabs();
+  }
 
-    // Bind metadata control buttons
-    this.expandAllMetadataBtn?.addEventListener('click', () => this.expandAllMetadata());
-    this.collapseAllMetadataBtn?.addEventListener('click', () => this.collapseAllMetadata());
+  /**
+   * Initialize tab switching functionality
+   */
+  initTabs() {
+    this.tabs.forEach(tab => {
+      tab.addEventListener('click', () => {
+        const tabName = tab.dataset.tab;
+        this.switchTab(tabName);
+      });
+    });
+  }
+
+  /**
+   * Switch to a specific tab
+   */
+  switchTab(tabName) {
+    // Update active tab state
+    this.activeTab = tabName;
+
+    // Update tab button styles
+    this.tabs.forEach(tab => {
+      if (tab.dataset.tab === tabName) {
+        tab.classList.add('active');
+      } else {
+        tab.classList.remove('active');
+      }
+    });
+
+    // Show/hide tab panels
+    this.tabPanels.forEach(panel => {
+      const panelTab = panel.id.replace('tab-panel-', '');
+      if (panelTab === tabName) {
+        panel.classList.remove('hidden');
+      } else {
+        panel.classList.add('hidden');
+      }
+    });
   }
 
   /**
@@ -422,55 +442,21 @@ class SessionDetail {
     this.emptyElement.classList.remove('hidden');
     this.loadingElement.classList.add('hidden');
     this.detailContainer.classList.add('hidden');
-  }
 
-  /**
-   * Toggle metadata visibility
-   */
-  toggleMetadata() {
-    const isHidden = this.metadataContent.classList.contains('hidden');
-    if (isHidden) {
-      this.metadataContent.classList.remove('hidden');
-      this.metadataChevron.style.transform = 'rotate(180deg)';
-      this.metadataControls.classList.remove('hidden');
-    } else {
-      this.metadataContent.classList.add('hidden');
-      this.metadataChevron.style.transform = 'rotate(0deg)';
-      this.metadataControls.classList.add('hidden');
-    }
-  }
-
-  /**
-   * Expand all metadata JSON nodes
-   */
-  expandAllMetadata() {
-    const allDisclosures = this.metadataDisplay.querySelectorAll('.disclosure');
-    allDisclosures.forEach(disclosure => {
-      if (disclosure.textContent === '▶') {
-        disclosure.click(); // Expand collapsed nodes
-      }
-    });
-  }
-
-  /**
-   * Collapse all metadata JSON nodes
-   */
-  collapseAllMetadata() {
-    const allDisclosures = this.metadataDisplay.querySelectorAll('.disclosure');
-    allDisclosures.forEach(disclosure => {
-      if (disclosure.textContent === '▼') {
-        disclosure.click(); // Collapse expanded nodes
-      }
-    });
+    // Reset to Timeline tab when hiding
+    this.switchTab('timeline');
   }
 
   /**
    * Render session detail
    */
-  render(sessionData) {
+  async render(sessionData) {
     this.emptyElement.classList.add('hidden');
     this.loadingElement.classList.add('hidden');
     this.detailContainer.classList.remove('hidden');
+
+    // Reset to Timeline tab when loading a new session
+    this.switchTab('timeline');
 
     // Display session ID
     this.sessionIdDisplay.textContent = sessionData.session_id;
@@ -486,13 +472,49 @@ class SessionDetail {
     });
 
     // Render timeline
-    this.renderTimeline(sessionData.timeline);
+    await this.renderTimeline(sessionData.timeline);
+
+    // Render token summary
+    this.renderTokenSummary(sessionData.timeline, sessionData.agents_summary);
+  }
+
+  /**
+   * Render token consumption summary with cost calculation
+   * Calculates cost per agent/model when multiple models are used
+   * Now displayed in dedicated "Consumo" tab
+   */
+  renderTokenSummary(timeline, agentsSummary) {
+    if (!this.tokenSummaryContainer) return;
+
+    // Get the last assistant message with metrics for EACH agent
+    const agentMetrics = {};
+
+    for (const item of timeline) {
+      if (item.type === 'message' && item.role === 'assistant' && item.metrics) {
+        // Store/update the last metrics for this agent
+        agentMetrics[item.agent_id] = {
+          metrics: item.metrics,
+          model: agentsSummary[item.agent_id]?.model || 'claude-3-5-sonnet'
+        };
+      }
+    }
+
+    // Check if we have any metrics
+    if (Object.keys(agentMetrics).length === 0) {
+      this.tokenSummaryContainer.innerHTML = '<p class="text-sm text-gray-500 italic">Sin métricas de consumo disponibles para esta sesión.</p>';
+      return;
+    }
+
+    // Render token summary with per-agent breakdown
+    const summaryElement = Components.renderTokenSummary(agentMetrics);
+    this.tokenSummaryContainer.innerHTML = '';
+    this.tokenSummaryContainer.appendChild(summaryElement);
   }
 
   /**
    * Render timeline items
    */
-  renderTimeline(timeline) {
+  async renderTimeline(timeline) {
     this.timelineContainer.innerHTML = '';
 
     if (!timeline || timeline.length === 0) {
@@ -500,11 +522,12 @@ class SessionDetail {
       return;
     }
 
-    timeline.forEach(item => {
+    // Use for...of to support await
+    for (const item of timeline) {
       let element;
 
       if (item.type === 'message') {
-        element = Components.renderTimelineMessage(item);
+        element = await Components.renderTimelineMessage(item);
       } else if (item.type === 'feedback') {
         element = Components.renderTimelineFeedback(item);
       }
@@ -512,7 +535,7 @@ class SessionDetail {
       if (element) {
         this.timelineContainer.appendChild(element);
       }
-    });
+    }
 
     // Scroll to top
     this.timelineContainer.scrollTop = 0;
@@ -630,10 +653,12 @@ class PanelResizer {
  * Orchestrates all components
  */
 class SessionViewer {
-  constructor() {
+  constructor(directSessionId = null) {
     this.apiClient = new APIClient();
     this.currentFilters = null;
-    this.sessionPasswordCache = {}; // Cache session passwords by session_id
+    this.sessionPasswordCache = new Map();  // Cache of session passwords for repeated access
+    this.pendingSessionId = directSessionId;  // Session ID passed from index.html
+    this.isDirectSessionAccess = !!directSessionId;  // Flag for direct session access
 
     this.init();
   }
@@ -663,101 +688,43 @@ class SessionViewer {
     // Check backend health
     await this.checkBackendHealth();
 
-    // Load metadata fields
-    await this.filterPanel.loadMetadataFields(this.apiClient);
+    // Only load metadata fields if NOT direct session access
+    // Direct session access with session password should not have access to search/metadata
+    if (!this.isDirectSessionAccess) {
+      await this.filterPanel.loadMetadataFields(this.apiClient);
+    }
 
-    // Check URL parameters for direct session loading
-    this.checkURLParameters();
+    // Handle direct session loading if session_id was passed
+    if (this.isDirectSessionAccess && this.pendingSessionId) {
+      this.handleDirectSessionAccess(this.pendingSessionId);
+    }
   }
 
   /**
-   * Prompt user for session-specific password
-   * Returns Promise that resolves with password hash when validated
+   * Handle direct session access via ?session_id=... query parameter
    */
-  async promptSessionPassword(sessionId) {
-    return new Promise((resolve, reject) => {
-      const modal = document.getElementById('session-password-modal');
-      const form = document.getElementById('session-password-form');
-      const input = document.getElementById('session-password-input');
-      const error = document.getElementById('session-password-error');
-      const sessionIdDisplay = document.getElementById('session-password-session-id');
+  handleDirectSessionAccess(sessionId) {
+    console.log(`Loading session from URL parameter: ${sessionId}`);
 
-      // Show session ID in modal
-      sessionIdDisplay.textContent = `Session ID: ${sessionId}`;
+    // Hide left panel (filters + results) and resize handle
+    const leftPanel = document.getElementById('left-panel');
+    const resizeHandle = document.getElementById('resize-handle');
+    const rightPanel = document.getElementById('right-panel');
 
-      // Show modal
-      modal.style.display = 'flex';
-      input.value = '';
-      error.style.display = 'none';
-      input.focus();
+    if (leftPanel) leftPanel.classList.add('hidden-panel');
+    if (resizeHandle) resizeHandle.classList.add('hidden-panel');
+    if (rightPanel) rightPanel.style.width = '100%';
 
-      // Handle form submission
-      form.onsubmit = async (e) => {
-        e.preventDefault();
-        const password = input.value;
+    // Store pending session ID
+    this.pendingSessionId = sessionId;
 
-        if (!password) {
-          error.textContent = 'Por favor ingrese la contraseña';
-          error.style.display = 'block';
-          return;
-        }
-
-        const hash = sha256(password);
-
-        try {
-          // Validate against backend
-          const response = await this.apiClient.checkSessionPassword(sessionId, hash);
-
-          if (response.valid) {
-            // Store in cache
-            this.sessionPasswordCache[sessionId] = hash;
-
-            // Hide modal
-            modal.style.display = 'none';
-
-            // Log if global password was used
-            if (response.used_global) {
-              console.log(`Session ${sessionId}: Authenticated with global password (legacy fallback)`);
-            } else {
-              console.log(`Session ${sessionId}: Authenticated with session-specific password`);
-            }
-
-            resolve(hash);
-          } else {
-            error.textContent = 'Contraseña incorrecta';
-            error.style.display = 'block';
-            input.select();
-          }
-        } catch (err) {
-          console.error('Error validating session password:', err);
-          error.textContent = 'Error al validar contraseña. Intente nuevamente.';
-          error.style.display = 'block';
-        }
-      };
-    });
-  }
-
-  /**
-   * Check URL parameters and load session if session_id is present
-   */
-  checkURLParameters() {
-    const urlParams = new URLSearchParams(window.location.search);
-    const sessionId = urlParams.get('session_id');
-
-    if (sessionId) {
-      console.log(`Loading session from URL parameter: ${sessionId}`);
-
-      // Hide left panel (filters + results) and resize handle
-      const leftPanel = document.getElementById('left-panel');
-      const resizeHandle = document.getElementById('resize-handle');
-      const rightPanel = document.getElementById('right-panel');
-
-      if (leftPanel) leftPanel.classList.add('hidden-panel');
-      if (resizeHandle) resizeHandle.classList.add('hidden-panel');
-      if (rightPanel) rightPanel.style.width = '100%';
-
-      // Load the session directly
+    // Check if password is already cached for this session
+    if (this.sessionPasswordCache.has(sessionId)) {
+      console.log(`Using cached password for session ${sessionId}`);
       this.handleSessionSelect(sessionId);
+    } else {
+      // Prompt for session password
+      this.promptSessionPassword(sessionId);
     }
   }
 
@@ -825,6 +792,126 @@ class SessionViewer {
   }
 
   /**
+   * Prompt for session password (Direct access via URL)
+   */
+  promptSessionPassword(sessionId) {
+    const modal = document.getElementById('session-password-modal');
+    const input = document.getElementById('session-password-input');
+    const form = document.getElementById('session-password-form');
+    const errorDiv = document.getElementById('session-password-error');
+    const cancelBtn = document.getElementById('session-password-cancel-btn');
+
+    // Show modal
+    modal.classList.remove('hidden');
+    input.value = '';
+    errorDiv.classList.add('hidden');
+    errorDiv.textContent = '';
+    input.focus();
+
+    // Clear previous listeners
+    form.onsubmit = null;
+    cancelBtn.onclick = null;
+
+    // Handle form submission
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const password = input.value.trim();
+
+      if (!password) {
+        errorDiv.textContent = 'Por favor, introduce una contraseña';
+        errorDiv.classList.remove('hidden');
+        return;
+      }
+
+      // Validate password
+      await this.checkSessionPassword(sessionId, password);
+    };
+
+    // Handle cancel
+    cancelBtn.onclick = () => {
+      modal.classList.add('hidden');
+      this.pendingSessionId = null;
+      // Optionally redirect to main view
+      window.location.href = '/';
+    };
+  }
+
+  /**
+   * Check session password against backend
+   */
+  async checkSessionPassword(sessionId, password) {
+    const modal = document.getElementById('session-password-modal');
+    const errorDiv = document.getElementById('session-password-error');
+    const submitBtn = document.getElementById('session-password-submit-btn');
+    const input = document.getElementById('session-password-input');
+
+    try {
+      // Disable submit button and show loading
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Verificando...';
+      errorDiv.classList.add('hidden');
+
+      // Hash password with SHA-256
+      const passwordHash = await this.hashPassword(password);
+
+      // Call backend to validate
+      const response = await fetch(`/api/session_viewer/v1/sessions/${sessionId}/check_password`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ password_hash: passwordHash })
+      });
+
+      const result = await response.json();
+
+      if (result.valid) {
+        // Password is correct - cache it and load session
+        this.sessionPasswordCache.set(sessionId, passwordHash);
+
+        console.log(result.used_global
+          ? `Access granted with master password for session ${sessionId}`
+          : `Access granted with session password for session ${sessionId}`
+        );
+
+        // Hide modal and load session
+        // The password will be sent in the request via handleSessionSelect()
+        modal.classList.add('hidden');
+        await this.handleSessionSelect(sessionId);
+      } else {
+        // Invalid password
+        errorDiv.textContent = 'Contraseña incorrecta. Debe usar la contraseña de sesión o la contraseña maestra.';
+        errorDiv.classList.remove('hidden');
+        input.value = '';
+        input.focus();
+
+        // Re-enable submit button
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Acceder';
+      }
+    } catch (error) {
+      console.error('Error checking session password:', error);
+      errorDiv.textContent = 'Error al validar la contraseña. Por favor, intenta de nuevo.';
+      errorDiv.classList.remove('hidden');
+
+      // Re-enable submit button
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Acceder';
+    }
+  }
+
+  /**
+   * Hash password using SHA-256
+   */
+  async hashPassword(password) {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(password);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  /**
    * Handle page change
    */
   async handlePageChange(page) {
@@ -857,41 +944,15 @@ class SessionViewer {
     this.sessionDetail.showLoading();
 
     try {
-      // Check if we already have global authentication (X-Password header)
-      const hasGlobalAuth = axios.defaults.headers.common['X-Password'];
-
-      // Get cached session password (if any)
-      let sessionPasswordHash = this.sessionPasswordCache[sessionId];
-
-      // Only prompt for session password if:
-      // - No global auth AND no cached session password
-      // This prevents unnecessary modal when user already authenticated globally
-      if (!hasGlobalAuth && !sessionPasswordHash) {
-        sessionPasswordHash = await this.promptSessionPassword(sessionId);
+      // If this session has a cached password (direct access mode), send it in the request
+      const additionalHeaders = {};
+      if (this.sessionPasswordCache.has(sessionId)) {
+        additionalHeaders['X-Session-Password'] = this.sessionPasswordCache.get(sessionId);
       }
 
-      // Call API with optional session password
-      // If sessionPasswordHash is null/undefined, axios will send X-Password instead
-      const sessionData = await this.apiClient.getSessionDetail(
-        sessionId,
-        sessionPasswordHash  // null when using global auth
-      );
-
+      const sessionData = await this.apiClient.getSessionDetail(sessionId, additionalHeaders);
       this.sessionDetail.render(sessionData);
     } catch (error) {
-      if (error.response?.status === 403) {
-        // Global auth failed - prompt for session-specific password
-        delete this.sessionPasswordCache[sessionId];
-
-        console.log('Global authentication failed, requesting session-specific password');
-
-        // Show modal for session password
-        const sessionPasswordHash = await this.promptSessionPassword(sessionId);
-
-        // Retry with session password
-        return this.handleSessionSelect(sessionId);
-      }
-
       console.error('Error loading session:', error);
       alert('Error al cargar la sesión. Por favor, intenta de nuevo.');
       this.sessionDetail.hide();

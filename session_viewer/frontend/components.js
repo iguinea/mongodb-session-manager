@@ -9,6 +9,19 @@
 dayjs.extend(dayjs_plugin_relativeTime);
 
 /**
+ * Helper to safely create zero-md elements after ensuring registration.
+ * This prevents timing issues where createElement('zero-md') is called
+ * before the custom element is defined by the ES module.
+ *
+ * @returns {Promise<HTMLElement>} A promise that resolves to a zero-md element
+ */
+async function createZeroMdElement() {
+  // Wait for zero-md custom element to be defined before creating elements
+  await customElements.whenDefined('zero-md');
+  return document.createElement('zero-md');
+}
+
+/**
  * Format utilities
  */
 const Format = {
@@ -40,6 +53,21 @@ const Format = {
     if (!text) return '';
     if (text.length <= maxLength) return text;
     return text.substring(0, maxLength) + '...';
+  },
+
+  /**
+   * Escape HTML special characters to prevent XSS attacks
+   * @param {string} unsafe - Untrusted user input
+   * @returns {string} - Safe HTML string
+   */
+  escapeHtml(unsafe) {
+    if (!unsafe) return '';
+    return String(unsafe)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
   }
 };
 
@@ -56,7 +84,7 @@ function renderSessionCard(session) {
     <div class="flex items-start justify-between mb-2">
       <div class="flex-1 min-w-0">
         <p class="text-sm font-medium text-gray-900 truncate">
-          ${session.session_id}
+          ${Format.escapeHtml(session.session_id)}
         </p>
         <p class="text-xs text-gray-500">
           ${Format.relativeTime(session.created_at)}
@@ -97,8 +125,8 @@ function renderSessionCard(session) {
         <div class="flex flex-wrap gap-1">
           ${Object.entries(session.metadata).slice(0, 3).map(([key, value]) => `
             <span class="inline-flex items-center px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-700">
-              <span class="font-medium">${key}:</span>
-              <span class="ml-1">${Format.truncate(String(value), 20)}</span>
+              <span class="font-medium">${Format.escapeHtml(key)}:</span>
+              <span class="ml-1">${Format.escapeHtml(Format.truncate(String(value), 20))}</span>
             </span>
           `).join('')}
           ${Object.keys(session.metadata).length > 3 ? `
@@ -112,6 +140,143 @@ function renderSessionCard(session) {
   `;
 
   return card;
+}
+
+/**
+ * Create custom styles template for zero-md elements
+ * Extracted to avoid code duplication
+ *
+ * @param {boolean} isUser - Whether this is a user message
+ * @returns {HTMLTemplateElement} - Style template element
+ */
+function createZeroMdStyles(isUser) {
+  const style = document.createElement('template');
+  style.innerHTML = `
+    <style>
+      :host {
+        --markdown-font-size: 0.875rem;
+        --markdown-line-height: 1.5;
+      }
+
+      /* Override default styles for better integration */
+      p { margin: 0.5em 0; }
+      p:first-child { margin-top: 0; }
+      p:last-child { margin-bottom: 0; }
+
+      code {
+        background: ${isUser ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)'};
+        padding: 0.2em 0.4em;
+        border-radius: 0.25rem;
+        font-size: 0.85em;
+      }
+
+      pre {
+        background: ${isUser ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)'};
+        padding: 1em;
+        border-radius: 0.5rem;
+        overflow-x: auto;
+      }
+
+      pre code {
+        background: transparent;
+        padding: 0;
+      }
+    </style>
+  `;
+  return style;
+}
+
+/**
+ * Check if text contains SESSION_DATA block with large content
+ * SESSION_DATA blocks contain massive JSON that can cause zero-md to hang
+ *
+ * @param {string} text - Text content to check
+ * @returns {Object|null} - Parsed session data info or null if not found
+ */
+function extractSessionData(text) {
+  if (!text) return null;
+
+  // Pattern: <SESSION_DATA> ... </SESSION_DATA>
+  const sessionDataRegex = /<SESSION_DATA>([\s\S]*?)<\/SESSION_DATA>/;
+  const match = text.match(sessionDataRegex);
+
+  if (!match) return null;
+
+  const rawContent = match[1].trim();
+
+  // Try to parse as JSON
+  try {
+    const parsed = JSON.parse(rawContent);
+    return {
+      fullMatch: match[0],
+      content: parsed,
+      isJson: true,
+      textBefore: text.substring(0, match.index),
+      textAfter: text.substring(match.index + match[0].length)
+    };
+  } catch (e) {
+    // Not valid JSON, but still SESSION_DATA block
+    return {
+      fullMatch: match[0],
+      content: rawContent,
+      isJson: false,
+      textBefore: text.substring(0, match.index),
+      textAfter: text.substring(match.index + match[0].length)
+    };
+  }
+}
+
+/**
+ * Render SESSION_DATA block as collapsible JSON viewer
+ * Uses renderjson for interactive visualization instead of zero-md
+ *
+ * @param {Object} sessionData - Extracted session data from extractSessionData()
+ * @param {boolean} isUser - Whether this is a user message
+ * @returns {HTMLElement} - Collapsible container element
+ */
+function renderSessionDataBlock(sessionData, isUser) {
+  const container = document.createElement('div');
+  container.className = `session-data-block ${isUser ? 'session-data-user' : 'session-data-assistant'}`;
+
+  // Create details/summary for collapsible behavior
+  const details = document.createElement('details');
+  details.className = 'session-data-details';
+
+  const summary = document.createElement('summary');
+  summary.className = 'session-data-summary';
+  summary.innerHTML = `
+    <span class="session-data-badge">📊 SESSION_DATA</span>
+    <span class="session-data-info">(Click para expandir)</span>
+  `;
+  details.appendChild(summary);
+
+  // Content container
+  const contentDiv = document.createElement('div');
+  contentDiv.className = 'session-data-content tool-json-content';
+
+  if (sessionData.isJson) {
+    // Render as interactive JSON tree
+    renderjson.set_show_to_level(1); // Collapsed by default
+    renderjson.set_max_string_length(80);
+    const jsonTree = renderjson(sessionData.content);
+    contentDiv.appendChild(jsonTree);
+  } else {
+    // Show as pre-formatted text (truncated)
+    const pre = document.createElement('pre');
+    pre.className = 'session-data-text';
+    const maxChars = 2000;
+    if (sessionData.content.length > maxChars) {
+      pre.textContent = sessionData.content.substring(0, maxChars) + '\n... (truncado)';
+    } else {
+      pre.textContent = sessionData.content;
+    }
+    contentDiv.appendChild(pre);
+  }
+
+  details.appendChild(contentDiv);
+  container.appendChild(details);
+
+  return container;
 }
 
 /**
@@ -172,7 +337,7 @@ function renderToolUse(toolUse, isUser) {
   header.className = 'tool-header';
   header.innerHTML = `
     <span class="tool-badge tool-badge-use">🔧 Tool Call</span>
-    <span class="tool-name">${toolUse.toolName}</span>
+    <span class="tool-name">${Format.escapeHtml(toolUse.toolName)}</span>
   `;
   container.appendChild(header);
 
@@ -219,7 +384,7 @@ function renderToolResult(toolResult, isUser) {
   header.className = 'tool-header';
   header.innerHTML = `
     <span class="tool-badge ${badgeClass}">${badgeIcon} ${badgeText}</span>
-    <span class="tool-status">${toolResult.status}</span>
+    <span class="tool-status">${Format.escapeHtml(toolResult.status)}</span>
   `;
   container.appendChild(header);
 
@@ -290,7 +455,7 @@ function renderToolResult(toolResult, isUser) {
  * Timeline Message Component
  * Renders a message in the timeline
  */
-function renderTimelineMessage(item) {
+async function renderTimelineMessage(item) {
   const isUser = item.role === 'user';
   const container = document.createElement('div');
   container.className = `flex ${isUser ? 'justify-end' : 'justify-start'} fade-in`;
@@ -308,7 +473,7 @@ function renderTimelineMessage(item) {
     header.className = 'flex items-center space-x-2 mb-1';
     header.innerHTML = `
       <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-primary-100 text-primary-800">
-        ${item.agent_id}
+        ${Format.escapeHtml(item.agent_id)}
       </span>
       <span class="text-xs text-gray-500">
         ${Format.date(item.timestamp)}
@@ -324,61 +489,61 @@ function renderTimelineMessage(item) {
   // Render each content part
   if (contentParts.length === 0) {
     // No content - show placeholder
-    const zeroMd = document.createElement('zero-md');
+    const zeroMd = await createZeroMdElement();
     const script = document.createElement('script');
     script.type = 'text/markdown';
     script.textContent = '*Sin contenido*';
     zeroMd.appendChild(script);
     bubble.appendChild(zeroMd);
   } else {
-    contentParts.forEach((part, index) => {
+    // Use for...of instead of forEach to support await
+    for (let index = 0; index < contentParts.length; index++) {
+      const part = contentParts[index];
       if (part.type === 'text') {
-        // Render text content with zero-md
-        const zeroMd = document.createElement('zero-md');
+        // Check for SESSION_DATA blocks that can cause zero-md to hang
+        const sessionData = extractSessionData(part.content);
 
-        // Add markdown content
-        const script = document.createElement('script');
-        script.type = 'text/markdown';
-        script.textContent = part.content;
-        zeroMd.appendChild(script);
+        if (sessionData) {
+          // Render text before SESSION_DATA (if any) with zero-md
+          if (sessionData.textBefore.trim()) {
+            const zeroMdBefore = await createZeroMdElement();
+            const scriptBefore = document.createElement('script');
+            scriptBefore.type = 'text/markdown';
+            scriptBefore.textContent = sessionData.textBefore;
+            zeroMdBefore.appendChild(scriptBefore);
+            zeroMdBefore.appendChild(createZeroMdStyles(isUser));
+            bubble.appendChild(zeroMdBefore);
+          }
 
-        // Add custom styles to zero-md
-        const style = document.createElement('template');
-        style.innerHTML = `
-          <style>
-            :host {
-              --markdown-font-size: 0.875rem;
-              --markdown-line-height: 1.5;
-            }
+          // Render SESSION_DATA as collapsible JSON viewer (not zero-md)
+          const sessionDataEl = renderSessionDataBlock(sessionData, isUser);
+          bubble.appendChild(sessionDataEl);
 
-            /* Override default styles for better integration */
-            p { margin: 0.5em 0; }
-            p:first-child { margin-top: 0; }
-            p:last-child { margin-bottom: 0; }
+          // Render text after SESSION_DATA (if any) with zero-md
+          if (sessionData.textAfter.trim()) {
+            const zeroMdAfter = await createZeroMdElement();
+            const scriptAfter = document.createElement('script');
+            scriptAfter.type = 'text/markdown';
+            scriptAfter.textContent = sessionData.textAfter;
+            zeroMdAfter.appendChild(scriptAfter);
+            zeroMdAfter.appendChild(createZeroMdStyles(isUser));
+            bubble.appendChild(zeroMdAfter);
+          }
+        } else {
+          // Normal text content - render with zero-md
+          const zeroMd = await createZeroMdElement();
 
-            code {
-              background: ${isUser ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)'};
-              padding: 0.2em 0.4em;
-              border-radius: 0.25rem;
-              font-size: 0.85em;
-            }
+          // Add markdown content
+          const script = document.createElement('script');
+          script.type = 'text/markdown';
+          script.textContent = part.content;
+          zeroMd.appendChild(script);
 
-            pre {
-              background: ${isUser ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)'};
-              padding: 1em;
-              border-radius: 0.5rem;
-              overflow-x: auto;
-            }
+          // Add custom styles to zero-md
+          zeroMd.appendChild(createZeroMdStyles(isUser));
 
-            pre code {
-              background: transparent;
-              padding: 0;
-            }
-          </style>
-        `;
-        zeroMd.appendChild(style);
-
-        bubble.appendChild(zeroMd);
+          bubble.appendChild(zeroMd);
+        }
       } else if (part.type === 'tool_use') {
         // Render tool call
         const toolUseEl = renderToolUse(part, isUser);
@@ -395,7 +560,7 @@ function renderTimelineMessage(item) {
         spacer.className = 'mt-3';
         bubble.appendChild(spacer);
       }
-    });
+    }
   }
 
   // Add metrics if available
@@ -409,7 +574,7 @@ function renderTimelineMessage(item) {
     const cycleMetrics = item.metrics.cycle_metrics || {};
     const toolUsage = item.metrics.tool_usage || {};
 
-    // Calculate cache hit rate if cache metrics exist
+    // Extract cache metrics
     const cacheRead = usage.cacheReadInputTokens || 0;
     const cacheWrite = usage.cacheWriteInputTokens || 0;
     const totalCacheable = cacheRead + cacheWrite;
@@ -442,7 +607,7 @@ function renderTimelineMessage(item) {
     if (cacheHitRate !== null) {
       const cacheIcon = cacheHitRate > 50 ? '✅' : '📝';
       metricsHTML += `
-        <span title="Cache: ${Format.number(cacheRead)} read, ${Format.number(cacheWrite)} write">
+        <span title="Cache: ${Format.number(cacheRead)} read (hits), ${Format.number(cacheWrite)} write (miss)">
           ${cacheIcon} Cache: ${cacheHitRate}%
         </span>`;
     }
@@ -531,7 +696,7 @@ function renderTimelineFeedback(item) {
             </div>
             ${item.comment ? `
               <p class="text-sm text-gray-700">
-                "${item.comment}"
+                "${Format.escapeHtml(item.comment)}"
               </p>
             ` : ''}
           </div>
@@ -555,7 +720,7 @@ function renderAgentSummary(agentId, summary) {
   const header = document.createElement('div');
   header.className = 'flex items-center justify-between mb-2';
   header.innerHTML = `
-    <span class="font-medium text-sm text-gray-900">${agentId}</span>
+    <span class="font-medium text-sm text-gray-900">${Format.escapeHtml(agentId)}</span>
     <span class="text-xs text-gray-500">${summary.messages_count} mensajes</span>
   `;
   div.appendChild(header);
@@ -565,7 +730,7 @@ function renderAgentSummary(agentId, summary) {
     const modelInfo = document.createElement('p');
     modelInfo.className = 'text-xs text-gray-600 mb-1';
     modelInfo.innerHTML = `
-      <span class="font-medium">Model:</span> ${Format.truncate(summary.model, 40)}
+      <span class="font-medium">Model:</span> ${Format.escapeHtml(Format.truncate(summary.model, 40))}
     `;
     div.appendChild(modelInfo);
   }
@@ -592,27 +757,22 @@ function renderAgentSummary(agentId, summary) {
 
 /**
  * Metadata Display Component
- * Renders metadata key-value pairs using renderjson for interactive JSON visualization
+ * Renders metadata as fully expanded JSON using renderjson
  */
 function renderMetadata(metadata) {
-  const container = document.createElement('div');
-  container.className = 'metadata-json-container';
-
-  if (Object.keys(metadata).length === 0) {
-    container.innerHTML = '<p class="text-sm text-gray-500 italic">Sin metadata</p>';
-    return container;
+  if (!metadata || Object.keys(metadata).length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'text-sm text-gray-500 italic';
+    empty.textContent = 'Sin metadata';
+    return empty;
   }
 
-  // Configure renderjson
-  renderjson.set_show_to_level(2);  // Show first two levels expanded
-  renderjson.set_max_string_length(100);  // Truncate long strings
+  // Configure renderjson - fully expanded, no collapse
+  renderjson.set_show_to_level('all');
+  renderjson.set_max_string_length(500);
 
-  // Render metadata as interactive JSON tree
-  const jsonTree = renderjson(metadata);
-  jsonTree.className = 'metadata-renderjson';
-  container.appendChild(jsonTree);
-
-  return container;
+  // Return renderjson element directly
+  return renderjson(metadata);
 }
 
 /**
@@ -788,6 +948,224 @@ function renderLoadingSpinner() {
   return '<div class="flex justify-center p-8"><div class="spinner"></div></div>';
 }
 
+/**
+ * AWS Bedrock Claude Pricing (per 1M tokens)
+ * Prices as of 2024
+ */
+const BEDROCK_PRICING = {
+  'claude-3-5-sonnet': {
+    input: 3.00,
+    output: 15.00,
+    cacheRead: 0.30,    // 90% discount on input
+    cacheWrite: 3.75    // 25% surcharge on input
+  },
+  'claude-3-sonnet': {
+    input: 3.00,
+    output: 15.00,
+    cacheRead: 0.30,
+    cacheWrite: 3.75
+  },
+  'claude-3-haiku': {
+    input: 0.25,
+    output: 1.25,
+    cacheRead: 0.03,
+    cacheWrite: 0.30
+  },
+  'claude-3-opus': {
+    input: 15.00,
+    output: 75.00,
+    cacheRead: 1.50,
+    cacheWrite: 18.75
+  },
+  // Default fallback
+  'default': {
+    input: 3.00,
+    output: 15.00,
+    cacheRead: 0.30,
+    cacheWrite: 3.75
+  }
+};
+
+/**
+ * Get pricing for a model
+ */
+function getModelPricing(modelId) {
+  // Normalize model ID
+  const normalizedModel = (modelId || '').toLowerCase();
+
+  if (normalizedModel.includes('opus')) {
+    return BEDROCK_PRICING['claude-3-opus'];
+  } else if (normalizedModel.includes('haiku')) {
+    return BEDROCK_PRICING['claude-3-haiku'];
+  } else if (normalizedModel.includes('sonnet')) {
+    return BEDROCK_PRICING['claude-3-5-sonnet'];
+  }
+
+  return BEDROCK_PRICING['default'];
+}
+
+/**
+ * Calculate cost for a single agent's usage
+ */
+function calculateAgentCost(usage, model) {
+  const pricing = getModelPricing(model);
+
+  const inputTokens = usage.inputTokens || 0;
+  const outputTokens = usage.outputTokens || 0;
+  const totalTokens = usage.totalTokens || (inputTokens + outputTokens);
+  const cacheRead = usage.cacheReadInputTokens || 0;
+  const cacheWrite = usage.cacheWriteInputTokens || 0;
+
+  const inputCost = (inputTokens / 1_000_000) * pricing.input;
+  const outputCost = (outputTokens / 1_000_000) * pricing.output;
+  const cacheReadCost = (cacheRead / 1_000_000) * pricing.cacheRead;
+  const cacheWriteCost = (cacheWrite / 1_000_000) * pricing.cacheWrite;
+  const totalCost = inputCost + outputCost + cacheReadCost + cacheWriteCost;
+  const cacheReadSavings = (cacheRead / 1_000_000) * (pricing.input - pricing.cacheRead);
+
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens,
+    cacheRead,
+    cacheWrite,
+    inputCost,
+    outputCost,
+    cacheReadCost,
+    cacheWriteCost,
+    totalCost,
+    cacheReadSavings,
+    pricing
+  };
+}
+
+/**
+ * Token Summary Component
+ * Renders total token consumption and cost calculation per agent
+ *
+ * @param {Object} agentMetrics - Object with agent_id as key, containing {metrics, model}
+ * @returns {HTMLElement} - Token summary element
+ */
+function renderTokenSummary(agentMetrics) {
+  const container = document.createElement('div');
+  container.className = 'token-summary';
+
+  // Calculate costs per agent
+  const agentCosts = {};
+  let grandTotalTokens = 0;
+  let grandTotalCost = 0;
+  let grandTotalSavings = 0;
+
+  for (const [agentId, data] of Object.entries(agentMetrics)) {
+    const usage = data.metrics?.accumulated_usage;
+    if (!usage) continue;
+
+    const costs = calculateAgentCost(usage, data.model);
+    agentCosts[agentId] = {
+      ...costs,
+      model: data.model,
+      modelDisplay: (data.model || 'Unknown').split('/').pop()
+    };
+
+    grandTotalTokens += costs.totalTokens;
+    grandTotalCost += costs.totalCost;
+    grandTotalSavings += costs.cacheReadSavings;
+  }
+
+  const agentCount = Object.keys(agentCosts).length;
+
+  // Build HTML
+  let html = `
+    <div class="token-summary-header">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+      </svg>
+      <span>Resumen de Consumo</span>
+      <span class="text-xs font-normal text-gray-500 ml-2">(${agentCount} ${agentCount === 1 ? 'agente' : 'agentes'})</span>
+    </div>
+
+    <!-- Grand Total -->
+    <div class="token-summary-grid" style="margin-bottom: 1rem;">
+      <div class="token-stat" style="grid-column: span 2;">
+        <div class="token-stat-label">Total Tokens (Sesión)</div>
+        <div class="token-stat-value">${Format.number(grandTotalTokens)}</div>
+      </div>
+      <div class="token-stat" style="grid-column: span 2;">
+        <div class="token-stat-label">Coste Total (Sesión)</div>
+        <div class="token-stat-value cost">$${grandTotalCost.toFixed(4)}</div>
+        ${grandTotalSavings > 0 ? `<div class="token-stat-subvalue" style="color: #059669;">Ahorro cache: $${grandTotalSavings.toFixed(4)}</div>` : ''}
+      </div>
+    </div>
+  `;
+
+  // Per-agent breakdown
+  for (const [agentId, costs] of Object.entries(agentCosts)) {
+    html += `
+      <div class="agent-cost-section">
+        <div class="agent-cost-header">
+          <span class="agent-cost-name">${Format.escapeHtml(agentId)}</span>
+          <span class="agent-cost-model">${Format.escapeHtml(costs.modelDisplay)}</span>
+          <span class="agent-cost-total">$${costs.totalCost.toFixed(4)}</span>
+        </div>
+        <div class="token-summary-grid">
+          <div class="token-stat">
+            <div class="token-stat-label">Total</div>
+            <div class="token-stat-value">${Format.number(costs.totalTokens)}</div>
+          </div>
+          <div class="token-stat">
+            <div class="token-stat-label">Input</div>
+            <div class="token-stat-value">${Format.number(costs.inputTokens)}</div>
+            <div class="token-stat-subvalue">$${costs.inputCost.toFixed(4)}</div>
+          </div>
+          <div class="token-stat">
+            <div class="token-stat-label">Output</div>
+            <div class="token-stat-value">${Format.number(costs.outputTokens)}</div>
+            <div class="token-stat-subvalue">$${costs.outputCost.toFixed(4)}</div>
+          </div>
+          <div class="token-stat">
+            <div class="token-stat-label">Cache Read</div>
+            <div class="token-stat-value">${Format.number(costs.cacheRead)}</div>
+            <div class="token-stat-subvalue">$${costs.cacheReadCost.toFixed(4)}</div>
+          </div>
+          <div class="token-stat">
+            <div class="token-stat-label">Cache Write</div>
+            <div class="token-stat-value">${Format.number(costs.cacheWrite)}</div>
+            <div class="token-stat-subvalue">$${costs.cacheWriteCost.toFixed(4)}</div>
+          </div>
+          <div class="token-stat">
+            <div class="token-stat-label">Subtotal</div>
+            <div class="token-stat-value cost">$${costs.totalCost.toFixed(4)}</div>
+          </div>
+        </div>
+        <div class="cost-breakdown">
+          <div class="cost-breakdown-title">Precios ${Format.escapeHtml(costs.modelDisplay)} (por 1M)</div>
+          <div class="cost-breakdown-grid">
+            <div class="cost-item">
+              <span>Input:</span>
+              <span class="cost-item-value">$${costs.pricing.input.toFixed(2)}</span>
+            </div>
+            <div class="cost-item">
+              <span>Output:</span>
+              <span class="cost-item-value">$${costs.pricing.output.toFixed(2)}</span>
+            </div>
+            <div class="cost-item">
+              <span>Cache Read:</span>
+              <span class="cost-item-value">$${costs.pricing.cacheRead.toFixed(2)}</span>
+            </div>
+            <div class="cost-item">
+              <span>Cache Write:</span>
+              <span class="cost-item-value">$${costs.pricing.cacheWrite.toFixed(2)}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  container.innerHTML = html;
+  return container;
+}
+
 // Export components for use in viewer.js
 window.Components = {
   Format,
@@ -798,5 +1176,6 @@ window.Components = {
   renderMetadata,
   renderDynamicFilter,
   renderEmptyState,
-  renderLoadingSpinner
+  renderLoadingSpinner,
+  renderTokenSummary
 };
