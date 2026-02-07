@@ -19,17 +19,24 @@ import logging
 import asyncio
 import signal
 import sys
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from uvicorn.logging import DefaultFormatter
 from strands import Agent
-from contextlib import asynccontextmanager
 from builtins import Exception, str, dict, print, max, min, KeyboardInterrupt
 
-
+from mongodb_session_manager import (
+    initialize_global_factory,
+    close_global_factory,
+    MongoDBConnectionPool,
+    get_global_factory,
+)
 from session_context import set_session_context_id
+from CaseType import CaseType
+from tools_agent_state import set_state, get_state
 
 
 # Usar el mismo formatter que Uvicorn para consistencia visual
@@ -62,14 +69,6 @@ def handle_shutdown(signum, frame):
 signal.signal(signal.SIGINT, handle_shutdown)
 signal.signal(signal.SIGTERM, handle_shutdown)
 ### END SHUTDOWN HANDLING ###
-
-
-from mongodb_session_manager import (
-    initialize_global_factory,
-    close_global_factory,
-    MongoDBConnectionPool,
-    get_global_factory,
-)
 
 
 # Lifespan event handler for FastAPI
@@ -124,8 +123,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from CaseType import CaseType
-
 
 _AGENT_PROMPT = f"""
 Eres un asistente de IA que responde siempre en formato mark down.
@@ -163,7 +160,6 @@ Eres un asistente de IA que responde siempre en formato mark down.
 * Si identificas el tipo de caso, usa la herramienta 'set_state' para establecer el 'case_type' en la metadata de la sesión.
 
 """
-from tools_agent_state import set_state, get_state
 
 
 @app.post("/chat")
