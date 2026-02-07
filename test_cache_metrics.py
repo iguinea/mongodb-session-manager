@@ -112,8 +112,8 @@ class TestMetricsSummaryExtraction:
         summary = agent.event_loop_metrics.get_summary()
 
         assert summary["total_cycles"] == 3
-        assert summary["total_duration"] == 4.5
-        assert summary["average_cycle_time"] == 1.5
+        assert summary["total_duration"] == pytest.approx(4.5)
+        assert summary["average_cycle_time"] == pytest.approx(1.5)
 
     def test_extracts_tool_usage_metrics(self):
         """Test tool usage metrics extraction."""
@@ -152,7 +152,7 @@ class TestMetricsSummaryExtraction:
         assert search_stats["call_count"] == 5
         assert search_stats["success_count"] == 4
         assert search_stats["error_count"] == 1
-        assert search_stats["success_rate"] == 0.8
+        assert search_stats["success_rate"] == pytest.approx(0.8)
 
     def test_handles_missing_cache_metrics_gracefully(self):
         """Test backwards compatibility when cache metrics are not present."""
@@ -200,7 +200,7 @@ class TestCacheHitRateCalculation:
             (cache_read / total_cacheable * 100) if total_cacheable > 0 else 0
         )
 
-        assert cache_hit_rate == 90.0, "Cache hit rate should be 90%"
+        assert cache_hit_rate == pytest.approx(90.0), "Cache hit rate should be 90%"
 
     def test_cache_hit_rate_zero_when_no_cache(self):
         """Test cache hit rate is 0 when no cacheable tokens."""
@@ -303,7 +303,7 @@ class TestUpdateDataStructure:
         tool_data = update_data[tool_key]
         assert "search" in tool_data
         assert tool_data["search"]["call_count"] == 3
-        assert tool_data["search"]["success_rate"] == 1.0
+        assert tool_data["search"]["success_rate"] == pytest.approx(1.0)
 
 
 class TestToolUsageProcessing:
@@ -344,7 +344,7 @@ class TestToolUsageProcessing:
 
         assert "search_documents" in _tool_usage
         assert _tool_usage["search_documents"]["call_count"] == 5
-        assert _tool_usage["search_documents"]["success_rate"] == 0.8
+        assert _tool_usage["search_documents"]["success_rate"] == pytest.approx(0.8)
         # Verify tool_info is NOT included (simplified structure)
         assert "tool_info" not in _tool_usage["search_documents"]
 
