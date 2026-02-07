@@ -1,0 +1,649 @@
+vamos a trabajar en una aplicacion web (javascript vanilla) que usaremos para recuperar un session de la base de datos y mostraremos su historico en pantalla, de manera que el usuario pueda ver como se ha desarrollado la conversación. usaras el directorio @session_viewer/  para implementar la solucion. quiero que pensemos juntos en como hacer esto.
+
+Quiero un panel donde pueda seleccionar la session a visualizar y un boton para recuperar la session de la base de datos. Para realizar esto tendremos unos filtros que podremos usar, para empezar, usaremos el campo session_id.
+
+Pero tambien podremos filtrar por otros campos como 
+- metadata.case_type
+- metadata.customer_phone
+- metadata.customer_cups
+- metadata.customer_itaxnum
+- created_at
+
+los filtros de la metadata deberñia ser configurables por el usuario, aunque usaremos los definidos arriba.
+
+
+en agents.<agent_type>.messages[*] tendremos el historico de la conversacion.
+la conversación deberá mostrarse en orden cronologico, de manera que el usuario pueda ver como se ha desarrollado la conversación.
+
+tener en cuenta el campo "feedbacks", y mostrar en que parte del orden cronologico de la conversación se encuentra el feedback.
+
+
+<ejemplo_de_session>
+{
+  "_id": "68ee8a6e8ff935ffff0f7b85",
+  "session_id": "68ee8a6e8ff935ffff0f7b85",
+  "session_type": "AGENT",
+  "created_at": {
+    "$date": "2025-10-14T17:37:50.668Z"
+  },
+  "updated_at": {
+    "$date": "2025-10-14T17:38:28.325Z"
+  },
+  "agents": {
+    "case_dispatcher": {
+      "agent_data": {
+        "agent_id": "case_dispatcher",
+        "state": {},
+        "conversation_manager_state": {
+          "__name__": "SlidingWindowConversationManager",
+          "removed_message_count": 0
+        },
+        "created_at": {
+          "$date": "2025-10-14T17:38:28.325Z"
+        },
+        "updated_at": {
+          "$date": "2025-10-14T17:38:28.325Z"
+        }
+      },
+      "messages": [
+        {
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "text": "Analiza el caso, mira en los metadatos!"
+              }
+            ]
+          },
+          "message_id": 0,
+          "redact_message": null,
+          "created_at": {
+            "$date": "2025-10-14T17:37:54.164Z"
+          },
+          "updated_at": {
+            "$date": "2025-10-14T17:37:54.164Z"
+          }
+        },
+        {
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "text": "Voy a analizar los metadatos de la sesión para revisar el caso."
+              },
+              {
+                "toolUse": {
+                  "toolUseId": "tooluse_R-9Oz_5CSBGZg2gNupCD7Q",
+                  "name": "manage_metadata",
+                  "input": {
+                    "action": "get"
+                  }
+                }
+              }
+            ]
+          },
+          "message_id": 1,
+          "redact_message": null,
+          "created_at": {
+            "$date": "2025-10-14T17:37:57.626Z"
+          },
+          "updated_at": {
+            "$date": "2025-10-14T17:37:57.626Z"
+          }
+        },
+        {
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "toolResult": {
+                  "toolUseId": "tooluse_R-9Oz_5CSBGZg2gNupCD7Q",
+                  "status": "success",
+                  "content": [
+                    {
+                      "text": "All metadata: {\"case_type\": \"Analizando caso\", \"customer_phone\": \"604518797\", \"customer_cups\": \"ES0234150063456295RR\", \"customer_itaxnum\": \"Y5604106D\", \"actual_datetime\": {\"datetime\": \"2025-10-14 19:37:53\", \"timezone\": \"Europe/Madrid\", \"timezone_offset\": \"+02:00\", \"timestamp\": 1760463473, \"iso_format\": \"2025-10-14T19:37:53.920577+02:00\"}, \"customer_data\": {\"EcambioTit\": \"X\", \"EcortesCups\": {\"item\": [{\"ExtUi\": \"ES0234150063456295RR\", \"TipoCorte\": \"ZTEC\", \"TipoCorteTxt\": \"Corte por IP\", \"FchCorte\": \"2025-02-27\"}]}, \"EdatosCup\": {\"item\": [{\"ExtUi\": \"ES0234150063456295RR\", \"Street\": \"CARRETAS\", \"HouseNum1\": \"0020\", \"HouseNum2\": null, \"Location\": null, \"Building\": null, \"Floor\": \"01\", \"Roomnumber\": \"    C\", \"City1\": \"VILLAVICIOSA DE ODON\", \"PostCode1\": \"28670\", \"Einzdat\": \"2017-07-07\", \"Auszdat\": \"9999-12-31\", \"SpName\": \"IBERDROLA CLIENTES, S.A.U.\", \"LastInspDate\": \"2019-09-11\", \"ProxInspDate\": \"2024-09-11\", \"Facturable\": null, \"Jca\": null, \"Aufnr\": \"000016474063\", \"Partner\": \"1000143679\", \"ZfchLimInsta\": \"2024-09-14\", \"ServiceDate\": \"2024-11-11\", \"ZfecConcertac\": \"2025-03-04\", \"ZhoraConcertac\": \"13:00:00\", \"ClCalculo\": \"ZDOM\", \"Tariftyp\": \"GD_DOM\", \"Tarifa\": \"GD_RL02\", \"ActivarIp40\": null, \"Gc\": null, \"OrdenD054\": null, \"FchPlanD054\": \"0000-00-00\", \"FchIpIrc\": \"2022-11-04\", \"RsulIpIrc\": \"01\", \"RsulTxtIpIrc\": \"Sin defectos\", \"PropiedadIrc\": \"CLIENTE\", \"EstadoSum\": \"03\", \"EstadoSumTxt\": \"Cortado\", \"ImporteCanon\": \"0.0\", \"TipoCanon\": null, \"FchFinCanon\": \"0000-00-00\", \"EstimarLectura\": \"N\", \"Sociedad\": \"0211\", \"FechaUltCt\": \"2017-07-07\", \"BajaAdmin\": null, \"UbicConta\": \"03\", \"UbicContaTxt\": \"VIVIENDA\"}]}, \"Edemoras\": null, \"EfechaCt\": \"2017-07-07\", \"Eipdata\": {\"item\": [{\"ExtUi\": \"ES0234150063456295RR\", \"Aufnr\": \"000014562587\", \"Gltrp\": \"2019-09-11\", \"Mngrp\": \"RESULINS\", \"Mncod\": \"01\", \"Descripcion\": \"Sin defectos\"}]}, \"Elocalizadores\": {\"item\": [{\"Zzlocalizador\": \"6aC2X\", \"Auart\": \"ZIP\", \"Matnr\": \"IP00\", \"Ktext\": \"INSPECCI\\u00d3N PERI\\u00d3DICA\", \"Aufnr\": \"000014562587\", \"Gltrp\": \"2019-09-11\", \"Zztecnico\": \"Fernando Adrados Tebar\", \"ExtUi\": \"ES0234150063456295RR\", \"Partner\": \"1000143679\", \"FchCita\": \"2019-09-11\", \"HabCita\": \"11:00:00\", \"HbisCita\": \"  :  :  \"}, {\"Zzlocalizador\": \"r1cqh\", \"Auart\": \"ZIP\", \"Matnr\": \"IP00\", \"Ktext\": \"INSPECCI\\u00d3N PERI\\u00d3DICA\", \"Aufnr\": \"000016474063\", \"Gltrp\": \"0000-00-00\", \"Zztecnico\": \"FERNANDO FUENTES VILLAREJO\", \"ExtUi\": \"ES0234150063456295RR\", \"Partner\": \"1000143679\", \"FchCita\": \"2025-03-04\", \"HabCita\": \"13:00:00\", \"HbisCita\": \"16:00:00\"}, {\"Zzlocalizador\": \"L6koG\", \"Auart\": \"ZS04\", \"Matnr\": \"D054\", \"Ktext\": \"CORTE IP POR AUSENCIA\", \"Aufnr\": \"000016596883\", \"Gltrp\": \"2025-02-27\", \"Zztecnico\": null, \"ExtUi\": \"ES0234150063456295RR\", \"Partner\": \"1000143679\", \"FchCita\": \"0000-00-00\", \"HabCita\": \"00:00:00\", \"HbisCita\": \"00:00:00\"}, {\"Zzlocalizador\": \"r1cqh\", \"Auart\": \"ZS01\", \"Matnr\": \"IP40\", \"Ktext\": \"REAPERTURA TRAS CORTE DE IP\", \"Aufnr\": \"000016632475\", \"Gltrp\": \"0000-00-00\", \"Zztecnico\": null, \"ExtUi\": \"ES0234150063456295RR\", \"Partner\": \"1000143679\", \"FchCita\": \"2025-03-04\", \"HabCita\": \"13:00:00\", \"HbisCita\": \"16:00:00\"}]}, \"Epartnerdata\": {\"NameFirst\": \"CLAIRE\", \"NameLast\": \"LAURE LAGARRIGUE\", \"NameLast2\": null, \"Street\": \"CARRETAS\", \"HouseNum1\": \"0020\", \"HouseNum2\": null, \"Location\": null, \"Building\": null, \"Floor\": \"01\", \"Roomnumber\": \"    C\", \"City1\": \"VILLAVICIOSA DE ODON\", \"PostCode1\": \"28670\", \"TelNumber\": null, \"MobNumber\": \"604518797\", \"SmtpAddr\": \"claire.lagarrigue@hotmail.fr\", \"Taxnum\": \"Y5604106D\"}, \"Eperlect\": {\"item\": [{\"ExtUi\": \"ES0234150063456295RR\", \"Fmin\": \"2025-10-22\", \"Fmax\": \"2025-11-13\"}]}, \"EperlectAnt\": {\"item\": [{\"ExtUi\": \"ES0234150063456295RR\", \"Fmin\": \"2025-08-26\", \"Fmax\": \"2025-09-16\"}]}, \"EperlectSig\": {\"item\": [{\"ExtUi\": \"ES0234150063456295RR\", \"Fmin\": \"2025-12-24\", \"Fmax\": \"2026-01-19\"}]}, \"Erecla\": {\"item\": [{\"ExtUi\": \"ES0234150063456295RR\", \"Qmnum\": \"000309442207\", \"Ausvn\": \"2025-02-28\", \"Ausbs\": \"2025-02-28\", \"Kurztext\": \"Reapertura por corte IP no realizada\", \"Canal\": \"3\", \"AvisoReiterado\": null, \"Demanda\": \"DA089\", \"Tipo\": \"DA\", \"Proceso\": null}, {\"ExtUi\": \"ES0234150063456295RR\", \"Qmnum\": \"000306372925\", \"Ausvn\": \"2019-06-18\", \"Ausbs\": \"2019-06-19\", \"Kurztext\": \"Reclamaci\\u00f3n p\\u00e1gina web\", \"Canal\": \"3\", \"AvisoReiterado\": null, \"Demanda\": \"IP11\", \"Tipo\": \"RE\", \"Proceso\": \"R\"}, {\"ExtUi\": \"ES0234150063456295RR\", \"Qmnum\": \"000306289153\", \"Ausvn\": \"2019-05-06\", \"Ausbs\": \"2019-05-06\", \"Kurztext\": \"Reclamaci\\u00f3n p\\u00e1gina web\", \"Canal\": \"3\", \"AvisoReiterado\": null, \"Demanda\": \"IP11\", \"Tipo\": \"RE\", \"Proceso\": \"R\"}]}, \"EsolComerc\": {\"item\": [{\"ExtUi\": \"ES0234150063456295RR\", \"Moveindate\": \"2017-07-07\", \"Moveoutdate\": \"0000-00-00\", \"Switchtype\": \"05\", \"Swttypetxt\": \"Modificaci\\u00f3n de contrato ATR\", \"Status\": \"01\", \"Statustext\": \"Realizado\", \"SolDate\": \"2017-07-26\", \"RealDate\": \"2017-07-26\"}, {\"ExtUi\": \"ES0234150063456295RR\", \"Moveindate\": \"2018-03-07\", \"Moveoutdate\": \"0000-00-00\", \"Switchtype\": \"26\", \"Swttypetxt\": \"Comunicaci\\u00f3n de Modificaci\\u00f3n de Datos\", \"Status\": \"01\", \"Statustext\": \"Realizado\", \"SolDate\": \"2018-04-21\", \"RealDate\": \"2018-04-21\"}, {\"ExtUi\": \"ES0234150063456295RR\", \"Moveindate\": \"2019-03-08\", \"Moveoutdate\": \"0000-00-00\", \"Switchtype\": \"26\", \"Swttypetxt\": \"Comunicaci\\u00f3n de Modificaci\\u00f3n de Datos\", \"Status\": \"01\", \"Statustext\": \"Realizado\", \"SolDate\": \"2019-04-03\", \"RealDate\": \"2019-04-03\"}, {\"ExtUi\": \"ES0234150063456295RR\", \"Moveindate\": \"2022-11-08\", \"Moveoutdate\": \"0000-00-00\", \"Switchtype\": \"26\", \"Swttypetxt\": \"Comunicaci\\u00f3n de Modificaci\\u00f3n de Datos\", \"Status\": \"01\", \"Statustext\": \"Realizado\", \"SolDate\": \"2022-12-16\", \"RealDate\": \"2022-12-16\"}, {\"ExtUi\": \"ES0234150063456295RR\", \"Moveindate\": \"2024-10-10\", \"Moveoutdate\": \"0000-00-00\", \"Switchtype\": \"05\", \"Swttypetxt\": \"Modificaci\\u00f3n de contrato ATR\", \"Status\": \"02\", \"Statustext\": \"Imposible realizar\", \"SolDate\": \"2024-10-09\", \"RealDate\": \"2024-10-09\"}]}, \"EsolDistri\": {\"item\": [{\"ExtUi\": \"ES0234150063456295RR\", \"Matnr\": \"IP40\", \"Ktext\": \"REAPERTURA TRAS CORTE DE IP\", \"Gstrp\": \"2025-02-28\", \"Gltrp\": \"0000-00-00\", \"Status\": \"En Curso\"}, {\"ExtUi\": \"ES0234150063456295RR\", \"Matnr\": \"D054\", \"Ktext\": \"CORTE IP POR AUSENCIA\", \"Gstrp\": \"2025-02-27\", \"Gltrp\": \"2025-02-27\", \"Status\": \"Realizado\"}]}, \"Etext\": {\"item\": [{\"Qmnum\": \"000306372925\", \"Znumber\": 1, \"Tdline\": \"17.06.2019 15:01:07 WEBSERVICE\"}, {\"Qmnum\": \"000306372925\", \"Znumber\": 2, \"Tdline\": \"Buenos dias,Estoy intentando de cambiar la fecha de inspeccion\"}, {\"Qmnum\": \"000306372925\", \"Znumber\": 3, \"Tdline\": \"periodica porque el 31/07/2019 09:00 - 11:00 no puedo. Pero la un\"}, {\"Qmnum\": \"000306372925\", \"Znumber\": 4, \"Tdline\": \"ica otra cita que me propone el sistema es el 11/09/2019 09:00 - 11:00,\"}, {\"Qmnum\": \"000306372925\", \"Znumber\": 5, \"Tdline\": \"y no puedo tampoco. Seria posible de posponerla al 13/09/2\"}, {\"Qmnum\": \"000306372925\", \"Znumber\": 6, \"Tdline\": \"019 18:00 - 21:00 ? Muchas gracias.Un saludo.Claire Lagarrigue\"}, {\"Qmnum\": \"000306372925\", \"Znumber\": 7, \"Tdline\": \"18.06.2019 09:46:17 EXT90099845\"}, {\"Qmnum\": \"000306372925\", \"Znumber\": 8, \"Tdline\": \"Estimada Claire\"}, {\"Qmnum\": \"000306372925\", \"Znumber\": 9, \"Tdline\": \"Enviamos su solicitud a nuestra contrata, para que la gestione.\"}, {\"Qmnum\": \"000306372925\", \"Znumber\": 10, \"Tdline\": \"Un saludo.\"}, {\"Qmnum\": \"000306289153\", \"Znumber\": 1, \"Tdline\": \"05.05.2019 12:44:43 WEBSERVICE\"}, {\"Qmnum\": \"000306289153\", \"Znumber\": 2, \"Tdline\": \"Buenos dias,Tengo que hacer la inspeccion periodica de la installacion\"}, {\"Qmnum\": \"000306289153\", \"Znumber\": 3, \"Tdline\": \"de gas este ano y en el correo que me habeis enviado me p\"}, {\"Qmnum\": \"000306289153\", \"Znumber\": 4, \"Tdline\": \"ropone una fecha que no me conviene. Estoy intentando de cambiar de\"}, {\"Qmnum\": \"000306289153\", \"Znumber\": 5, \"Tdline\": \"fecha online pero la unica nueva que me propone no me conviene\"}, {\"Qmnum\": \"000306289153\", \"Znumber\": 6, \"Tdline\": \"tampoco. \\u00bfComo puedo hacer ?Gracias.Un saludo.Claire Lagarrigue\"}, {\"Qmnum\": \"000306289153\", \"Znumber\": 7, \"Tdline\": \"06.05.2019 09:50:54 EXT90099845\"}, {\"Qmnum\": \"000306289153\", \"Znumber\": 8, \"Tdline\": \"Buenos dias,\"}, {\"Qmnum\": \"000306289153\", \"Znumber\": 9, \"Tdline\": \"Segun lo que nos consta en nuestro sitema, tiene cita el dia 31/07/2019\"}, {\"Qmnum\": \"000306289153\", \"Znumber\": 10, \"Tdline\": \"de 09:00 a 11:00 h, si no puede en esa fecha, indiquenos en que horario\"}, {\"Qmnum\": \"000306289153\", \"Znumber\": 11, \"Tdline\": \"le viene mejor y fecha.\"}, {\"Qmnum\": \"000306289153\", \"Znumber\": 12, \"Tdline\": \"Un saludo.\"}]}, \"Eultlect\": {\"item\": [{\"ExtUi\": \"ES0234150063456295RR\", \"Fultlect\": \"2025-02-27\", \"Clase\": \"01\", \"Lectura\": \"8473\", \"Mlreason\": \"13\", \"Calculado\": null}]}, \"Eultlectreal\": {\"item\": [{\"ExtUi\": \"ES0234150063456295RR\", \"Fultlect\": \"2025-02-27\", \"Clase\": \"01\", \"Lectura\": \"8473\"}]}}, \"dni_data\": {\"APELLIDOS\": \"LAURE LAGARRIGUE \", \"CUPS\": \"ES0234150063456295RR\", \"DIRECCION\": \"CARRETAS\", \"MULTIPLECUPS\": \"false\", \"NIF\": \"Y5604106D\", \"NOMBRE\": \"CLAIRE\", \"REQUESTSUCCESS\": \"true\", \"RESPONSETEXT\": \"\"}}"
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          "message_id": 2,
+          "redact_message": null,
+          "created_at": {
+            "$date": "2025-10-14T17:37:57.635Z"
+          },
+          "updated_at": {
+            "$date": "2025-10-14T17:37:57.635Z"
+          },
+          "event_loop_metrics": {
+            "accumulated_metrics": {
+              "latencyMs": 3000
+            },
+            "accumulated_usage": {
+              "inputTokens": 17859,
+              "outputTokens": 74,
+              "totalTokens": 17933
+            }
+          }
+        },
+        {
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "text": "Perfecto, voy a analizar los datos del caso en detalle:\n\n## 🔍 Análisis del Caso\n\nHe revisado los metadatos y he identificado la siguiente situación:\n\n### **Datos del Cliente**\n- **Nombre**: CLAIRE LAURE LAGARRIGUE\n- **CUPS**: ES0234150063456295RR\n- **DNI**: Y5604106D\n- **Teléfono**: 604518797\n- **Dirección**: CARRETAS 0020, 01-C, VILLAVICIOSA DE ODON (28670)\n\n---\n\n### **Situación Actual**\n\nAnalizo las órdenes en el sistema:\n\n#### **1. Orden IP00 (Inspección Periódica) - Índice [0]**\n- **Número orden**: 000014562587\n- **Fecha fin**: 2019-09-11 ✅ (completada)\n- **Resultado**: Código 01 - \"Sin defectos\"\n- **Estado**: Inspección antigua realizada correctamente\n\n#### **2. Orden IP00 (Nueva Inspección Periódica) - Índice [1]**\n- **Número orden**: 000016474063\n- **Fecha fin**: 0000-00-00 ❌ (pendiente/sin completar)\n- **Cita programada**: 2025-03-04 de 13:00 a 16:00\n- **Estado**: **PENDIENTE** - No completada\n\n#### **3. Orden D054 (Corte por IP) - Índice [2]**\n- **Número orden**: 000016596883\n- **Fecha fin**: 2025-02-27 ✅ (completada)\n- **Tipo**: \"CORTE IP POR AUSENCIA\"\n- **Estado**: El suministro fue **CORTADO** el 27/02/2025\n\n#### **4. Orden IP40 (Reapertura) - Índice [3]**\n- **Número orden**: 000016632475\n- **Fecha fin**: 0000-00-00 ❌ (pendiente)\n- **Cita programada**: 2025-03-04 de 13:00 a 16:00\n- **Estado**: **PENDIENTE** de realizar\n\n---\n\n### **Información Adicional Relevante**\n\n- **Estado del suministro**: **CORTADO** (EdatosCup.EstadoSum = \"03\")\n- **Reclamación abierta**: Aviso 000309442207 - \"Reapertura por corte IP no realizada\" (28/02/2025)\n- **Historial**: La cliente ya reclamó en 2019 por problemas para cambiar fechas de IP\n\n---\n\n## 📊 Diagnóstico del Tipo de Caso\n\nBasándome en las condiciones de identificación:\n\n### ✅ **Condiciones cumplidas para IP_REAPERTURA:**\n\n1. **Orden IP00 pendiente** (índice [1]): \n   - ✅ Matnr == \"IP00\"\n   - ✅ Gltrp == \"0000-00-00\" (pendiente)\n\n2. **Orden D054 completada** (índice [2]):\n   - ✅ Matnr == \"D054\"\n   - ✅ Gltrp == \"2025-02-27\" (corte ejecutado)\n\n3. **Orden temporal correcta**:\n   - ✅ Índice D054 (2) > Índice IP00 (1)\n   - La orden de corte se creó **después** de la IP00\n\n4. **Orden IP40 pendiente** (índice [3]):\n   - ✅ Existe orden de reapertura creada\n   - ✅ Pendiente de ejecución\n\n5. **Mismo punto de suministro**: Todas las órdenes corresponden al CUPS ES0234150063456295RR\n\n---\n\n### 📋 **Resumen del Caso**\n\n**Tipo de caso detectado**: ✨ **CASO DE REAPERTURA TRAS CORTE POR IP**\n\n**Cronología**:\n1. 📅 La IP de 2019 pasó sin defectos\n2. 📅 Se programó nueva IP (debe hacerse cada 5 años)\n3. ❌ El cliente no estuvo disponible para la IP\n4. 🔴 El **27/02/2025** el suministro fue **CORTADO** por ausencia en IP\n5. 📞 El **28/02/2025** el cliente presentó reclamación\n6. 📆 Se programó cita de reapertura para el **04/03/2025 (13:00-16:00)**\n7. ⏰ **Fecha actual**: 14/10/2025 - **La cita ya pasó hace más de 7 meses**\n\n**Situación crítica detectada**: \n- ⚠️ El suministro sigue **CORTADO** desde febrero 2025\n- ⚠️ La cita de reapertura del 04/03/2025 **no se realizó** o no se completó\n- ⚠️ Han pasado más de 7 meses sin reapertura\n\n**Próximos pasos**:\nEl caso debe ser derivado al agente especializado en **REAPERTURA TRAS CORTE POR IP** para:\n- Verificar por qué no se realizó la reapertura en marzo\n- Agendar nueva cita urgente para reapertura\n- Resolver la situación del suministro cortado\n\n---\n\n¿Deseas que proceda con la actualización de metadata y la transferencia al agente especializado en reaperturas?"
+              }
+            ]
+          },
+          "message_id": 3,
+          "redact_message": null,
+          "created_at": {
+            "$date": "2025-10-14T17:38:28.314Z"
+          },
+          "updated_at": {
+            "$date": "2025-10-14T17:38:28.314Z"
+          },
+          "event_loop_metrics": {
+            "accumulated_metrics": {
+              "latencyMs": 33553
+            },
+            "accumulated_usage": {
+              "inputTokens": 40067,
+              "outputTokens": 1524,
+              "totalTokens": 41591
+            }
+          }
+        }
+      ],
+      "created_at": {
+        "$date": "2025-10-14T17:37:54.164Z"
+      },
+      "updated_at": {
+        "$date": "2025-10-14T17:38:28.325Z"
+      }
+    }
+  },
+  "metadata": {
+    "case_type": "Analizando caso",
+    "customer_phone": "604518797",
+    "customer_cups": "ES0234150063456295RR",
+    "customer_itaxnum": "Y5604106D",
+    "actual_datetime": {
+      "datetime": "2025-10-14 19:37:53",
+      "timezone": "Europe/Madrid",
+      "timezone_offset": "+02:00",
+      "timestamp": 1760463473,
+      "iso_format": "2025-10-14T19:37:53.920577+02:00"
+    },
+    "customer_data": {
+      "EcambioTit": "X",
+      "EcortesCups": {
+        "item": [
+          {
+            "ExtUi": "ES0234150063456295RR",
+            "TipoCorte": "ZTEC",
+            "TipoCorteTxt": "Corte por IP",
+            "FchCorte": "2025-02-27"
+          }
+        ]
+      },
+      "EdatosCup": {
+        "item": [
+          {
+            "ExtUi": "ES0234150063456295RR",
+            "Street": "CARRETAS",
+            "HouseNum1": "0020",
+            "HouseNum2": null,
+            "Location": null,
+            "Building": null,
+            "Floor": "01",
+            "Roomnumber": "    C",
+            "City1": "VILLAVICIOSA DE ODON",
+            "PostCode1": "28670",
+            "Einzdat": "2017-07-07",
+            "Auszdat": "9999-12-31",
+            "SpName": "IBERDROLA CLIENTES, S.A.U.",
+            "LastInspDate": "2019-09-11",
+            "ProxInspDate": "2024-09-11",
+            "Facturable": null,
+            "Jca": null,
+            "Aufnr": "000016474063",
+            "Partner": "1000143679",
+            "ZfchLimInsta": "2024-09-14",
+            "ServiceDate": "2024-11-11",
+            "ZfecConcertac": "2025-03-04",
+            "ZhoraConcertac": "13:00:00",
+            "ClCalculo": "ZDOM",
+            "Tariftyp": "GD_DOM",
+            "Tarifa": "GD_RL02",
+            "ActivarIp40": null,
+            "Gc": null,
+            "OrdenD054": null,
+            "FchPlanD054": "0000-00-00",
+            "FchIpIrc": "2022-11-04",
+            "RsulIpIrc": "01",
+            "RsulTxtIpIrc": "Sin defectos",
+            "PropiedadIrc": "CLIENTE",
+            "EstadoSum": "03",
+            "EstadoSumTxt": "Cortado",
+            "ImporteCanon": "0.0",
+            "TipoCanon": null,
+            "FchFinCanon": "0000-00-00",
+            "EstimarLectura": "N",
+            "Sociedad": "0211",
+            "FechaUltCt": "2017-07-07",
+            "BajaAdmin": null,
+            "UbicConta": "03",
+            "UbicContaTxt": "VIVIENDA"
+          }
+        ]
+      },
+      "Edemoras": null,
+      "EfechaCt": "2017-07-07",
+      "Eipdata": {
+        "item": [
+          {
+            "ExtUi": "ES0234150063456295RR",
+            "Aufnr": "000014562587",
+            "Gltrp": "2019-09-11",
+            "Mngrp": "RESULINS",
+            "Mncod": "01",
+            "Descripcion": "Sin defectos"
+          }
+        ]
+      },
+      "Elocalizadores": {
+        "item": [
+          {
+            "Zzlocalizador": "6aC2X",
+            "Auart": "ZIP",
+            "Matnr": "IP00",
+            "Ktext": "INSPECCIÓN PERIÓDICA",
+            "Aufnr": "000014562587",
+            "Gltrp": "2019-09-11",
+            "Zztecnico": "Fernando Adrados Tebar",
+            "ExtUi": "ES0234150063456295RR",
+            "Partner": "1000143679",
+            "FchCita": "2019-09-11",
+            "HabCita": "11:00:00",
+            "HbisCita": "  :  :  "
+          },
+          {
+            "Zzlocalizador": "r1cqh",
+            "Auart": "ZIP",
+            "Matnr": "IP00",
+            "Ktext": "INSPECCIÓN PERIÓDICA",
+            "Aufnr": "000016474063",
+            "Gltrp": "0000-00-00",
+            "Zztecnico": "FERNANDO FUENTES VILLAREJO",
+            "ExtUi": "ES0234150063456295RR",
+            "Partner": "1000143679",
+            "FchCita": "2025-03-04",
+            "HabCita": "13:00:00",
+            "HbisCita": "16:00:00"
+          },
+          {
+            "Zzlocalizador": "L6koG",
+            "Auart": "ZS04",
+            "Matnr": "D054",
+            "Ktext": "CORTE IP POR AUSENCIA",
+            "Aufnr": "000016596883",
+            "Gltrp": "2025-02-27",
+            "Zztecnico": null,
+            "ExtUi": "ES0234150063456295RR",
+            "Partner": "1000143679",
+            "FchCita": "0000-00-00",
+            "HabCita": "00:00:00",
+            "HbisCita": "00:00:00"
+          },
+          {
+            "Zzlocalizador": "r1cqh",
+            "Auart": "ZS01",
+            "Matnr": "IP40",
+            "Ktext": "REAPERTURA TRAS CORTE DE IP",
+            "Aufnr": "000016632475",
+            "Gltrp": "0000-00-00",
+            "Zztecnico": null,
+            "ExtUi": "ES0234150063456295RR",
+            "Partner": "1000143679",
+            "FchCita": "2025-03-04",
+            "HabCita": "13:00:00",
+            "HbisCita": "16:00:00"
+          }
+        ]
+      },
+      "Epartnerdata": {
+        "NameFirst": "CLAIRE",
+        "NameLast": "LAURE LAGARRIGUE",
+        "NameLast2": null,
+        "Street": "CARRETAS",
+        "HouseNum1": "0020",
+        "HouseNum2": null,
+        "Location": null,
+        "Building": null,
+        "Floor": "01",
+        "Roomnumber": "    C",
+        "City1": "VILLAVICIOSA DE ODON",
+        "PostCode1": "28670",
+        "TelNumber": null,
+        "MobNumber": "604518797",
+        "SmtpAddr": "claire.lagarrigue@hotmail.fr",
+        "Taxnum": "Y5604106D"
+      },
+      "Eperlect": {
+        "item": [
+          {
+            "ExtUi": "ES0234150063456295RR",
+            "Fmin": "2025-10-22",
+            "Fmax": "2025-11-13"
+          }
+        ]
+      },
+      "EperlectAnt": {
+        "item": [
+          {
+            "ExtUi": "ES0234150063456295RR",
+            "Fmin": "2025-08-26",
+            "Fmax": "2025-09-16"
+          }
+        ]
+      },
+      "EperlectSig": {
+        "item": [
+          {
+            "ExtUi": "ES0234150063456295RR",
+            "Fmin": "2025-12-24",
+            "Fmax": "2026-01-19"
+          }
+        ]
+      },
+      "Erecla": {
+        "item": [
+          {
+            "ExtUi": "ES0234150063456295RR",
+            "Qmnum": "000309442207",
+            "Ausvn": "2025-02-28",
+            "Ausbs": "2025-02-28",
+            "Kurztext": "Reapertura por corte IP no realizada",
+            "Canal": "3",
+            "AvisoReiterado": null,
+            "Demanda": "DA089",
+            "Tipo": "DA",
+            "Proceso": null
+          },
+          {
+            "ExtUi": "ES0234150063456295RR",
+            "Qmnum": "000306372925",
+            "Ausvn": "2019-06-18",
+            "Ausbs": "2019-06-19",
+            "Kurztext": "Reclamación página web",
+            "Canal": "3",
+            "AvisoReiterado": null,
+            "Demanda": "IP11",
+            "Tipo": "RE",
+            "Proceso": "R"
+          },
+          {
+            "ExtUi": "ES0234150063456295RR",
+            "Qmnum": "000306289153",
+            "Ausvn": "2019-05-06",
+            "Ausbs": "2019-05-06",
+            "Kurztext": "Reclamación página web",
+            "Canal": "3",
+            "AvisoReiterado": null,
+            "Demanda": "IP11",
+            "Tipo": "RE",
+            "Proceso": "R"
+          }
+        ]
+      },
+      "EsolComerc": {
+        "item": [
+          {
+            "ExtUi": "ES0234150063456295RR",
+            "Moveindate": "2017-07-07",
+            "Moveoutdate": "0000-00-00",
+            "Switchtype": "05",
+            "Swttypetxt": "Modificación de contrato ATR",
+            "Status": "01",
+            "Statustext": "Realizado",
+            "SolDate": "2017-07-26",
+            "RealDate": "2017-07-26"
+          },
+          {
+            "ExtUi": "ES0234150063456295RR",
+            "Moveindate": "2018-03-07",
+            "Moveoutdate": "0000-00-00",
+            "Switchtype": "26",
+            "Swttypetxt": "Comunicación de Modificación de Datos",
+            "Status": "01",
+            "Statustext": "Realizado",
+            "SolDate": "2018-04-21",
+            "RealDate": "2018-04-21"
+          },
+          {
+            "ExtUi": "ES0234150063456295RR",
+            "Moveindate": "2019-03-08",
+            "Moveoutdate": "0000-00-00",
+            "Switchtype": "26",
+            "Swttypetxt": "Comunicación de Modificación de Datos",
+            "Status": "01",
+            "Statustext": "Realizado",
+            "SolDate": "2019-04-03",
+            "RealDate": "2019-04-03"
+          },
+          {
+            "ExtUi": "ES0234150063456295RR",
+            "Moveindate": "2022-11-08",
+            "Moveoutdate": "0000-00-00",
+            "Switchtype": "26",
+            "Swttypetxt": "Comunicación de Modificación de Datos",
+            "Status": "01",
+            "Statustext": "Realizado",
+            "SolDate": "2022-12-16",
+            "RealDate": "2022-12-16"
+          },
+          {
+            "ExtUi": "ES0234150063456295RR",
+            "Moveindate": "2024-10-10",
+            "Moveoutdate": "0000-00-00",
+            "Switchtype": "05",
+            "Swttypetxt": "Modificación de contrato ATR",
+            "Status": "02",
+            "Statustext": "Imposible realizar",
+            "SolDate": "2024-10-09",
+            "RealDate": "2024-10-09"
+          }
+        ]
+      },
+      "EsolDistri": {
+        "item": [
+          {
+            "ExtUi": "ES0234150063456295RR",
+            "Matnr": "IP40",
+            "Ktext": "REAPERTURA TRAS CORTE DE IP",
+            "Gstrp": "2025-02-28",
+            "Gltrp": "0000-00-00",
+            "Status": "En Curso"
+          },
+          {
+            "ExtUi": "ES0234150063456295RR",
+            "Matnr": "D054",
+            "Ktext": "CORTE IP POR AUSENCIA",
+            "Gstrp": "2025-02-27",
+            "Gltrp": "2025-02-27",
+            "Status": "Realizado"
+          }
+        ]
+      },
+      "Etext": {
+        "item": [
+          {
+            "Qmnum": "000306372925",
+            "Znumber": 1,
+            "Tdline": "17.06.2019 15:01:07 WEBSERVICE"
+          },
+          {
+            "Qmnum": "000306372925",
+            "Znumber": 2,
+            "Tdline": "Buenos dias,Estoy intentando de cambiar la fecha de inspeccion"
+          },
+          {
+            "Qmnum": "000306372925",
+            "Znumber": 3,
+            "Tdline": "periodica porque el 31/07/2019 09:00 - 11:00 no puedo. Pero la un"
+          },
+          {
+            "Qmnum": "000306372925",
+            "Znumber": 4,
+            "Tdline": "ica otra cita que me propone el sistema es el 11/09/2019 09:00 - 11:00,"
+          },
+          {
+            "Qmnum": "000306372925",
+            "Znumber": 5,
+            "Tdline": "y no puedo tampoco. Seria posible de posponerla al 13/09/2"
+          },
+          {
+            "Qmnum": "000306372925",
+            "Znumber": 6,
+            "Tdline": "019 18:00 - 21:00 ? Muchas gracias.Un saludo.Claire Lagarrigue"
+          },
+          {
+            "Qmnum": "000306372925",
+            "Znumber": 7,
+            "Tdline": "18.06.2019 09:46:17 EXT90099845"
+          },
+          {
+            "Qmnum": "000306372925",
+            "Znumber": 8,
+            "Tdline": "Estimada Claire"
+          },
+          {
+            "Qmnum": "000306372925",
+            "Znumber": 9,
+            "Tdline": "Enviamos su solicitud a nuestra contrata, para que la gestione."
+          },
+          {
+            "Qmnum": "000306372925",
+            "Znumber": 10,
+            "Tdline": "Un saludo."
+          },
+          {
+            "Qmnum": "000306289153",
+            "Znumber": 1,
+            "Tdline": "05.05.2019 12:44:43 WEBSERVICE"
+          },
+          {
+            "Qmnum": "000306289153",
+            "Znumber": 2,
+            "Tdline": "Buenos dias,Tengo que hacer la inspeccion periodica de la installacion"
+          },
+          {
+            "Qmnum": "000306289153",
+            "Znumber": 3,
+            "Tdline": "de gas este ano y en el correo que me habeis enviado me p"
+          },
+          {
+            "Qmnum": "000306289153",
+            "Znumber": 4,
+            "Tdline": "ropone una fecha que no me conviene. Estoy intentando de cambiar de"
+          },
+          {
+            "Qmnum": "000306289153",
+            "Znumber": 5,
+            "Tdline": "fecha online pero la unica nueva que me propone no me conviene"
+          },
+          {
+            "Qmnum": "000306289153",
+            "Znumber": 6,
+            "Tdline": "tampoco. ¿Como puedo hacer ?Gracias.Un saludo.Claire Lagarrigue"
+          },
+          {
+            "Qmnum": "000306289153",
+            "Znumber": 7,
+            "Tdline": "06.05.2019 09:50:54 EXT90099845"
+          },
+          {
+            "Qmnum": "000306289153",
+            "Znumber": 8,
+            "Tdline": "Buenos dias,"
+          },
+          {
+            "Qmnum": "000306289153",
+            "Znumber": 9,
+            "Tdline": "Segun lo que nos consta en nuestro sitema, tiene cita el dia 31/07/2019"
+          },
+          {
+            "Qmnum": "000306289153",
+            "Znumber": 10,
+            "Tdline": "de 09:00 a 11:00 h, si no puede en esa fecha, indiquenos en que horario"
+          },
+          {
+            "Qmnum": "000306289153",
+            "Znumber": 11,
+            "Tdline": "le viene mejor y fecha."
+          },
+          {
+            "Qmnum": "000306289153",
+            "Znumber": 12,
+            "Tdline": "Un saludo."
+          }
+        ]
+      },
+      "Eultlect": {
+        "item": [
+          {
+            "ExtUi": "ES0234150063456295RR",
+            "Fultlect": "2025-02-27",
+            "Clase": "01",
+            "Lectura": "8473",
+            "Mlreason": "13",
+            "Calculado": null
+          }
+        ]
+      },
+      "Eultlectreal": {
+        "item": [
+          {
+            "ExtUi": "ES0234150063456295RR",
+            "Fultlect": "2025-02-27",
+            "Clase": "01",
+            "Lectura": "8473"
+          }
+        ]
+      }
+    },
+    "dni_data": {
+      "APELLIDOS": "LAURE LAGARRIGUE ",
+      "CUPS": "ES0234150063456295RR",
+      "DIRECCION": "CARRETAS",
+      "MULTIPLECUPS": "false",
+      "NIF": "Y5604106D",
+      "NOMBRE": "CLAIRE",
+      "REQUESTSUCCESS": "true",
+      "RESPONSETEXT": ""
+    }
+  },
+  "feedbacks": [
+    {
+      "rating": "up",
+      "comment": "asdfasdfasdfasdf",
+      "created_at": {
+        "$date": "2025-10-14T17:38:02.006Z"
+      }
+    }
+  ]
+}
+</ejemplo_de_session>
+
+
+tratalo como una nueva feature para documentarla y prepara su fichero plan.md y progress.md para poder seguir el progreso de la implementacion.
+
+quiero que generes un backend y un frontend para esta feature.
+
+- session_viewer/backend
+- session_viewer/frontend
+
+
+has entendido? tienes dudas? 
