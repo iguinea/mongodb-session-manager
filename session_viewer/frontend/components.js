@@ -9,6 +9,19 @@
 dayjs.extend(dayjs_plugin_relativeTime);
 
 /**
+ * Helper to safely create zero-md elements after ensuring registration.
+ * This prevents timing issues where createElement('zero-md') is called
+ * before the custom element is defined by the ES module.
+ *
+ * @returns {Promise<HTMLElement>} A promise that resolves to a zero-md element
+ */
+async function createZeroMdElement() {
+  // Wait for zero-md custom element to be defined before creating elements
+  await customElements.whenDefined('zero-md');
+  return document.createElement('zero-md');
+}
+
+/**
  * Format utilities
  */
 const Format = {
@@ -40,6 +53,21 @@ const Format = {
     if (!text) return '';
     if (text.length <= maxLength) return text;
     return text.substring(0, maxLength) + '...';
+  },
+
+  /**
+   * Escape HTML special characters to prevent XSS attacks
+   * @param {string} unsafe - Untrusted user input
+   * @returns {string} - Safe HTML string
+   */
+  escapeHtml(unsafe) {
+    if (!unsafe) return '';
+    return String(unsafe)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
   }
 };
 
@@ -56,7 +84,7 @@ function renderSessionCard(session) {
     <div class="flex items-start justify-between mb-2">
       <div class="flex-1 min-w-0">
         <p class="text-sm font-medium text-gray-900 truncate">
-          ${session.session_id}
+          ${Format.escapeHtml(session.session_id)}
         </p>
         <p class="text-xs text-gray-500">
           ${Format.relativeTime(session.created_at)}
@@ -97,8 +125,8 @@ function renderSessionCard(session) {
         <div class="flex flex-wrap gap-1">
           ${Object.entries(session.metadata).slice(0, 3).map(([key, value]) => `
             <span class="inline-flex items-center px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-700">
-              <span class="font-medium">${key}:</span>
-              <span class="ml-1">${Format.truncate(String(value), 20)}</span>
+              <span class="font-medium">${Format.escapeHtml(key)}:</span>
+              <span class="ml-1">${Format.escapeHtml(Format.truncate(String(value), 20))}</span>
             </span>
           `).join('')}
           ${Object.keys(session.metadata).length > 3 ? `
@@ -112,6 +140,143 @@ function renderSessionCard(session) {
   `;
 
   return card;
+}
+
+/**
+ * Create custom styles template for zero-md elements
+ * Extracted to avoid code duplication
+ *
+ * @param {boolean} isUser - Whether this is a user message
+ * @returns {HTMLTemplateElement} - Style template element
+ */
+function createZeroMdStyles(isUser) {
+  const style = document.createElement('template');
+  style.innerHTML = `
+    <style>
+      :host {
+        --markdown-font-size: 0.875rem;
+        --markdown-line-height: 1.5;
+      }
+
+      /* Override default styles for better integration */
+      p { margin: 0.5em 0; }
+      p:first-child { margin-top: 0; }
+      p:last-child { margin-bottom: 0; }
+
+      code {
+        background: ${isUser ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)'};
+        padding: 0.2em 0.4em;
+        border-radius: 0.25rem;
+        font-size: 0.85em;
+      }
+
+      pre {
+        background: ${isUser ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)'};
+        padding: 1em;
+        border-radius: 0.5rem;
+        overflow-x: auto;
+      }
+
+      pre code {
+        background: transparent;
+        padding: 0;
+      }
+    </style>
+  `;
+  return style;
+}
+
+/**
+ * Check if text contains SESSION_DATA block with large content
+ * SESSION_DATA blocks contain massive JSON that can cause zero-md to hang
+ *
+ * @param {string} text - Text content to check
+ * @returns {Object|null} - Parsed session data info or null if not found
+ */
+function extractSessionData(text) {
+  if (!text) return null;
+
+  // Pattern: <SESSION_DATA> ... </SESSION_DATA>
+  const sessionDataRegex = /<SESSION_DATA>([\s\S]*?)<\/SESSION_DATA>/;
+  const match = sessionDataRegex.exec(text);
+
+  if (!match) return null;
+
+  const rawContent = match[1].trim();
+
+  // Try to parse as JSON
+  try {
+    const parsed = JSON.parse(rawContent);
+    return {
+      fullMatch: match[0],
+      content: parsed,
+      isJson: true,
+      textBefore: text.substring(0, match.index),
+      textAfter: text.substring(match.index + match[0].length)
+    };
+  } catch (e) {
+    // Not valid JSON, but still SESSION_DATA block
+    return {
+      fullMatch: match[0],
+      content: rawContent,
+      isJson: false,
+      textBefore: text.substring(0, match.index),
+      textAfter: text.substring(match.index + match[0].length)
+    };
+  }
+}
+
+/**
+ * Render SESSION_DATA block as collapsible JSON viewer
+ * Uses renderjson for interactive visualization instead of zero-md
+ *
+ * @param {Object} sessionData - Extracted session data from extractSessionData()
+ * @param {boolean} isUser - Whether this is a user message
+ * @returns {HTMLElement} - Collapsible container element
+ */
+function renderSessionDataBlock(sessionData, isUser) {
+  const container = document.createElement('div');
+  container.className = `session-data-block ${isUser ? 'session-data-user' : 'session-data-assistant'}`;
+
+  // Create details/summary for collapsible behavior
+  const details = document.createElement('details');
+  details.className = 'session-data-details';
+
+  const summary = document.createElement('summary');
+  summary.className = 'session-data-summary';
+  summary.innerHTML = `
+    <span class="session-data-badge">📊 SESSION_DATA</span>
+    <span class="session-data-info">(Click para expandir)</span>
+  `;
+  details.appendChild(summary);
+
+  // Content container
+  const contentDiv = document.createElement('div');
+  contentDiv.className = 'session-data-content tool-json-content';
+
+  if (sessionData.isJson) {
+    // Render as interactive JSON tree
+    renderjson.set_show_to_level(1); // Collapsed by default
+    renderjson.set_max_string_length(80);
+    const jsonTree = renderjson(sessionData.content);
+    contentDiv.appendChild(jsonTree);
+  } else {
+    // Show as pre-formatted text (truncated)
+    const pre = document.createElement('pre');
+    pre.className = 'session-data-text';
+    const maxChars = 2000;
+    if (sessionData.content.length > maxChars) {
+      pre.textContent = sessionData.content.substring(0, maxChars) + '\n... (truncado)';
+    } else {
+      pre.textContent = sessionData.content;
+    }
+    contentDiv.appendChild(pre);
+  }
+
+  details.appendChild(contentDiv);
+  container.appendChild(details);
+
+  return container;
 }
 
 /**
@@ -172,7 +337,7 @@ function renderToolUse(toolUse, isUser) {
   header.className = 'tool-header';
   header.innerHTML = `
     <span class="tool-badge tool-badge-use">🔧 Tool Call</span>
-    <span class="tool-name">${toolUse.toolName}</span>
+    <span class="tool-name">${Format.escapeHtml(toolUse.toolName)}</span>
   `;
   container.appendChild(header);
 
@@ -219,7 +384,7 @@ function renderToolResult(toolResult, isUser) {
   header.className = 'tool-header';
   header.innerHTML = `
     <span class="tool-badge ${badgeClass}">${badgeIcon} ${badgeText}</span>
-    <span class="tool-status">${toolResult.status}</span>
+    <span class="tool-status">${Format.escapeHtml(toolResult.status)}</span>
   `;
   container.appendChild(header);
 
@@ -287,203 +452,175 @@ function renderToolResult(toolResult, isUser) {
 }
 
 /**
+ * Create a zero-md element with markdown content and optional styles
+ */
+async function createMarkdownElement(text, isUser, includeStyles = true) {
+  const zeroMd = await createZeroMdElement();
+  const script = document.createElement('script');
+  script.type = 'text/markdown';
+  script.textContent = text;
+  zeroMd.appendChild(script);
+  if (includeStyles) {
+    zeroMd.appendChild(createZeroMdStyles(isUser));
+  }
+  return zeroMd;
+}
+
+/**
+ * Render a text content part, handling SESSION_DATA blocks
+ */
+async function renderTextPart(part, isUser, bubble) {
+  const sessionData = extractSessionData(part.content);
+
+  if (!sessionData) {
+    bubble.appendChild(await createMarkdownElement(part.content, isUser));
+    return;
+  }
+
+  if (sessionData.textBefore.trim()) {
+    bubble.appendChild(await createMarkdownElement(sessionData.textBefore, isUser));
+  }
+
+  bubble.appendChild(renderSessionDataBlock(sessionData, isUser));
+
+  if (sessionData.textAfter.trim()) {
+    bubble.appendChild(await createMarkdownElement(sessionData.textAfter, isUser));
+  }
+}
+
+/**
+ * Render content parts into a bubble element
+ */
+async function renderContentParts(contentParts, isUser, bubble) {
+  if (contentParts.length === 0) {
+    bubble.appendChild(await createMarkdownElement('*Sin contenido*', isUser, false));
+    return;
+  }
+
+  for (let index = 0; index < contentParts.length; index++) {
+    const part = contentParts[index];
+
+    if (part.type === 'text') {
+      await renderTextPart(part, isUser, bubble);
+    } else if (part.type === 'tool_use') {
+      bubble.appendChild(renderToolUse(part, isUser));
+    } else if (part.type === 'tool_result') {
+      bubble.appendChild(renderToolResult(part, isUser));
+    }
+
+    if (index < contentParts.length - 1) {
+      const spacer = document.createElement('div');
+      spacer.className = 'mt-3';
+      bubble.appendChild(spacer);
+    }
+  }
+}
+
+/**
+ * Build tool usage metric span HTML
+ */
+function buildToolUsageSpan(toolUsage) {
+  const toolNames = Object.keys(toolUsage);
+  const totalToolCalls = toolNames.reduce((sum, name) => sum + (toolUsage[name]?.call_count || 0), 0);
+  const totalToolErrors = toolNames.reduce((sum, name) => sum + (toolUsage[name]?.error_count || 0), 0);
+
+  if (totalToolCalls === 0) return '';
+
+  const toolIcon = totalToolErrors > 0 ? '⚠️' : '🔧';
+  const toolTitle = toolNames.map(name => {
+    const t = toolUsage[name];
+    return name + ': ' + t.call_count + ' calls (' + t.success_count + '✓ ' + t.error_count + '✗) ' + (t.average_time?.toFixed(2) || 0) + 's avg';
+  }).join('\\n');
+  const errorSuffix = totalToolErrors > 0 ? ' (' + totalToolErrors + ' err)' : '';
+  const plural = totalToolCalls > 1 ? 's' : '';
+
+  return '<span title="' + toolTitle + '">' + toolIcon + ' ' + totalToolCalls + ' tool' + plural + errorSuffix + '</span>';
+}
+
+/**
+ * Build metrics HTML string from message metrics data
+ */
+function buildMetricsHTML(itemMetrics, isUser) {
+  const usage = itemMetrics.accumulated_usage || {};
+  const perfMetrics = itemMetrics.accumulated_metrics || {};
+  const cycleMetrics = itemMetrics.cycle_metrics || {};
+  const toolUsage = itemMetrics.tool_usage || {};
+
+  const cacheRead = usage.cacheReadInputTokens || 0;
+  const cacheWrite = usage.cacheWriteInputTokens || 0;
+  const totalCacheable = cacheRead + cacheWrite;
+  const cacheHitRate = totalCacheable > 0 ? Math.round((cacheRead / totalCacheable) * 100) : null;
+  const colorClass = isUser ? 'text-primary-100' : 'text-gray-500';
+
+  const spans = [];
+
+  spans.push('<span title="Total Tokens (in: ' + Format.number(usage.inputTokens || 0) + ', out: ' + Format.number(usage.outputTokens || 0) + ')">🔢 ' + Format.number(usage.totalTokens || 0) + '</span>');
+  spans.push('<span title="Latencia total">⏱️ ' + (perfMetrics.latencyMs || 0) + 'ms</span>');
+
+  if (perfMetrics.timeToFirstByteMs) {
+    spans.push('<span title="Time to First Byte">⚡ TTFB: ' + perfMetrics.timeToFirstByteMs + 'ms</span>');
+  }
+
+  if (cacheHitRate !== null) {
+    const cacheIcon = cacheHitRate > 50 ? '✅' : '📝';
+    spans.push('<span title="Cache: ' + Format.number(cacheRead) + ' read (hits), ' + Format.number(cacheWrite) + ' write (miss)">' + cacheIcon + ' Cache: ' + cacheHitRate + '%</span>');
+  }
+
+  if (cycleMetrics.cycle_count) {
+    const totalDur = (cycleMetrics.total_duration || 0).toFixed(2);
+    const avgDur = (cycleMetrics.average_cycle_time || 0).toFixed(2);
+    const plural = cycleMetrics.cycle_count > 1 ? 's' : '';
+    spans.push('<span title="Cycles: ' + cycleMetrics.cycle_count + ', Total: ' + totalDur + 's, Avg: ' + avgDur + 's">🔄 ' + cycleMetrics.cycle_count + ' cycle' + plural + '</span>');
+  }
+
+  const toolSpan = buildToolUsageSpan(toolUsage);
+  if (toolSpan) spans.push(toolSpan);
+
+  return '<div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs ' + colorClass + '">' + spans.join('') + '</div>';
+}
+
+/**
  * Timeline Message Component
  * Renders a message in the timeline
  */
-function renderTimelineMessage(item) {
+async function renderTimelineMessage(item) {
   const isUser = item.role === 'user';
   const container = document.createElement('div');
   container.className = `flex ${isUser ? 'justify-end' : 'justify-start'} fade-in`;
 
-  // Parse message content
-  const contentParts = parseMessageContent(item.content);
-
-  // Create wrapper div
   const wrapper = document.createElement('div');
   wrapper.className = `max-w-[85%] ${isUser ? 'ml-auto' : 'mr-auto'}`;
 
-  // Add agent badge and timestamp for assistant messages
   if (!isUser) {
     const header = document.createElement('div');
     header.className = 'flex items-center space-x-2 mb-1';
     header.innerHTML = `
       <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-primary-100 text-primary-800">
-        ${item.agent_id}
+        ${Format.escapeHtml(item.agent_id)}
       </span>
-      <span class="text-xs text-gray-500">
-        ${Format.date(item.timestamp)}
-      </span>
+      <span class="text-xs text-gray-500">${Format.date(item.timestamp)}</span>
     `;
     wrapper.appendChild(header);
   }
 
-  // Create message bubble container
   const bubble = document.createElement('div');
   bubble.className = `rounded-lg px-4 py-3 ${isUser ? 'bg-primary-600 text-white user-message' : 'bg-gray-100 text-gray-900 assistant-message'}`;
 
-  // Render each content part
-  if (contentParts.length === 0) {
-    // No content - show placeholder
-    const zeroMd = document.createElement('zero-md');
-    const script = document.createElement('script');
-    script.type = 'text/markdown';
-    script.textContent = '*Sin contenido*';
-    zeroMd.appendChild(script);
-    bubble.appendChild(zeroMd);
-  } else {
-    contentParts.forEach((part, index) => {
-      if (part.type === 'text') {
-        // Render text content with zero-md
-        const zeroMd = document.createElement('zero-md');
+  await renderContentParts(parseMessageContent(item.content), isUser, bubble);
 
-        // Add markdown content
-        const script = document.createElement('script');
-        script.type = 'text/markdown';
-        script.textContent = part.content;
-        zeroMd.appendChild(script);
-
-        // Add custom styles to zero-md
-        const style = document.createElement('template');
-        style.innerHTML = `
-          <style>
-            :host {
-              --markdown-font-size: 0.875rem;
-              --markdown-line-height: 1.5;
-            }
-
-            /* Override default styles for better integration */
-            p { margin: 0.5em 0; }
-            p:first-child { margin-top: 0; }
-            p:last-child { margin-bottom: 0; }
-
-            code {
-              background: ${isUser ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)'};
-              padding: 0.2em 0.4em;
-              border-radius: 0.25rem;
-              font-size: 0.85em;
-            }
-
-            pre {
-              background: ${isUser ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)'};
-              padding: 1em;
-              border-radius: 0.5rem;
-              overflow-x: auto;
-            }
-
-            pre code {
-              background: transparent;
-              padding: 0;
-            }
-          </style>
-        `;
-        zeroMd.appendChild(style);
-
-        bubble.appendChild(zeroMd);
-      } else if (part.type === 'tool_use') {
-        // Render tool call
-        const toolUseEl = renderToolUse(part, isUser);
-        bubble.appendChild(toolUseEl);
-      } else if (part.type === 'tool_result') {
-        // Render tool result
-        const toolResultEl = renderToolResult(part, isUser);
-        bubble.appendChild(toolResultEl);
-      }
-
-      // Add spacing between parts (except for the last one)
-      if (index < contentParts.length - 1) {
-        const spacer = document.createElement('div');
-        spacer.className = 'mt-3';
-        bubble.appendChild(spacer);
-      }
-    });
-  }
-
-  // Add metrics if available
   if (item.metrics) {
     const metrics = document.createElement('div');
     metrics.className = `mt-2 pt-2 border-t ${isUser ? 'border-primary-500' : 'border-gray-200'}`;
-
-    // Build metrics HTML with all available data
-    const usage = item.metrics.accumulated_usage || {};
-    const perfMetrics = item.metrics.accumulated_metrics || {};
-    const cycleMetrics = item.metrics.cycle_metrics || {};
-    const toolUsage = item.metrics.tool_usage || {};
-
-    // Calculate cache hit rate if cache metrics exist
-    const cacheRead = usage.cacheReadInputTokens || 0;
-    const cacheWrite = usage.cacheWriteInputTokens || 0;
-    const totalCacheable = cacheRead + cacheWrite;
-    const cacheHitRate = totalCacheable > 0 ? Math.round((cacheRead / totalCacheable) * 100) : null;
-
-    // Build tool usage summary
-    const toolNames = Object.keys(toolUsage);
-    const totalToolCalls = toolNames.reduce((sum, name) => sum + (toolUsage[name]?.call_count || 0), 0);
-    const totalToolErrors = toolNames.reduce((sum, name) => sum + (toolUsage[name]?.error_count || 0), 0);
-
-    // First row: Tokens and Latency
-    let metricsHTML = `
-      <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs ${isUser ? 'text-primary-100' : 'text-gray-500'}">
-        <span title="Total Tokens (in: ${Format.number(usage.inputTokens || 0)}, out: ${Format.number(usage.outputTokens || 0)})">
-          🔢 ${Format.number(usage.totalTokens || 0)}
-        </span>
-        <span title="Latencia total">
-          ⏱️ ${perfMetrics.latencyMs || 0}ms
-        </span>`;
-
-    // Add Time to First Byte if available
-    if (perfMetrics.timeToFirstByteMs) {
-      metricsHTML += `
-        <span title="Time to First Byte">
-          ⚡ TTFB: ${perfMetrics.timeToFirstByteMs}ms
-        </span>`;
-    }
-
-    // Add cache metrics if available
-    if (cacheHitRate !== null) {
-      const cacheIcon = cacheHitRate > 50 ? '✅' : '📝';
-      metricsHTML += `
-        <span title="Cache: ${Format.number(cacheRead)} read, ${Format.number(cacheWrite)} write">
-          ${cacheIcon} Cache: ${cacheHitRate}%
-        </span>`;
-    }
-
-    // Add cycle metrics if available
-    if (cycleMetrics.cycle_count) {
-      metricsHTML += `
-        <span title="Cycles: ${cycleMetrics.cycle_count}, Total: ${(cycleMetrics.total_duration || 0).toFixed(2)}s, Avg: ${(cycleMetrics.average_cycle_time || 0).toFixed(2)}s">
-          🔄 ${cycleMetrics.cycle_count} cycle${cycleMetrics.cycle_count > 1 ? 's' : ''}
-        </span>`;
-    }
-
-    // Add tool usage summary if available
-    if (totalToolCalls > 0) {
-      const toolIcon = totalToolErrors > 0 ? '⚠️' : '🔧';
-      const toolTitle = toolNames.map(name => {
-        const t = toolUsage[name];
-        return `${name}: ${t.call_count} calls (${t.success_count}✓ ${t.error_count}✗) ${t.average_time?.toFixed(2) || 0}s avg`;
-      }).join('\\n');
-      metricsHTML += `
-        <span title="${toolTitle}">
-          ${toolIcon} ${totalToolCalls} tool${totalToolCalls > 1 ? 's' : ''}${totalToolErrors > 0 ? ` (${totalToolErrors} err)` : ''}
-        </span>`;
-    }
-
-    metricsHTML += `</div>`;
-    metrics.innerHTML = metricsHTML;
+    metrics.innerHTML = buildMetricsHTML(item.metrics, isUser);
     bubble.appendChild(metrics);
   }
 
   wrapper.appendChild(bubble);
 
-  // Add timestamp for user messages
   if (isUser) {
     const footer = document.createElement('div');
     footer.className = 'text-right mt-1';
-    footer.innerHTML = `
-      <span class="text-xs text-gray-500">
-        ${Format.date(item.timestamp)}
-      </span>
-    `;
+    footer.innerHTML = `<span class="text-xs text-gray-500">${Format.date(item.timestamp)}</span>`;
     wrapper.appendChild(footer);
   }
 
@@ -531,7 +668,7 @@ function renderTimelineFeedback(item) {
             </div>
             ${item.comment ? `
               <p class="text-sm text-gray-700">
-                "${item.comment}"
+                "${Format.escapeHtml(item.comment)}"
               </p>
             ` : ''}
           </div>
@@ -555,7 +692,7 @@ function renderAgentSummary(agentId, summary) {
   const header = document.createElement('div');
   header.className = 'flex items-center justify-between mb-2';
   header.innerHTML = `
-    <span class="font-medium text-sm text-gray-900">${agentId}</span>
+    <span class="font-medium text-sm text-gray-900">${Format.escapeHtml(agentId)}</span>
     <span class="text-xs text-gray-500">${summary.messages_count} mensajes</span>
   `;
   div.appendChild(header);
@@ -565,7 +702,7 @@ function renderAgentSummary(agentId, summary) {
     const modelInfo = document.createElement('p');
     modelInfo.className = 'text-xs text-gray-600 mb-1';
     modelInfo.innerHTML = `
-      <span class="font-medium">Model:</span> ${Format.truncate(summary.model, 40)}
+      <span class="font-medium">Model:</span> ${Format.escapeHtml(Format.truncate(summary.model, 40))}
     `;
     div.appendChild(modelInfo);
   }
@@ -592,27 +729,22 @@ function renderAgentSummary(agentId, summary) {
 
 /**
  * Metadata Display Component
- * Renders metadata key-value pairs using renderjson for interactive JSON visualization
+ * Renders metadata as fully expanded JSON using renderjson
  */
 function renderMetadata(metadata) {
-  const container = document.createElement('div');
-  container.className = 'metadata-json-container';
-
-  if (Object.keys(metadata).length === 0) {
-    container.innerHTML = '<p class="text-sm text-gray-500 italic">Sin metadata</p>';
-    return container;
+  if (!metadata || Object.keys(metadata).length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'text-sm text-gray-500 italic';
+    empty.textContent = 'Sin metadata';
+    return empty;
   }
 
-  // Configure renderjson
-  renderjson.set_show_to_level(2);  // Show first two levels expanded
-  renderjson.set_max_string_length(100);  // Truncate long strings
+  // Configure renderjson - fully expanded, no collapse
+  renderjson.set_show_to_level('all');
+  renderjson.set_max_string_length(500);
 
-  // Render metadata as interactive JSON tree
-  const jsonTree = renderjson(metadata);
-  jsonTree.className = 'metadata-renderjson';
-  container.appendChild(jsonTree);
-
-  return container;
+  // Return renderjson element directly
+  return renderjson(metadata);
 }
 
 /**
@@ -788,6 +920,224 @@ function renderLoadingSpinner() {
   return '<div class="flex justify-center p-8"><div class="spinner"></div></div>';
 }
 
+/**
+ * AWS Bedrock Claude Pricing (per 1M tokens)
+ * Prices as of 2024
+ */
+const BEDROCK_PRICING = {
+  'claude-3-5-sonnet': {
+    input: 3.00,
+    output: 15.00,
+    cacheRead: 0.30,    // 90% discount on input
+    cacheWrite: 3.75    // 25% surcharge on input
+  },
+  'claude-3-sonnet': {
+    input: 3.00,
+    output: 15.00,
+    cacheRead: 0.30,
+    cacheWrite: 3.75
+  },
+  'claude-3-haiku': {
+    input: 0.25,
+    output: 1.25,
+    cacheRead: 0.03,
+    cacheWrite: 0.30
+  },
+  'claude-3-opus': {
+    input: 15.00,
+    output: 75.00,
+    cacheRead: 1.50,
+    cacheWrite: 18.75
+  },
+  // Default fallback
+  'default': {
+    input: 3.00,
+    output: 15.00,
+    cacheRead: 0.30,
+    cacheWrite: 3.75
+  }
+};
+
+/**
+ * Get pricing for a model
+ */
+function getModelPricing(modelId) {
+  // Normalize model ID
+  const normalizedModel = (modelId || '').toLowerCase();
+
+  if (normalizedModel.includes('opus')) {
+    return BEDROCK_PRICING['claude-3-opus'];
+  } else if (normalizedModel.includes('haiku')) {
+    return BEDROCK_PRICING['claude-3-haiku'];
+  } else if (normalizedModel.includes('sonnet')) {
+    return BEDROCK_PRICING['claude-3-5-sonnet'];
+  }
+
+  return BEDROCK_PRICING['default'];
+}
+
+/**
+ * Calculate cost for a single agent's usage
+ */
+function calculateAgentCost(usage, model) {
+  const pricing = getModelPricing(model);
+
+  const inputTokens = usage.inputTokens || 0;
+  const outputTokens = usage.outputTokens || 0;
+  const totalTokens = usage.totalTokens || (inputTokens + outputTokens);
+  const cacheRead = usage.cacheReadInputTokens || 0;
+  const cacheWrite = usage.cacheWriteInputTokens || 0;
+
+  const inputCost = (inputTokens / 1_000_000) * pricing.input;
+  const outputCost = (outputTokens / 1_000_000) * pricing.output;
+  const cacheReadCost = (cacheRead / 1_000_000) * pricing.cacheRead;
+  const cacheWriteCost = (cacheWrite / 1_000_000) * pricing.cacheWrite;
+  const totalCost = inputCost + outputCost + cacheReadCost + cacheWriteCost;
+  const cacheReadSavings = (cacheRead / 1_000_000) * (pricing.input - pricing.cacheRead);
+
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens,
+    cacheRead,
+    cacheWrite,
+    inputCost,
+    outputCost,
+    cacheReadCost,
+    cacheWriteCost,
+    totalCost,
+    cacheReadSavings,
+    pricing
+  };
+}
+
+/**
+ * Token Summary Component
+ * Renders total token consumption and cost calculation per agent
+ *
+ * @param {Object} agentMetrics - Object with agent_id as key, containing {metrics, model}
+ * @returns {HTMLElement} - Token summary element
+ */
+function renderTokenSummary(agentMetrics) {
+  const container = document.createElement('div');
+  container.className = 'token-summary';
+
+  // Calculate costs per agent
+  const agentCosts = {};
+  let grandTotalTokens = 0;
+  let grandTotalCost = 0;
+  let grandTotalSavings = 0;
+
+  for (const [agentId, data] of Object.entries(agentMetrics)) {
+    const usage = data.metrics?.accumulated_usage;
+    if (!usage) continue;
+
+    const costs = calculateAgentCost(usage, data.model);
+    agentCosts[agentId] = {
+      ...costs,
+      model: data.model,
+      modelDisplay: (data.model || 'Unknown').split('/').pop()
+    };
+
+    grandTotalTokens += costs.totalTokens;
+    grandTotalCost += costs.totalCost;
+    grandTotalSavings += costs.cacheReadSavings;
+  }
+
+  const agentCount = Object.keys(agentCosts).length;
+
+  // Build HTML
+  let html = `
+    <div class="token-summary-header">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+      </svg>
+      <span>Resumen de Consumo</span>
+      <span class="text-xs font-normal text-gray-500 ml-2">(${agentCount} ${agentCount === 1 ? 'agente' : 'agentes'})</span>
+    </div>
+
+    <!-- Grand Total -->
+    <div class="token-summary-grid" style="margin-bottom: 1rem;">
+      <div class="token-stat" style="grid-column: span 2;">
+        <div class="token-stat-label">Total Tokens (Sesión)</div>
+        <div class="token-stat-value">${Format.number(grandTotalTokens)}</div>
+      </div>
+      <div class="token-stat" style="grid-column: span 2;">
+        <div class="token-stat-label">Coste Total (Sesión)</div>
+        <div class="token-stat-value cost">$${grandTotalCost.toFixed(4)}</div>
+        ${grandTotalSavings > 0 ? `<div class="token-stat-subvalue" style="color: #059669;">Ahorro cache: $${grandTotalSavings.toFixed(4)}</div>` : ''}
+      </div>
+    </div>
+  `;
+
+  // Per-agent breakdown
+  for (const [agentId, costs] of Object.entries(agentCosts)) {
+    html += `
+      <div class="agent-cost-section">
+        <div class="agent-cost-header">
+          <span class="agent-cost-name">${Format.escapeHtml(agentId)}</span>
+          <span class="agent-cost-model">${Format.escapeHtml(costs.modelDisplay)}</span>
+          <span class="agent-cost-total">$${costs.totalCost.toFixed(4)}</span>
+        </div>
+        <div class="token-summary-grid">
+          <div class="token-stat">
+            <div class="token-stat-label">Total</div>
+            <div class="token-stat-value">${Format.number(costs.totalTokens)}</div>
+          </div>
+          <div class="token-stat">
+            <div class="token-stat-label">Input</div>
+            <div class="token-stat-value">${Format.number(costs.inputTokens)}</div>
+            <div class="token-stat-subvalue">$${costs.inputCost.toFixed(4)}</div>
+          </div>
+          <div class="token-stat">
+            <div class="token-stat-label">Output</div>
+            <div class="token-stat-value">${Format.number(costs.outputTokens)}</div>
+            <div class="token-stat-subvalue">$${costs.outputCost.toFixed(4)}</div>
+          </div>
+          <div class="token-stat">
+            <div class="token-stat-label">Cache Read</div>
+            <div class="token-stat-value">${Format.number(costs.cacheRead)}</div>
+            <div class="token-stat-subvalue">$${costs.cacheReadCost.toFixed(4)}</div>
+          </div>
+          <div class="token-stat">
+            <div class="token-stat-label">Cache Write</div>
+            <div class="token-stat-value">${Format.number(costs.cacheWrite)}</div>
+            <div class="token-stat-subvalue">$${costs.cacheWriteCost.toFixed(4)}</div>
+          </div>
+          <div class="token-stat">
+            <div class="token-stat-label">Subtotal</div>
+            <div class="token-stat-value cost">$${costs.totalCost.toFixed(4)}</div>
+          </div>
+        </div>
+        <div class="cost-breakdown">
+          <div class="cost-breakdown-title">Precios ${Format.escapeHtml(costs.modelDisplay)} (por 1M)</div>
+          <div class="cost-breakdown-grid">
+            <div class="cost-item">
+              <span>Input:</span>
+              <span class="cost-item-value">$${costs.pricing.input.toFixed(2)}</span>
+            </div>
+            <div class="cost-item">
+              <span>Output:</span>
+              <span class="cost-item-value">$${costs.pricing.output.toFixed(2)}</span>
+            </div>
+            <div class="cost-item">
+              <span>Cache Read:</span>
+              <span class="cost-item-value">$${costs.pricing.cacheRead.toFixed(2)}</span>
+            </div>
+            <div class="cost-item">
+              <span>Cache Write:</span>
+              <span class="cost-item-value">$${costs.pricing.cacheWrite.toFixed(2)}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  container.innerHTML = html;
+  return container;
+}
+
 // Export components for use in viewer.js
 window.Components = {
   Format,
@@ -798,5 +1148,6 @@ window.Components = {
   renderMetadata,
   renderDynamicFilter,
   renderEmptyState,
-  renderLoadingSpinner
+  renderLoadingSpinner,
+  renderTokenSummary
 };

@@ -3,14 +3,17 @@
 # Default target
 .DEFAULT_GOAL := help
 
+# Configurable port
+PORT ?= 8883
+
 # Frontend server
 run: ## Start HTTP server on port 8883
-	@echo "Starting frontend server on http://localhost:8883"
-	@python3 -m http.server 8883
+	@echo "Starting frontend server on http://localhost:$(PORT)"
+	@python3 -m http.server $(PORT)
 
 open: ## Open frontend in browser
-	@echo "Opening http://localhost:8883 in browser..."
-	@open http://localhost:8883 || xdg-open http://localhost:8883 || start http://localhost:8883
+	@echo "Opening http://localhost:$(PORT) in browser..."
+	@open http://localhost:$(PORT) || xdg-open http://localhost:$(PORT) || start http://localhost:$(PORT)
 
 # Cleanup
 clean: ## Clean up temporary files

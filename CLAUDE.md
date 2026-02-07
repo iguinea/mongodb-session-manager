@@ -180,6 +180,74 @@ Current version: **0.5.0**
 - **Feature Plans**: Save accepted plans to `features/<n>_<short_description>/plan.md`
 - **Documentation Index**: See `docs/README.md` for full documentation structure
 
+## Branch Conventions
+
+| Prefijo | Uso | Ejemplo |
+|---------|-----|---------|
+| `feature/` | Nueva funcionalidad | `feature/user-auth` |
+| `fix/` | Corrección de bug | `fix/login-error` |
+| `refactor/` | Refactorización | `refactor/api-client` |
+| `docs/` | Documentación | `docs/api-readme` |
+| `test/` | Añadir tests | `test/user-service` |
+| `chore/` | Mantenimiento | `chore/update-deps` |
+
+## Commit Conventions
+
+```
+Add:      nueva funcionalidad
+Update:   mejora de funcionalidad existente
+Fix:      corrección de bug
+Refactor: refactorización sin cambio de comportamiento
+Docs:     cambios en documentación
+Test:     añadir o modificar tests
+Chore:    tareas de mantenimiento (deps, config)
+```
+
+## Development Philosophy
+
+### SOLID Principles
+
+- **S - Single Responsibility**: Una clase/función debe tener una única razón para cambiar. Si la descripción incluye "Y", hay que separar.
+- **O - Open/Closed**: Abierto para extensión, cerrado para modificación. Usar interfaces y estrategias en vez de `if/elif` crecientes.
+- **L - Liskov Substitution**: Subtipos deben ser intercambiables por sus tipos base sin romper el contrato.
+- **I - Interface Segregation**: Interfaces pequeñas y específicas. No obligar a implementar métodos que no se usan.
+- **D - Dependency Inversion**: Depender de abstracciones (Protocol/ABC), no de implementaciones concretas. Inyectar dependencias.
+
+### KISS & YAGNI
+
+- No abstraer prematuramente. Tres líneas similares son mejor que una abstracción prematura.
+- No añadir parámetros, configuración o features "por si acaso".
+- No optimizar sin métricas que lo justifiquen.
+- Soluciones directas y claras sobre patrones sofisticados innecesarios.
+
+### DRY (Rule of Three)
+
+- Abstraer solo cuando la misma lógica se repite **3+ veces**.
+- Si la duplicación es **similar pero no idéntica**, mantener separado.
+
+### TDD Workflow
+
+1. **RED**: Escribir test que falla (función/clase no existe aún)
+2. **GREEN**: Código mínimo para pasar el test
+3. **REFACTOR**: Mejorar estructura sin romper tests
+
+Orden de tests: Happy path > Edge cases > Error cases > Integration
+
+### DDD (Domain-Driven Design)
+
+- Organizar código por dominio de negocio, no por capa técnica
+- Usar el lenguaje del negocio en nombres de clases, funciones y variables
+- Cada contexto tiene su propio modelo aunque represente el mismo concepto
+
+### Coverage Requirements
+
+| Componente | Mínimo |
+|------------|--------|
+| Lógica de negocio / Services | 80% |
+| Handlers / Controllers | 70% |
+| Repository / Data Layer | 60% |
+| Utilities / Helpers | 80% |
+
 ## Testing
 
 Tests require a MongoDB connection. Set the environment variable before running:

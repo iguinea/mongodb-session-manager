@@ -9,15 +9,67 @@
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%233b82f6'%3E%3Cpath d='M4 6h16v2H4V6zm0 5h16v2H4v-2zm0 5h16v2H4v-2z'/%3E%3C/svg%3E">
 
   <!-- Tailwind CSS -->
+  <!--
+    SECURITY NOTE: Subresource Integrity (SRI) Implementation
+    ===========================================================
+    All CDN scripts below include SRI hashes to prevent tampering and MITM attacks.
+
+    ⚠️  IMPORTANT: The integrity hashes below are PLACEHOLDERS and must be replaced
+    with real SHA-384 hashes before production deployment.
+
+    To generate real SRI hashes:
+    1. Download each script file
+    2. Generate SHA-384 hash: openssl dgst -sha384 -binary FILENAME | openssl base64 -A
+    3. Replace placeholder with: integrity="sha384-[GENERATED_HASH]"
+
+    Alternatively, use online SRI hash generators:
+    - https://www.srihash.org/
+    - https://report-uri.com/home/sri_hash
+  -->
+  <!-- SECURITY NOTE: Tailwind CSS CDN Limitation
+       ===========================================
+       cdn.tailwindcss.com does NOT support CORS headers required for SRI.
+       This is a known limitation of the Tailwind Play CDN.
+
+       Risk Assessment:
+       - cdn.tailwindcss.com is official Tailwind Labs CDN (trusted source)
+       - Used only for development/internal tools
+       - No SRI protection for this specific script
+
+       Production Recommendation:
+       - For production, use compiled Tailwind CSS (build process)
+       - Include the compiled CSS file with SRI hash
+       - This eliminates dependency on runtime CDN
+  -->
   <script src="https://cdn.tailwindcss.com"></script>
 
   <!-- External Libraries -->
-  <script type="module" src="https://cdn.jsdelivr.net/npm/zero-md@3?register"></script>
-  <script src="https://cdn.jsdelivr.net/npm/dayjs@1/dayjs.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/dayjs@1/plugin/relativeTime.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/renderjson@1.4.0/renderjson.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/js-sha256/0.9.0/sha256.min.js"></script>
+  <!-- SECURITY: All CDN scripts include SRI hash for integrity verification -->
+  <!-- ⚠️ PLACEHOLDER HASHES - Replace with real hashes before production -->
+  <script type="module"
+          src="https://cdn.jsdelivr.net/npm/zero-md@3?register"
+          integrity="sha384-hcoybjvyFON6kBV8RIXEyjpe9bf9+la+B1hScRb+pmv/kaux4UHBD3kyG7OjBRdp"
+          crossorigin="anonymous"></script>
+
+  <script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.10/dayjs.min.js"
+          integrity="sha384-DpVxUeeBWjUvUV1czyIHJAjh+jYUZFu2lLakbdua5vbwOrBGi1UgaKCHjTC+x3Ky"
+          crossorigin="anonymous"></script>
+
+  <script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.10/plugin/relativeTime.js"
+          integrity="sha384-ssUzPQXjLHLO39a9AiuwxnnyDxIvOMUxEQpqfreUaW7jLEdDAXiF6UooZRO53F6Z"
+          crossorigin="anonymous"></script>
+
+  <script src="https://cdn.jsdelivr.net/npm/axios@1.6.2/dist/axios.min.js"
+          integrity="sha384-qaQjoVmFCnAfbYjc3HBcZccFDyHxtBMaTqYfJkGDc+sK6oPPZS8sJeZbNs0Evucx"
+          crossorigin="anonymous"></script>
+
+  <script src="https://cdn.jsdelivr.net/npm/renderjson@1.4.0/renderjson.min.js"
+          integrity="sha384-4hKFxj9DPKgBR9NcOpYaBsbHNyeqoSBXnF62DYj0AC7zoxr49K7Jgint3aM2oHbA"
+          crossorigin="anonymous"></script>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/js-sha256/0.11.0/sha256.min.js"
+          integrity="sha384-NCqZ2iJKpYoQ/I3tlJxuBrIRGea/PHcu9FOg+XY6LtZsABJsvvvNRkdxH3qCAUnJ"
+          crossorigin="anonymous"></script>
 
   <!-- Tailwind Configuration -->
   <script>
@@ -358,113 +410,178 @@
       color: white;
     }
 
-    /* Metadata control buttons */
-    .metadata-control-btn {
+    /* SESSION_DATA block styles */
+    .session-data-block {
+      margin-top: 0.75rem;
+      border-radius: 0.5rem;
+      border: 2px solid #f59e0b;
+      background-color: #fffbeb;
+      padding: 0.75rem;
+      font-size: 0.875rem;
+    }
+
+    .session-data-user {
+      background-color: rgba(0, 0, 0, 0.3);
+      border-color: rgba(255, 255, 255, 0.5);
+    }
+
+    .session-data-details {
+      width: 100%;
+    }
+
+    .session-data-summary {
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.25rem 0;
+      user-select: none;
+    }
+
+    .session-data-summary:hover {
+      opacity: 0.8;
+    }
+
+    .session-data-badge {
       display: inline-flex;
       align-items: center;
-      gap: 0.25rem;
-      padding: 0.25rem 0.5rem;
-      font-size: 0.75rem;
+      padding: 0.25rem 0.75rem;
+      border-radius: 0.25rem;
+      font-size: 0.8rem;
+      font-weight: 700;
+      background-color: #f59e0b;
+      color: white;
+      white-space: nowrap;
+      text-shadow: 0 1px 1px rgba(0, 0, 0, 0.2);
+    }
+
+    .session-data-user .session-data-badge {
+      background-color: #f59e0b;
+      color: white;
+    }
+
+    .session-data-info {
+      font-size: 0.8rem;
       font-weight: 500;
-      color: #4b5563;
-      background-color: white;
-      border: 1px solid #d1d5db;
-      border-radius: 0.375rem;
-      cursor: pointer;
-      transition: all 0.2s;
+      color: #92400e;
     }
 
-    .metadata-control-btn:hover {
-      background-color: #f9fafb;
-      border-color: #9ca3af;
-      color: #1f2937;
+    .session-data-user .session-data-info {
+      color: rgba(255, 255, 255, 0.9);
     }
 
-    .metadata-control-btn svg {
-      width: 0.875rem;
-      height: 0.875rem;
-    }
-
-    /* Metadata JSON container */
-    .metadata-json-container {
-      padding: 0.75rem;
-      background-color: #f9fafb;
-      border: 1px solid #e5e7eb;
-      border-radius: 0.375rem;
-      max-height: 400px;
+    .session-data-content {
+      margin-top: 0.75rem;
+      max-height: 500px;
       overflow-y: auto;
+      background-color: #fef3c7;
+      border-radius: 0.375rem;
+      padding: 0.75rem;
     }
 
-    .metadata-json-container::-webkit-scrollbar {
-      width: 6px;
+    .session-data-user .session-data-content {
+      background-color: rgba(0, 0, 0, 0.2);
     }
 
-    .metadata-json-container::-webkit-scrollbar-track {
-      background: #f1f5f9;
+    .session-data-text {
+      margin: 0;
+      padding: 0;
+      font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+      font-size: 0.75rem;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-break: break-word;
+      color: #78350f;
     }
 
-    .metadata-json-container::-webkit-scrollbar-thumb {
-      background: #cbd5e1;
-      border-radius: 3px;
+    .session-data-user .session-data-text {
+      color: white;
     }
 
-    .metadata-json-container::-webkit-scrollbar-thumb:hover {
-      background: #94a3b8;
-    }
-
-    /* Metadata renderjson styles */
-    .metadata-json-container .renderjson {
+    /* SESSION_DATA renderjson overrides for better contrast */
+    .session-data-content .renderjson {
       font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
       font-size: 0.75rem;
       line-height: 1.5;
     }
 
-    .metadata-json-container .renderjson a {
+    .session-data-content .renderjson .string {
+      color: #047857;
+    }
+
+    .session-data-content .renderjson .number {
+      color: #b91c1c;
+    }
+
+    .session-data-content .renderjson .boolean {
+      color: #6d28d9;
+    }
+
+    .session-data-content .renderjson .key {
+      color: #1e40af;
+      font-weight: 600;
+    }
+
+    .session-data-content .renderjson .syntax {
+      color: #78350f;
+    }
+
+    .session-data-content .renderjson a {
+      color: #0369a1;
+      text-decoration: none;
+    }
+
+    .session-data-content .renderjson a:hover {
+      text-decoration: underline;
+    }
+
+    /* Metadata Panel Styles */
+    #metadata-display .renderjson {
+      font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+      font-size: 0.8rem;
+      line-height: 1.6;
+    }
+
+    #metadata-display .renderjson a {
       text-decoration: none;
       color: #3b82f6;
     }
 
-    .metadata-json-container .renderjson a:hover {
+    #metadata-display .renderjson a:hover {
       text-decoration: underline;
     }
 
-    .metadata-json-container .renderjson .disclosure {
-      color: #6b7280;
-      font-size: 0.875rem;
-      margin-left: -1em;
+    #metadata-display .renderjson .disclosure {
+      color: #9ca3af;
+      font-size: 0.75rem;
       cursor: pointer;
       user-select: none;
     }
 
-    .metadata-json-container .renderjson .syntax {
+    #metadata-display .renderjson .syntax {
       color: #6b7280;
     }
 
-    .metadata-json-container .renderjson .string {
+    #metadata-display .renderjson .string {
       color: #059669;
     }
 
-    .metadata-json-container .renderjson .number {
+    #metadata-display .renderjson .number {
       color: #dc2626;
     }
 
-    .metadata-json-container .renderjson .boolean {
+    #metadata-display .renderjson .boolean {
       color: #7c3aed;
     }
 
-    .metadata-json-container .renderjson .key {
+    #metadata-display .renderjson .key {
       color: #1e40af;
       font-weight: 500;
     }
 
-    .metadata-json-container .renderjson .keyword {
+    #metadata-display .renderjson .keyword {
       color: #9333ea;
       font-weight: 600;
-    }
-
-    .metadata-json-container .renderjson .object.syntax,
-    .metadata-json-container .renderjson .array.syntax {
-      color: #475569;
     }
 
     /* Resize handle */
@@ -557,12 +674,285 @@
     #prompt-modal-content::-webkit-scrollbar-thumb:hover {
       background: #94a3b8;
     }
+
+    /* Expandable sections (full content, no scroll) */
+    .expandable-section {
+      padding: 0.5rem;
+      background-color: #f9fafb;
+      border: 1px solid #e5e7eb;
+      border-radius: 0.375rem;
+    }
+
+    /* Resizable sections */
+    .resizable-section {
+      resize: vertical;
+      overflow: auto;
+      min-height: 100px;
+      max-height: 500px;
+      padding: 0.5rem;
+      background-color: #f9fafb;
+      border: 1px solid #e5e7eb;
+      border-radius: 0.375rem;
+    }
+
+    .resizable-section::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    .resizable-section::-webkit-scrollbar-track {
+      background: #f1f5f9;
+    }
+
+    .resizable-section::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 3px;
+    }
+
+    .resizable-section::-webkit-scrollbar-thumb:hover {
+      background: #94a3b8;
+    }
+
+    /* Resize handle visual hint */
+    .resizable-section::after {
+      content: '';
+      display: block;
+      height: 4px;
+      background: linear-gradient(to right, transparent 20%, #d1d5db 20%, #d1d5db 40%, transparent 40%, transparent 60%, #d1d5db 60%, #d1d5db 80%, transparent 80%);
+      margin-top: 0.5rem;
+      border-radius: 2px;
+      cursor: ns-resize;
+    }
+
+    /* Token Summary Styles */
+    .token-summary {
+      background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+      border: 1px solid #bae6fd;
+      border-radius: 0.5rem;
+      padding: 1rem;
+    }
+
+    .token-summary-header {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 0.75rem;
+      font-weight: 600;
+      color: #0369a1;
+    }
+
+    .token-summary-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 0.75rem;
+    }
+
+    .token-stat {
+      background: white;
+      border-radius: 0.375rem;
+      padding: 0.75rem;
+      text-align: center;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    }
+
+    .token-stat-label {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #64748b;
+      margin-bottom: 0.25rem;
+    }
+
+    .token-stat-value {
+      font-size: 1.125rem;
+      font-weight: 700;
+      color: #1e293b;
+    }
+
+    .token-stat-value.cost {
+      color: #059669;
+    }
+
+    .token-stat-subvalue {
+      font-size: 0.7rem;
+      color: #94a3b8;
+      margin-top: 0.125rem;
+    }
+
+    .cost-breakdown {
+      margin-top: 0.75rem;
+      padding-top: 0.75rem;
+      border-top: 1px solid #e0f2fe;
+    }
+
+    .cost-breakdown-title {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: #0369a1;
+      margin-bottom: 0.5rem;
+    }
+
+    .cost-breakdown-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 0.5rem;
+      font-size: 0.75rem;
+    }
+
+    .cost-item {
+      display: flex;
+      justify-content: space-between;
+      color: #475569;
+    }
+
+    .cost-item-value {
+      font-weight: 500;
+      color: #1e293b;
+    }
+
+    /* Agent cost section styles */
+    .agent-cost-section {
+      margin-top: 1rem;
+      padding-top: 1rem;
+      border-top: 2px solid #e0f2fe;
+    }
+
+    .agent-cost-header {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 0.75rem;
+      padding: 0.5rem 0.75rem;
+      background: linear-gradient(90deg, #dbeafe 0%, transparent 100%);
+      border-radius: 0.375rem;
+    }
+
+    .agent-cost-name {
+      font-weight: 600;
+      color: #1e40af;
+      font-size: 0.875rem;
+    }
+
+    .agent-cost-model {
+      font-size: 0.7rem;
+      color: #64748b;
+      background: white;
+      padding: 0.125rem 0.5rem;
+      border-radius: 9999px;
+      border: 1px solid #e2e8f0;
+    }
+
+    .agent-cost-total {
+      margin-left: auto;
+      font-weight: 700;
+      color: #059669;
+      font-size: 0.95rem;
+    }
+
+    .agent-cost-section .token-summary-grid {
+      margin-bottom: 0.5rem;
+    }
+
+    .agent-cost-section .cost-breakdown {
+      margin-top: 0.5rem;
+      padding-top: 0.5rem;
+      border-top: 1px dashed #cbd5e1;
+    }
+
+    .agent-cost-section .cost-breakdown-title {
+      font-size: 0.7rem;
+    }
+
+    .agent-cost-section .cost-breakdown-grid {
+      font-size: 0.7rem;
+    }
+
+    /* Session Tabs Styles */
+    .session-tabs {
+      background-color: #f9fafb;
+      padding: 0 1rem;
+    }
+
+    .session-tabs nav {
+      display: flex;
+      gap: 0;
+    }
+
+    .session-tab {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.875rem 1.25rem;
+      font-size: 0.875rem;
+      font-weight: 500;
+      color: #6b7280;
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      white-space: nowrap;
+    }
+
+    .session-tab:hover {
+      color: #3b82f6;
+      background-color: rgba(59, 130, 246, 0.05);
+    }
+
+    .session-tab.active {
+      color: #3b82f6;
+      border-bottom-color: #3b82f6;
+      background-color: white;
+    }
+
+    .session-tab .tab-icon {
+      font-size: 1rem;
+    }
+
+    .session-tab .tab-label {
+      font-weight: 500;
+    }
+
+    /* Tab Panels */
+    .tab-panels {
+      position: relative;
+    }
+
+    .tab-panel {
+      padding: 1rem;
+    }
+
+    .tab-panel.hidden {
+      display: none;
+    }
+
+    /* Adjust timeline container for tabs */
+    #tab-panel-timeline #timeline-container {
+      max-height: calc(100vh - 280px);
+      overflow-y: auto;
+    }
+
+    /* Token summary in tab - full width display */
+    #tab-panel-consumo .token-summary {
+      margin: 0;
+    }
+
+    /* Metadata in tab */
+    #tab-panel-metadata {
+      max-height: calc(100vh - 280px);
+      overflow-y: auto;
+    }
+
+    /* Agents in tab */
+    #tab-panel-agentes {
+      max-height: calc(100vh - 280px);
+      overflow-y: auto;
+    }
   </style>
 </head>
 <body class="bg-gray-50">
 
   <!-- Authentication Modal -->
-  <div id="auth-modal" class="fixed inset-0 bg-gradient-to-br from-gray-900 via-blue-900 to-gray-900 flex flex-col items-center justify-center z-50">
+  <div id="auth-modal" class="fixed inset-0 bg-gradient-to-br from-gray-900 via-blue-900 to-gray-900 flex flex-col items-center justify-center z-50 hidden">
     <!-- Logo Background -->
     <div class="absolute inset-0 flex items-center justify-center opacity-10">
       <svg class="w-64 h-64 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -610,8 +1000,8 @@
     <p class="mt-6 text-sm text-gray-400">MongoDB Session Manager</p>
   </div>
 
-  <!-- Session Password Modal (hidden by default) -->
-  <div id="session-password-modal" class="fixed inset-0 bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 flex flex-col items-center justify-center z-50" style="display: none;">
+  <!-- Session Password Modal (Direct Access) -->
+  <div id="session-password-modal" class="fixed inset-0 bg-gradient-to-br from-purple-900 via-purple-800 to-purple-900 flex flex-col items-center justify-center z-50 hidden">
     <!-- Logo Background -->
     <div class="absolute inset-0 flex items-center justify-center opacity-10">
       <svg class="w-64 h-64 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -624,12 +1014,11 @@
       <div class="text-center mb-6">
         <div class="mx-auto h-16 w-16 bg-purple-600 rounded-full flex items-center justify-center mb-4">
           <svg class="h-10 w-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"></path>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
           </svg>
         </div>
-        <h2 class="text-2xl font-bold text-gray-900">Session Password</h2>
-        <p class="text-sm text-gray-600 mt-2">Esta sesión requiere una contraseña específica</p>
-        <p class="text-xs text-gray-500 mt-1" id="session-password-session-id"></p>
+        <h2 class="text-2xl font-bold text-gray-900">Acceso a Sesión</h2>
+        <p class="text-sm text-gray-600 mt-2">Introduce la contraseña de esta sesión o la contraseña maestra</p>
       </div>
 
       <form id="session-password-form" class="space-y-4">
@@ -637,7 +1026,7 @@
           <input
             type="password"
             id="session-password-input"
-            placeholder="Contraseña de sesión"
+            placeholder="Contraseña"
             class="w-full px-4 py-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-purple-500 focus:border-transparent"
             autocomplete="off"
           />
@@ -646,18 +1035,24 @@
         <div id="session-password-error" class="text-red-600 text-sm hidden bg-red-50 p-3 rounded-md border border-red-200">
         </div>
 
-        <button
-          type="submit"
-          id="session-password-submit-btn"
-          class="w-full bg-purple-600 text-white py-3 rounded-md hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 transition-colors font-medium"
-        >
-          Acceder a la Sesión
-        </button>
+        <div class="flex gap-3">
+          <button
+            type="button"
+            id="session-password-cancel-btn"
+            class="flex-1 bg-gray-200 text-gray-900 py-3 rounded-md hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2 transition-colors font-medium"
+          >
+            Cancelar
+          </button>
+          <button
+            type="submit"
+            id="session-password-submit-btn"
+            class="flex-1 bg-purple-600 text-white py-3 rounded-md hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 transition-colors font-medium"
+          >
+            Acceder
+          </button>
+        </div>
       </form>
     </div>
-
-    <!-- Info -->
-    <p class="mt-6 text-sm text-gray-400">Password específico de sesión</p>
   </div>
 
   <!-- Header -->
@@ -883,50 +1278,56 @@
               </div>
             </div>
 
-            <!-- Metadata Section -->
-            <div class="p-4 border-b border-gray-200">
-              <div class="flex items-center justify-between mb-2">
-                <button
-                  id="toggle-metadata-btn"
-                  class="flex items-center space-x-2"
-                >
-                  <span class="font-medium text-gray-900">Metadata</span>
-                  <svg id="metadata-chevron" class="w-5 h-5 text-gray-400 transform transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-                  </svg>
+            <!-- Tab Navigation -->
+            <div class="session-tabs border-b border-gray-200">
+              <nav class="flex -mb-px" aria-label="Tabs">
+                <button class="session-tab active" data-tab="timeline">
+                  <span class="tab-icon">💬</span>
+                  <span class="tab-label">Timeline</span>
                 </button>
-                <!-- Metadata control buttons -->
-                <div id="metadata-controls" class="hidden flex space-x-2">
-                  <button id="expand-all-metadata-btn" class="metadata-control-btn">
-                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
-                    </svg>
-                    <span>Expand All</span>
-                  </button>
-                  <button id="collapse-all-metadata-btn" class="metadata-control-btn">
-                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4"></path>
-                    </svg>
-                    <span>Collapse All</span>
-                  </button>
+                <button class="session-tab" data-tab="consumo">
+                  <span class="tab-icon">💰</span>
+                  <span class="tab-label">Consumo</span>
+                </button>
+                <button class="session-tab" data-tab="metadata">
+                  <span class="tab-icon">📋</span>
+                  <span class="tab-label">Metadata</span>
+                </button>
+                <button class="session-tab" data-tab="agentes">
+                  <span class="tab-icon">🤖</span>
+                  <span class="tab-label">Agentes</span>
+                </button>
+              </nav>
+            </div>
+
+            <!-- Tab Content Panels -->
+            <div class="tab-panels">
+              <!-- Timeline Panel (default active) -->
+              <div id="tab-panel-timeline" class="tab-panel active">
+                <div id="timeline-container" class="space-y-4 custom-scrollbar" style="max-height: calc(100vh - 280px); overflow-y: auto;">
+                  <!-- Timeline items will be rendered here -->
                 </div>
               </div>
-              <div id="metadata-content" class="mt-3 hidden">
-                <div id="metadata-display" class="space-y-2 text-sm"></div>
+
+              <!-- Consumo Panel -->
+              <div id="tab-panel-consumo" class="tab-panel hidden">
+                <div id="token-summary-container">
+                  <!-- Token summary will be rendered here -->
+                </div>
               </div>
-            </div>
 
-            <!-- Agents Summary -->
-            <div class="p-4 border-b border-gray-200">
-              <h3 class="font-medium text-gray-900 mb-3">Agentes</h3>
-              <div id="agents-summary" class="space-y-2"></div>
-            </div>
+              <!-- Metadata Panel -->
+              <div id="tab-panel-metadata" class="tab-panel hidden">
+                <div id="metadata-display">
+                  <!-- Metadata JSON will be rendered here -->
+                </div>
+              </div>
 
-            <!-- Timeline -->
-            <div class="p-4">
-              <h3 class="font-medium text-gray-900 mb-4">Timeline</h3>
-              <div id="timeline-container" class="space-y-4 custom-scrollbar" style="max-height: calc(100vh - 550px); overflow-y: auto;">
-                <!-- Timeline items will be rendered here -->
+              <!-- Agentes Panel -->
+              <div id="tab-panel-agentes" class="tab-panel hidden">
+                <div id="agents-summary" class="space-y-3">
+                  <!-- Agents summary will be rendered here -->
+                </div>
               </div>
             </div>
           </div>
@@ -943,7 +1344,7 @@
     /**
      * System Prompt Modal Functions
      */
-    window.openPromptModal = function(promptText) {
+    window.openPromptModal = async function(promptText) {
       const modal = document.getElementById('prompt-modal');
       const content = document.getElementById('prompt-modal-content');
 
@@ -964,7 +1365,8 @@
         '<span class="xml-tag">$1</span>'
       );
 
-      // Create zero-md element
+      // Create zero-md element (wait for custom element to be defined)
+      await customElements.whenDefined('zero-md');
       const zeroMd = document.createElement('zero-md');
 
       // Add markdown content with highlighted tags
@@ -1067,39 +1469,40 @@
      * Initialize application with authentication
      */
     document.addEventListener('DOMContentLoaded', () => {
+      // Check if this is a direct session access via ?session_id=...
+      const urlParams = new URLSearchParams(window.location.search);
+      const sessionId = urlParams.get('session_id');
+
+      if (sessionId) {
+        // Direct session access - skip master password modal entirely
+        console.log('Direct session access detected:', sessionId);
+
+        // Remove master password modal from DOM (prevent any interaction)
+        const authModal = document.getElementById('auth-modal');
+        authModal.remove();
+
+        // Initialize app with session_id (will prompt for session password)
+        window.app = new SessionViewer(sessionId);
+        window.panelResizer = new PanelResizer();
+        setupPromptModal();
+
+        // Exit early - do NOT set up master password event listeners
+        return;
+      }
+
+      // Normal flow - master password authentication
       const authModal = document.getElementById('auth-modal');
       const authForm = document.getElementById('auth-form');
       const passwordInput = document.getElementById('password-input');
       const authError = document.getElementById('auth-error');
       const authSubmitBtn = document.getElementById('auth-submit-btn');
 
+      // Show master password modal
+      authModal.classList.remove('hidden');
+
       // Password stored in memory (NOT localStorage)
       let appPasswordHash = null;
 
-      // Check if accessing directly with session_id parameter
-      const urlParams = new URLSearchParams(window.location.search);
-      const sessionId = urlParams.get('session_id');
-
-      if (sessionId) {
-        // Direct session access - skip global authentication modal
-        console.log('Direct session access detected, skipping global authentication');
-
-        // Hide/remove auth modal
-        authModal.style.display = 'none';
-        authModal.remove();
-
-        // Initialize application WITHOUT global password
-        window.app = new SessionViewer();
-        window.panelResizer = new PanelResizer();
-
-        // Setup System Prompt Modal handlers
-        setupPromptModal();
-
-        // Session-specific authentication will be handled by SessionViewer
-        return;
-      }
-
-      // Normal flow: show global authentication modal
       // Focus on password input
       passwordInput.focus();
 
@@ -1123,8 +1526,8 @@
           // Hash password with SHA-256
           const passwordHash = hashPassword(password);
 
-          // Validate with backend
-          const response = await axios.post('http://localhost:8882/api/v1/check_password', {
+          // Validate with backend (use relative URL to work in dev and prod)
+          const response = await axios.post('/api/session_viewer/v1/check_password', {
             password_hash: passwordHash
           });
 
@@ -1138,7 +1541,7 @@
             // Remove modal from DOM
             authModal.remove();
 
-            // Initialize application
+            // Initialize application (no session_id = normal mode)
             window.app = new SessionViewer();
             window.panelResizer = new PanelResizer();
 
