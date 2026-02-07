@@ -517,6 +517,27 @@ async function renderContentParts(contentParts, isUser, bubble) {
 }
 
 /**
+ * Build tool usage metric span HTML
+ */
+function buildToolUsageSpan(toolUsage) {
+  const toolNames = Object.keys(toolUsage);
+  const totalToolCalls = toolNames.reduce((sum, name) => sum + (toolUsage[name]?.call_count || 0), 0);
+  const totalToolErrors = toolNames.reduce((sum, name) => sum + (toolUsage[name]?.error_count || 0), 0);
+
+  if (totalToolCalls === 0) return '';
+
+  const toolIcon = totalToolErrors > 0 ? '⚠️' : '🔧';
+  const toolTitle = toolNames.map(name => {
+    const t = toolUsage[name];
+    return name + ': ' + t.call_count + ' calls (' + t.success_count + '✓ ' + t.error_count + '✗) ' + (t.average_time?.toFixed(2) || 0) + 's avg';
+  }).join('\\n');
+  const errorSuffix = totalToolErrors > 0 ? ' (' + totalToolErrors + ' err)' : '';
+  const plural = totalToolCalls > 1 ? 's' : '';
+
+  return '<span title="' + toolTitle + '">' + toolIcon + ' ' + totalToolCalls + ' tool' + plural + errorSuffix + '</span>';
+}
+
+/**
  * Build metrics HTML string from message metrics data
  */
 function buildMetricsHTML(itemMetrics, isUser) {
@@ -529,44 +550,33 @@ function buildMetricsHTML(itemMetrics, isUser) {
   const cacheWrite = usage.cacheWriteInputTokens || 0;
   const totalCacheable = cacheRead + cacheWrite;
   const cacheHitRate = totalCacheable > 0 ? Math.round((cacheRead / totalCacheable) * 100) : null;
+  const colorClass = isUser ? 'text-primary-100' : 'text-gray-500';
 
-  const toolNames = Object.keys(toolUsage);
-  const totalToolCalls = toolNames.reduce((sum, name) => sum + (toolUsage[name]?.call_count || 0), 0);
-  const totalToolErrors = toolNames.reduce((sum, name) => sum + (toolUsage[name]?.error_count || 0), 0);
+  const spans = [];
 
-  let html = `
-    <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs ${isUser ? 'text-primary-100' : 'text-gray-500'}">
-      <span title="Total Tokens (in: ${Format.number(usage.inputTokens || 0)}, out: ${Format.number(usage.outputTokens || 0)})">
-        🔢 ${Format.number(usage.totalTokens || 0)}
-      </span>
-      <span title="Latencia total">
-        ⏱️ ${perfMetrics.latencyMs || 0}ms
-      </span>`;
+  spans.push('<span title="Total Tokens (in: ' + Format.number(usage.inputTokens || 0) + ', out: ' + Format.number(usage.outputTokens || 0) + ')">🔢 ' + Format.number(usage.totalTokens || 0) + '</span>');
+  spans.push('<span title="Latencia total">⏱️ ' + (perfMetrics.latencyMs || 0) + 'ms</span>');
 
   if (perfMetrics.timeToFirstByteMs) {
-    html += `<span title="Time to First Byte">⚡ TTFB: ${perfMetrics.timeToFirstByteMs}ms</span>`;
+    spans.push('<span title="Time to First Byte">⚡ TTFB: ' + perfMetrics.timeToFirstByteMs + 'ms</span>');
   }
 
   if (cacheHitRate !== null) {
     const cacheIcon = cacheHitRate > 50 ? '✅' : '📝';
-    html += `<span title="Cache: ${Format.number(cacheRead)} read (hits), ${Format.number(cacheWrite)} write (miss)">${cacheIcon} Cache: ${cacheHitRate}%</span>`;
+    spans.push('<span title="Cache: ' + Format.number(cacheRead) + ' read (hits), ' + Format.number(cacheWrite) + ' write (miss)">' + cacheIcon + ' Cache: ' + cacheHitRate + '%</span>');
   }
 
   if (cycleMetrics.cycle_count) {
-    html += `<span title="Cycles: ${cycleMetrics.cycle_count}, Total: ${(cycleMetrics.total_duration || 0).toFixed(2)}s, Avg: ${(cycleMetrics.average_cycle_time || 0).toFixed(2)}s">🔄 ${cycleMetrics.cycle_count} cycle${cycleMetrics.cycle_count > 1 ? 's' : ''}</span>`;
+    const totalDur = (cycleMetrics.total_duration || 0).toFixed(2);
+    const avgDur = (cycleMetrics.average_cycle_time || 0).toFixed(2);
+    const plural = cycleMetrics.cycle_count > 1 ? 's' : '';
+    spans.push('<span title="Cycles: ' + cycleMetrics.cycle_count + ', Total: ' + totalDur + 's, Avg: ' + avgDur + 's">🔄 ' + cycleMetrics.cycle_count + ' cycle' + plural + '</span>');
   }
 
-  if (totalToolCalls > 0) {
-    const toolIcon = totalToolErrors > 0 ? '⚠️' : '🔧';
-    const toolTitle = toolNames.map(name => {
-      const t = toolUsage[name];
-      return `${name}: ${t.call_count} calls (${t.success_count}✓ ${t.error_count}✗) ${t.average_time?.toFixed(2) || 0}s avg`;
-    }).join('\\n');
-    html += `<span title="${toolTitle}">${toolIcon} ${totalToolCalls} tool${totalToolCalls > 1 ? 's' : ''}${totalToolErrors > 0 ? ` (${totalToolErrors} err)` : ''}</span>`;
-  }
+  const toolSpan = buildToolUsageSpan(toolUsage);
+  if (toolSpan) spans.push(toolSpan);
 
-  html += `</div>`;
-  return html;
+  return '<div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs ' + colorClass + '">' + spans.join('') + '</div>';
 }
 
 /**
