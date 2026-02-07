@@ -581,7 +581,7 @@ def test_metadata_hook():
         session_id="test",
         client=Mock(),
         database_name="test_db",
-        metadataHook=test_hook
+        metadata_hook=test_hook
     )
 
     # Test hook is called
@@ -601,7 +601,7 @@ def test_metadata_hook_validation():
         session_id="test",
         client=Mock(),
         database_name="test_db",
-        metadataHook=validation_hook
+        metadata_hook=validation_hook
     )
 
     # Should raise error
@@ -624,7 +624,7 @@ def test_feedback_hook():
         session_id="test",
         client=Mock(),
         database_name="test_db",
-        feedbackHook=feedback_hook
+        feedback_hook=feedback_hook
     )
 
     # Add feedback
@@ -662,7 +662,7 @@ def test_sns_feedback_hook(mocker):
         session_id="test",
         client=Mock(),
         database_name="test_db",
-        feedbackHook=hook
+        feedback_hook=hook
     )
 
     feedback = {"rating": "down", "comment": "Bad response"}
@@ -702,7 +702,7 @@ def test_sqs_metadata_hook(mocker):
         session_id="test",
         client=Mock(),
         database_name="test_db",
-        metadataHook=hook
+        metadata_hook=hook
     )
 
     metadata = {"status": "active", "priority": "high", "internal": "not synced"}
@@ -830,58 +830,36 @@ def test_update_metadata_preserves_existing_fields():
 
 ```
 tests/
-  ├── unit/                    # Unit tests
+  ├── conftest.py                          # Shared fixtures
+  ├── unit/                                # 224 unit tests (no MongoDB required)
+  │   ├── test_session_repository.py
   │   ├── test_session_manager.py
-  │   ├── test_repository.py
   │   ├── test_connection_pool.py
-  │   └── test_factory.py
-  ├── integration/             # Integration tests
-  │   ├── test_full_workflow.py
-  │   ├── test_persistence.py
-  │   └── test_concurrent.py
-  ├── hooks/                   # Hook tests
-  │   ├── test_metadata_hooks.py
-  │   └── test_feedback_hooks.py
-  ├── aws/                     # AWS integration tests
-  │   ├── test_sns_hook.py
-  │   └── test_sqs_hook.py
-  ├── conftest.py             # Shared fixtures
-  └── pytest.ini              # Pytest configuration
+  │   ├── test_session_factory.py
+  │   ├── test_hooks_feedback_sns.py
+  │   ├── test_hooks_metadata_sqs.py
+  │   ├── test_hooks_metadata_websocket.py
+  │   ├── test_hooks_utils_sns.py
+  │   └── test_hooks_utils_sqs.py
+  └── integration/                         # 29 integration tests (require MongoDB)
+      ├── test_repository_integration.py
+      ├── test_manager_integration.py
+      └── test_factory_integration.py
 ```
 
 ### Pytest Configuration
 
-```ini
-# pytest.ini
-[pytest]
-testpaths = tests
-python_files = test_*.py
-python_classes = Test*
-python_functions = test_*
+Pytest is configured in `pyproject.toml`:
 
-markers =
-    unit: Unit tests
-    integration: Integration tests requiring MongoDB
-    slow: Slow tests
-    aws: Tests requiring AWS services
-
-addopts =
-    -v
-    --strict-markers
-    --tb=short
-    --disable-warnings
-
-# Coverage settings
-[coverage:run]
-source = mongodb_session_manager
-omit =
-    tests/*
-    setup.py
-
-[coverage:report]
-precision = 2
-show_missing = True
-skip_covered = False
+```toml
+# pyproject.toml
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: tests requiring a real MongoDB connection",
+    "slow: tests that take a long time to run",
+]
+addopts = "-v --tb=short"
 ```
 
 ## Summary

@@ -39,8 +39,8 @@ def __init__(
     collection_name: str = "collection_name",
     client: Optional[MongoClient] = None,
     metadata_fields: Optional[List[str]] = None,
-    metadataHook: Optional[Callable[[Dict[str, Any]], None]] = None,
-    feedbackHook: Optional[Callable[[Dict[str, Any]], None]] = None,
+    metadata_hook: Optional[Callable[[Dict[str, Any]], None]] = None,
+    feedback_hook: Optional[Callable[[Dict[str, Any]], None]] = None,
     **kwargs: Any,
 ) -> None
 ```
@@ -61,9 +61,9 @@ Initialize MongoDB Session Manager with connection details and configuration.
 
 - **metadata_fields** (`Optional[List[str]]`, default: `None`): List of metadata field names to be indexed in MongoDB for optimized queries. These fields will have indexes created automatically.
 
-- **metadataHook** (`Optional[Callable]`, default: `None`): Hook function to intercept metadata operations (update, get, delete). See [Hooks](#metadata-hooks) section for details.
+- **metadata_hook** (`Optional[Callable]`, default: `None`): Hook function to intercept metadata operations (update, get, delete). See [Hooks](#metadata-hooks) section for details.
 
-- **feedbackHook** (`Optional[Callable]`, default: `None`): Hook function to intercept feedback operations (add). See [Hooks](#feedback-hooks) section for details.
+- **feedback_hook** (`Optional[Callable]`, default: `None`): Hook function to intercept feedback operations (add). See [Hooks](#feedback-hooks) section for details.
 
 - **kwargs** (`Any`): Additional keyword arguments. MongoDB client options (e.g., `maxPoolSize`, `minPoolSize`) are passed to `MongoClient`. Other arguments are passed to the parent `RepositorySessionManager` class.
 
@@ -143,8 +143,8 @@ def notify_feedback(original_func, action, session_id, **kwargs):
 manager = MongoDBSessionManager(
     session_id="user-123",
     connection_string="mongodb://localhost:27017/",
-    metadataHook=audit_metadata,
-    feedbackHook=notify_feedback
+    metadata_hook=audit_metadata,
+    feedback_hook=notify_feedback
 )
 ```
 
@@ -230,7 +230,7 @@ Synchronize agent data and automatically capture event loop metrics and agent co
 
 This method performs three key operations:
 1. Saves the current agent state to MongoDB
-2. **NEW v0.1.14**: Captures and persists agent configuration (model, system_prompt)
+2. **NEW v0.5.0**: Captures and persists agent configuration (model, system_prompt)
 3. Captures and stores event loop metrics (latency, token usage) from the agent's most recent interaction
 
 The metrics are automatically extracted from `agent.event_loop_metrics.accumulated_metrics` and `agent.event_loop_metrics.accumulated_usage`, and stored in the `event_loop_metrics` field of the latest assistant message.
@@ -356,7 +356,7 @@ manager.update_metadata({
 
 #### Hook Integration
 
-If a `metadataHook` was provided during initialization, it will be called with:
+If a `metadata_hook` was provided during initialization, it will be called with:
 - `action`: `"update"`
 - `session_id`: Current session ID
 - `metadata`: The metadata dictionary being updated
@@ -398,7 +398,7 @@ if "metadata" in metadata:
 
 #### Hook Integration
 
-If a `metadataHook` was provided during initialization, it will be called with:
+If a `metadata_hook` was provided during initialization, it will be called with:
 - `action`: `"get"`
 - `session_id`: Current session ID
 
@@ -439,7 +439,7 @@ print(metadata["metadata"])
 
 #### Hook Integration
 
-If a `metadataHook` was provided during initialization, it will be called with:
+If a `metadata_hook` was provided during initialization, it will be called with:
 - `action`: `"delete"`
 - `session_id`: Current session ID
 - `keys`: List of keys being deleted
@@ -578,7 +578,7 @@ manager.add_feedback({
 
 #### Hook Integration
 
-If a `feedbackHook` was provided during initialization, it will be called with:
+If a `feedback_hook` was provided during initialization, it will be called with:
 - `action`: `"add"`
 - `session_id`: Current session ID
 - `feedback`: The feedback dictionary being added
@@ -635,7 +635,7 @@ for fb in feedbacks:
 
 ## Agent Configuration Methods
 
-**NEW in v0.1.14**: These methods enable retrieval and management of agent configuration (model and system_prompt).
+**NEW in v0.5.0**: These methods enable retrieval and management of agent configuration (model and system_prompt).
 
 ### `get_agent_config`
 
@@ -934,7 +934,7 @@ def audit_metadata_hook(original_func, action, session_id, **kwargs):
 manager = MongoDBSessionManager(
     session_id="user-123",
     connection_string="mongodb://...",
-    metadataHook=audit_metadata_hook
+    metadata_hook=audit_metadata_hook
 )
 ```
 
@@ -964,7 +964,7 @@ def validation_metadata_hook(original_func, action, session_id, **kwargs):
 manager = MongoDBSessionManager(
     session_id="user-123",
     connection_string="mongodb://...",
-    metadataHook=validation_metadata_hook
+    metadata_hook=validation_metadata_hook
 )
 ```
 
@@ -1015,7 +1015,7 @@ def notification_feedback_hook(original_func, action, session_id, **kwargs):
 manager = MongoDBSessionManager(
     session_id="user-123",
     connection_string="mongodb://...",
-    feedbackHook=notification_feedback_hook
+    feedback_hook=notification_feedback_hook
 )
 ```
 
@@ -1040,7 +1040,7 @@ def analytics_feedback_hook(original_func, action, session_id, **kwargs):
 manager = MongoDBSessionManager(
     session_id="user-123",
     connection_string="mongodb://...",
-    feedbackHook=analytics_feedback_hook
+    feedback_hook=analytics_feedback_hook
 )
 ```
 

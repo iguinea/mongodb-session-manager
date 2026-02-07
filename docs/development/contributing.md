@@ -49,7 +49,7 @@ Before you begin contributing, ensure you have:
 
 1. **Development Environment Set Up**
    - See [setup.md](setup.md) for detailed instructions
-   - Python 3.13+, UV, and MongoDB installed
+   - Python 3.12+, UV, and MongoDB installed
    - Project dependencies installed with `uv sync`
 
 2. **GitHub Account**

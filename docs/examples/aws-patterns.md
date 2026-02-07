@@ -167,7 +167,7 @@ session_manager = MongoDBSessionManager(
     session_id="sns-demo-session",
     connection_string="mongodb://localhost:27017/",
     database_name="aws_examples",
-    feedbackHook=feedback_hook
+    feedback_hook=feedback_hook
 )
 
 # Add feedback - automatically sends to appropriate SNS topic
@@ -259,7 +259,7 @@ session_manager = MongoDBSessionManager(
     session_id="alerts-session",
     connection_string="mongodb://localhost:27017/",
     database_name="aws_examples",
-    feedbackHook=hook_alerts_only
+    feedback_hook=hook_alerts_only
 )
 
 # Positive feedback - no SNS notification
@@ -342,7 +342,7 @@ session_manager = MongoDBSessionManager(
     session_id="sqs-demo-session",
     connection_string="mongodb://localhost:27017/",
     database_name="aws_examples",
-    metadataHook=metadata_hook
+    metadata_hook=metadata_hook
 )
 
 # Update metadata - propagated fields sent to SQS
@@ -431,8 +431,8 @@ session_manager = MongoDBSessionManager(
     session_id="combined-demo-session",
     connection_string="mongodb://localhost:27017/",
     database_name="aws_examples",
-    feedbackHook=feedback_hook,
-    metadataHook=metadata_hook
+    feedback_hook=feedback_hook,
+    metadata_hook=metadata_hook
 )
 
 # Scenario: User interaction with full tracking
@@ -620,8 +620,8 @@ def create_session_manager_with_aws(session_id: str):
         session_id=session_id,
         connection_string=os.getenv("MONGODB_URI"),
         database_name=f"{ENVIRONMENT}_db",
-        feedbackHook=feedback_hook,
-        metadataHook=metadata_hook
+        feedback_hook=feedback_hook,
+        metadata_hook=metadata_hook
     )
 
 # Usage
@@ -731,7 +731,7 @@ def create_session_manager_safe(session_id: str):
         session_id=session_id,
         connection_string="mongodb://localhost:27017/",
         database_name="examples",
-        feedbackHook=feedback_hook
+        feedback_hook=feedback_hook
     )
 
 # Usage - works regardless of AWS availability
@@ -831,7 +831,7 @@ session_manager = MongoDBSessionManager(
     session_id="test-session",
     connection_string="mongodb://localhost:27017/",
     database_name="test",
-    feedbackHook=feedback_hook
+    feedback_hook=feedback_hook
 )
 
 session_manager.add_feedback({"rating": "up", "comment": "Test"})
@@ -860,7 +860,7 @@ def test_feedback_with_sns():
         session_id="test-session",
         connection_string="mongodb://localhost:27017/",
         database_name="test",
-        feedbackHook=mock_hook
+        feedback_hook=mock_hook
     )
 
     # Add feedback

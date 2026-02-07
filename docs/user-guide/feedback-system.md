@@ -203,7 +203,7 @@ session_manager = MongoDBSessionManager(
     session_id="user-123",
     connection_string="mongodb://localhost:27017/",
     database_name="my_db",
-    feedbackHook=feedback_audit_hook  # All feedback logged
+    feedback_hook=feedback_audit_hook  # All feedback logged
 )
 
 session_manager.add_feedback({
@@ -254,7 +254,7 @@ session_manager = MongoDBSessionManager(
     session_id="user-123",
     connection_string="mongodb://localhost:27017/",
     database_name="my_db",
-    feedbackHook=feedback_validation_hook
+    feedback_hook=feedback_validation_hook
 )
 
 # This will pass
@@ -314,7 +314,7 @@ session_manager = MongoDBSessionManager(
     session_id="user-123",
     connection_string="mongodb://localhost:27017/",
     database_name="my_db",
-    feedbackHook=notification_hook
+    feedback_hook=notification_hook
 )
 
 session_manager.add_feedback({
@@ -381,7 +381,7 @@ session_manager = MongoDBSessionManager(
     session_id="user-123",
     connection_string="mongodb://localhost:27017/",
     database_name="my_db",
-    feedbackHook=analytics_hook
+    feedback_hook=analytics_hook
 )
 
 # Add multiple feedbacks
@@ -431,7 +431,7 @@ session_manager = MongoDBSessionManager(
     session_id="user-123",
     connection_string="mongodb://localhost:27017/",
     database_name="my_db",
-    feedbackHook=combined  # All three hooks active!
+    feedback_hook=combined  # All three hooks active!
 )
 
 # Feedback goes through validation -> audit -> notification -> storage
@@ -593,7 +593,7 @@ async def add_feedback(session_id: str, feedback_data: FeedbackRequest):
         factory = get_global_factory()
         session_manager = factory.create_session_manager(
             session_id,
-            feedbackHook=feedback_validation_hook  # Add validation
+            feedback_hook=feedback_validation_hook  # Add validation
         )
 
         session_manager.add_feedback({
@@ -628,7 +628,7 @@ async def add_feedback(session_id: str, feedback_data: FeedbackRequest):
     factory = get_global_factory()
     session_manager = factory.create_session_manager(
         session_id,
-        feedbackHook=analytics_hook
+        feedback_hook=analytics_hook
     )
 
     session_manager.add_feedback({
@@ -716,7 +716,7 @@ analytics_hook = FeedbackAnalyticsHook()
 ```python
 # Good - separate concerns
 session_manager = MongoDBSessionManager(
-    feedbackHook=create_combined_hook(
+    feedback_hook=create_combined_hook(
         validation_hook,  # Data quality
         audit_hook,       # Compliance
         analytics_hook,   # Metrics

@@ -463,7 +463,7 @@ def audit_metadata(original_func, action, session_id, **kwargs):
 factory = get_global_factory()
 session_manager = factory.create_session_manager(
     session_id="user-123",
-    metadataHook=audit_metadata  # Add hook
+    metadata_hook=audit_metadata  # Add hook
 )
 ```
 
