@@ -91,6 +91,7 @@ async def benchmark_with_pooling(session_ids: List[str]):
         for i in range(NUM_OPERATIONS_PER_SESSION):
             # Simulate some operations
             # Note: check_session_exists() is not available without cache wrapper
+            pass
     
     elapsed = time.time() - start_time
     
