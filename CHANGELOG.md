@@ -1,5 +1,9 @@
 # Changelog
 
+## [2026-02-08] PR #26 - Chore: remove obsolete feature plans, playground chat, and viewer.txt (@iguinea)
+
+- Chore: remove obsolete feature plans, playground chat, and viewer.txt
+
 ## [2026-02-08] PR #25 - Chore: qlty audit fixes - code quality and test improvements (@iguinea)
 
 - Chore: configure qlty.toml to eliminate 57 false positives
