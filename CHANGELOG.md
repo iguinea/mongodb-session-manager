@@ -1,5 +1,23 @@
 # Changelog
 
+## [2026-02-08] PR #25 - Chore: qlty audit fixes - code quality and test improvements (@iguinea)
+
+- Chore: configure qlty.toml to eliminate 57 false positives
+- Fix: add missing pass statement in empty for loop body
+- Refactor: reduce cognitive complexity in 10 functions below threshold
+- Refactor: extract TIMEZONE_UTC_SUFFIX constant for duplicated '+00:00…
+- Fix: use pytest.approx() for float comparisons in tests
+- Refactor: fix JavaScript quality issues in Session Viewer
+- Refactor: remove commented-out code blocks
+- Fix: move E402 imports to top of file in example_fastapi_streaming.py
+- Fix: rename camelCase variables to snake_case (PEP 8)
+- Test: restructure and expand test suite from 30 to 253 tests
+- Docs: update README.md with current project state
+- Chore: fix qlty issues in tests and update triage rules
+- Docs: update all documentation to match current project state
+- Fix: resolve remaining qlty issues from second audit pass
+- Fix: restore accidentally deleted files
+
 ## [2026-02-07] PR #14 - Update: migrate Session Viewer with security, rate limiting, and tabbed UI (@iguinea)
 
 - chore: add CI workflow, GitHub docs, and dev philosophy
