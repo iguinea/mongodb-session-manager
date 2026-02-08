@@ -17,9 +17,11 @@ uv sync
 # Run any example
 uv run python examples/example_calculator_tool.py
 
-# Run tests (requires MongoDB - see Testing section below)
-uv run pytest test_*.py -v
-uv run pytest test_cache_metrics.py -v  # Single test file
+# Run tests
+uv run python -m pytest tests/ -v                          # All tests
+uv run python -m pytest tests/unit/ -v                      # Unit tests only (no MongoDB needed)
+uv run python -m pytest tests/ -m "not integration" -v      # Exclude integration tests
+uv run python -m pytest tests/integration/ -v               # Integration only (requires MongoDB)
 
 # Linting/formatting
 uv run ruff check .
@@ -250,11 +252,18 @@ Orden de tests: Happy path > Edge cases > Error cases > Integration
 
 ## Testing
 
-Tests require a MongoDB connection. Set the environment variable before running:
+Tests are organized in `tests/unit/` (no MongoDB needed) and `tests/integration/` (requires MongoDB).
 
 ```bash
+# Unit tests (no MongoDB required)
+uv run python -m pytest tests/unit/ -v
+
+# Integration tests (requires MongoDB)
 export MONGODB_CONNECTION_STRING="mongodb://<user>:<pass>@localhost:8550/"
-uv run pytest test_*.py -v
+uv run python -m pytest tests/integration/ -v
+
+# All tests
+uv run python -m pytest tests/ -v
 ```
 
 **Default credentials for local development:**

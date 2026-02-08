@@ -5,18 +5,19 @@ This guide will help you install MongoDB Session Manager and all its dependencie
 ## Requirements
 
 ### System Requirements
-- **Python**: 3.11 or higher (3.13 recommended)
+- **Python**: 3.12.8 or higher
 - **MongoDB**: 4.2 or higher (local or remote instance)
 - **Package Manager**: UV (recommended) or pip
 
 ### Python Dependencies
 The library has the following core dependencies:
 
-- `pymongo>=4.13.2` - MongoDB Python driver
-- `strands-agents>=1.0.1` - Core Strands Agents SDK
-- `strands-agents-tools>=0.2.1` - Strands tools
-- `fastapi>=0.116.1` - For FastAPI integration
-- `uvloop>=0.21.0` - High-performance event loop
+- `pymongo>=4.16.0` - MongoDB Python driver
+- `strands-agents>=1.23.0` - Core Strands Agents SDK
+- `strands-agents-tools>=0.2.19` - Strands tools
+- `fastapi>=0.128.0` - For FastAPI integration
+- `uvloop>=0.22.0` - High-performance event loop
+- `boto3>=1.42.0` - AWS SDK (for hooks)
 
 ### Optional Dependencies
 For AWS integrations (SNS/SQS hooks):

@@ -229,7 +229,7 @@ session_manager = MongoDBSessionManager(
     session_id="validated-feedback-session",
     connection_string="mongodb://localhost:27017/",
     database_name="examples",
-    feedbackHook=feedback_validation_hook
+    feedback_hook=feedback_validation_hook
 )
 
 # Valid feedback
@@ -366,7 +366,7 @@ session_manager = MongoDBSessionManager(
     session_id="notification-session",
     connection_string="mongodb://localhost:27017/",
     database_name="examples",
-    feedbackHook=notification_hook
+    feedback_hook=notification_hook
 )
 
 # Add positive feedback
@@ -501,7 +501,7 @@ session_manager = MongoDBSessionManager(
     session_id="analytics-session",
     connection_string="mongodb://localhost:27017/",
     database_name="examples",
-    feedbackHook=analytics_hook
+    feedback_hook=analytics_hook
 )
 
 # Simulate various feedback
@@ -782,7 +782,7 @@ async def add_feedback(
         factory = get_global_factory()
         session_manager = factory.create_session_manager(
             session_id=session_id,
-            feedbackHook=feedback_validation_hook
+            feedback_hook=feedback_validation_hook
         )
 
         # Add feedback

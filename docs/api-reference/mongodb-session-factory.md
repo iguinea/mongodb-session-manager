@@ -134,7 +134,7 @@ This is the primary method for creating session managers. Each call returns a ne
 
 - **metadata_fields** (`Optional[List[str]]`, default: `None`): Override the factory's default metadata fields for this session manager.
 
-- **kwargs** (`Any`): Additional arguments passed to `MongoDBSessionManager.__init__()`. This includes hook parameters like `metadataHook` and `feedbackHook`.
+- **kwargs** (`Any`): Additional arguments passed to `MongoDBSessionManager.__init__()`. This includes hook parameters like `metadata_hook` and `feedback_hook`.
 
 #### Returns
 
@@ -164,7 +164,7 @@ def audit_hook(original_func, action, session_id, **kwargs):
 
 manager3 = factory.create_session_manager(
     session_id="user-789",
-    metadataHook=audit_hook  # Hook passed via kwargs
+    metadata_hook=audit_hook  # Hook passed via kwargs
 )
 
 # Create many managers efficiently
@@ -680,7 +680,7 @@ factory = MongoDBSessionManagerFactory(
 # Create managers with hooks
 manager = factory.create_session_manager(
     session_id="user-123",
-    metadataHook=create_audit_metadata_hook()
+    metadata_hook=create_audit_metadata_hook()
 )
 ```
 

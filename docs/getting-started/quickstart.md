@@ -6,7 +6,7 @@ Get started with MongoDB Session Manager in just 5 minutes! This guide will walk
 
 Before you begin, make sure you have:
 
-1. Python 3.11 or higher installed
+1. Python 3.12.8 or higher installed
 2. MongoDB running locally or access to MongoDB Atlas
 3. The library installed (see [Installation Guide](installation.md))
 

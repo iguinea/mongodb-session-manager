@@ -113,7 +113,7 @@ graph TB
 **Key Methods**:
 ```python
 # Session lifecycle
-__init__(session_id, connection_string, client, metadataHook, feedbackHook, **kwargs)
+__init__(session_id, connection_string, client, metadata_hook, feedback_hook, **kwargs)
 initialize(agent, **kwargs)
 close()
 
@@ -668,7 +668,7 @@ feedback_hook = create_feedback_sns_hook(
 manager = MongoDBSessionManager(
     session_id="session-123",
     connection_string="mongodb://...",
-    feedbackHook=feedback_hook
+    feedback_hook=feedback_hook
 )
 ```
 
@@ -684,7 +684,7 @@ metadata_hook = create_metadata_sqs_hook(
 manager = MongoDBSessionManager(
     session_id="session-123",
     connection_string="mongodb://...",
-    metadataHook=metadata_hook
+    metadata_hook=metadata_hook
 )
 ```
 

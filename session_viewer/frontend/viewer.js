@@ -659,8 +659,12 @@ class SessionViewer {
     this.sessionPasswordCache = new Map();  // Cache of session passwords for repeated access
     this.pendingSessionId = directSessionId;  // Session ID passed from index.html
     this.isDirectSessionAccess = !!directSessionId;  // Flag for direct session access
+  }
 
-    this.init();
+  static async create(directSessionId = null) {
+    const viewer = new SessionViewer(directSessionId);
+    await viewer.init();
+    return viewer;
   }
 
   async init() {

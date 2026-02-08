@@ -417,6 +417,39 @@ def validate_session_password(session_id: str, password_hash: str) -> tuple[bool
         return (False, False)
 
 
+def _parse_filters(filters_json: str) -> Dict[str, Any]:
+    """Parse JSON filters string into MongoDB query conditions."""
+    import json
+    import re
+
+    query = {}
+    try:
+        filters_dict = json.loads(filters_json)
+        for key, value in filters_dict.items():
+            if key.startswith("metadata."):
+                safe_value = re.escape(str(value))
+                query[key] = {REGEX_KEY: safe_value, REGEX_OPTIONS_KEY: "i"}
+            else:
+                query[key] = str(value)
+    except json.JSONDecodeError:
+        logger.warning(f"Invalid JSON in filters parameter: {filters_json}")
+    return query
+
+
+def _build_date_range(
+    created_at_start: Optional[datetime], created_at_end: Optional[datetime]
+) -> Optional[Dict[str, Any]]:
+    """Build date range query condition."""
+    if not created_at_start and not created_at_end:
+        return None
+    date_range = {}
+    if created_at_start:
+        date_range["$gte"] = created_at_start
+    if created_at_end:
+        date_range["$lte"] = created_at_end
+    return date_range
+
+
 def build_search_query(
     filters: Optional[str],
     session_id: Optional[str],
@@ -427,33 +460,20 @@ def build_search_query(
 
     All regex values are sanitized with re.escape() to prevent NoSQL injection.
     """
-    import json
     import re
 
     query = {}
 
     if filters:
-        try:
-            filters_dict = json.loads(filters)
-            for key, value in filters_dict.items():
-                if key.startswith("metadata."):
-                    safe_value = re.escape(str(value))
-                    query[key] = {REGEX_KEY: safe_value, REGEX_OPTIONS_KEY: "i"}
-                else:
-                    query[key] = str(value)
-        except json.JSONDecodeError:
-            logger.warning(f"Invalid JSON in filters parameter: {filters}")
+        query.update(_parse_filters(filters))
 
     if session_id:
         safe_session_id = re.escape(session_id)
         query["session_id"] = {REGEX_KEY: safe_session_id, REGEX_OPTIONS_KEY: "i"}
 
-    if created_at_start or created_at_end:
-        query["created_at"] = {}
-        if created_at_start:
-            query["created_at"]["$gte"] = created_at_start
-        if created_at_end:
-            query["created_at"]["$lte"] = created_at_end
+    date_range = _build_date_range(created_at_start, created_at_end)
+    if date_range:
+        query["created_at"] = date_range
 
     return query
 
@@ -520,6 +540,31 @@ def get_indexed_fields(collection: Any) -> List[str]:
         return []
 
 
+def _extract_nested_value(doc: Dict, field_name: str) -> Any:
+    """Extract a value from a nested dict using dot-notation field name."""
+    value = doc
+    for part in field_name.split("."):
+        if isinstance(value, dict):
+            value = value.get(part)
+        else:
+            return None
+    return value
+
+
+def _classify_value_type(value: Any) -> str:
+    """Classify a Python value into a field type string."""
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, (int, float)):
+        return "number"
+    if isinstance(value, datetime):
+        return "date"
+    return "string"
+
+
+TYPE_PRIORITY = ["boolean", "number", "date", "string"]
+
+
 def detect_field_type(collection: Any, field_name: str) -> str:
     """Detect field data type by sampling documents."""
     if "date" in field_name.lower() or field_name.endswith("_at"):
@@ -533,41 +578,19 @@ def detect_field_type(collection: Any, field_name: str) -> str:
         ]
 
         samples = list(collection.aggregate(pipeline))
-
         if not samples:
             return "string"
 
         types_found = set()
-
         for doc in samples:
-            value = doc
-            for part in field_name.split("."):
-                if isinstance(value, dict):
-                    value = value.get(part)
-                else:
-                    value = None
-                    break
+            value = _extract_nested_value(doc, field_name)
+            if value is not None:
+                types_found.add(_classify_value_type(value))
 
-            if value is None:
-                continue
-
-            if isinstance(value, bool):
-                types_found.add("boolean")
-            elif isinstance(value, (int, float)):
-                types_found.add("number")
-            elif isinstance(value, datetime):
-                types_found.add("date")
-            else:
-                types_found.add("string")
-
-        if "boolean" in types_found:
-            return "boolean"
-        elif "number" in types_found:
-            return "number"
-        elif "date" in types_found:
-            return "date"
-        else:
-            return "string"
+        for type_name in TYPE_PRIORITY:
+            if type_name in types_found:
+                return type_name
+        return "string"
 
     except Exception as e:
         logger.warning(f"Error detecting type for {field_name}: {e}")

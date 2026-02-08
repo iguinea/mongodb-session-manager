@@ -19,17 +19,24 @@ import logging
 import asyncio
 import signal
 import sys
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from uvicorn.logging import DefaultFormatter
 from strands import Agent
-from contextlib import asynccontextmanager
 from builtins import Exception, str, dict, print, max, min, KeyboardInterrupt
 
-
+from mongodb_session_manager import (
+    initialize_global_factory,
+    close_global_factory,
+    MongoDBConnectionPool,
+    get_global_factory,
+)
 from session_context import set_session_context_id
+from CaseType import CaseType
+from tools_agent_state import set_state, get_state
 
 
 # Usar el mismo formatter que Uvicorn para consistencia visual
@@ -62,14 +69,6 @@ def handle_shutdown(signum, frame):
 signal.signal(signal.SIGINT, handle_shutdown)
 signal.signal(signal.SIGTERM, handle_shutdown)
 ### END SHUTDOWN HANDLING ###
-
-
-from mongodb_session_manager import (
-    initialize_global_factory,
-    close_global_factory,
-    MongoDBConnectionPool,
-    get_global_factory,
-)
 
 
 # Lifespan event handler for FastAPI
@@ -109,17 +108,7 @@ async def lifespan(app: FastAPI):
 
 
 # Create FastAPI app with lifespan handler
-app = FastAPI(
-    # title="Virtual Agent API with Optimized Session Management",
-    # description="This API demonstrates optimized session management using MongoDB with connection pooling and caching.",
-    # version="1.0.0",
-    # contact={
-    #     "name": "Iñaki Guinea Beristain",
-    #     "email": "iguinea@gmail.com"
-    # },
-    # license_info={"name": "MIT License"},
-    lifespan=lifespan
-)
+app = FastAPI(lifespan=lifespan)
 
 # --- Middleware CORS ---
 # Esencial en una arquitectura de 2 servidores para permitir la comunicación
@@ -133,8 +122,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-from CaseType import CaseType
 
 
 _AGENT_PROMPT = f"""
@@ -173,7 +160,6 @@ Eres un asistente de IA que responde siempre en formato mark down.
 * Si identificas el tipo de caso, usa la herramienta 'set_state' para establecer el 'case_type' en la metadata de la sesión.
 
 """
-from tools_agent_state import set_state, get_state
 
 
 @app.post("/chat")
@@ -227,25 +213,6 @@ async def chat(request: Request, data: dict, session_id: str = Header(...)):
 
 
 # # --- New endpoints for session management features ---
-# @app.get("/sessions/{session_id}")
-# async def get_session_details(session_id: str, _: str = Depends(verify_api_key)):
-#     """Get session data and metadata."""
-#     session_store = get_session_store()
-#     if not session_store:
-#         raise HTTPException(status_code=503, detail="Session store not initialized")
-#     session_data = await session_store.get_session(session_id)
-#     if not session_data:
-#         raise HTTPException(status_code=404, detail="Session not found")
-
-#     metadata = await session_store.get_session_metadata(session_id)
-
-#     return {
-#         "session_id": session_id,
-#         "data": session_data,
-#         "metadata": metadata
-#     }
-
-
 @app.get("/case-types")
 async def get_case_types():
     """Get available case types."""
@@ -278,12 +245,6 @@ async def health_check():
     except Exception as e:
         return {"status": "unhealthy", "error": str(e)}
 
-    # session_store = get_session_store()
-    # if not session_store:
-    #     return {"status": "unhealthy", "reason": "Session store not initialized"}
-    # health = await session_store.get_service_health()
-    # return health
-
 
 @app.get("/metrics")
 async def get_metrics():
@@ -298,13 +259,6 @@ async def get_metrics():
     except Exception as e:
         logging.error(f"Error getting metrics: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-    # """Get session store metrics."""
-    # session_store = get_session_store()
-    # if not session_store:
-    #     raise HTTPException(status_code=503, detail="Session store not initialized")
-    # metrics = await session_store.get_system_metrics()
-    # return metrics
 
 
 # Add this to handle running with uvicorn programmatically

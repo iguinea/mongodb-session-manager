@@ -83,50 +83,51 @@ def metadata_audit_hook(original_func: Callable, action: str, session_id: str, *
 
 
 # Example 2: Validation Hook - Validates metadata before operations
+PROTECTED_FIELDS = {"_id", "session_id", "created_at", "internal_status"}
+REQUIRED_FIELDS = {"last_updated": lambda: datetime.now().isoformat(), "updated_by": lambda: "system"}
+MAX_VALUE_LENGTH = 1000
+
+
+def _validate_no_protected_fields(fields, protected=PROTECTED_FIELDS):
+    """Raise ValueError if any protected field is present."""
+    violations = [f for f in fields if f in protected]
+    if violations:
+        raise ValueError(f"Cannot modify protected field(s): {violations}")
+
+
+def _ensure_required_fields(metadata):
+    """Auto-add required fields if missing."""
+    for field, default_fn in REQUIRED_FIELDS.items():
+        if field not in metadata:
+            metadata[field] = default_fn()
+
+
+def _validate_value_lengths(metadata):
+    """Validate that string values don't exceed max length."""
+    for key, value in metadata.items():
+        if isinstance(value, str) and len(value) > MAX_VALUE_LENGTH:
+            raise ValueError(f"Value for '{key}' exceeds maximum length of {MAX_VALUE_LENGTH}")
+
+
 def metadata_validation_hook(original_func: Callable, action: str, session_id: str, **kwargs):
     """
     Hook that validates metadata operations before executing them.
     """
-    # Define validation rules
-    PROTECTED_FIELDS = ["_id", "session_id", "created_at", "internal_status"]
-    REQUIRED_FIELDS = ["last_updated", "updated_by"]
-    MAX_VALUE_LENGTH = 1000
-    
     if action == "update" and "metadata" in kwargs:
         metadata = kwargs["metadata"]
-        
-        # Check for protected fields
-        for field in PROTECTED_FIELDS:
-            if field in metadata:
-                raise ValueError(f"Cannot update protected field: {field}")
-        
-        # Check for required fields
-        for field in REQUIRED_FIELDS:
-            if field not in metadata:
-                # Auto-add required fields
-                metadata[field] = "system" if field == "updated_by" else datetime.now().isoformat()
-        
-        # Validate value lengths
-        for key, value in metadata.items():
-            if isinstance(value, str) and len(value) > MAX_VALUE_LENGTH:
-                raise ValueError(f"Value for '{key}' exceeds maximum length of {MAX_VALUE_LENGTH}")
-        
-        # Add validation timestamp
+        _validate_no_protected_fields(metadata.keys())
+        _ensure_required_fields(metadata)
+        _validate_value_lengths(metadata)
         metadata["_validated_at"] = datetime.now().isoformat()
-        
+
         logger.info(f"[VALIDATION] Metadata validated for session {session_id}")
         return original_func(metadata)
-    
-    elif action == "delete" and "keys" in kwargs:
-        # Prevent deletion of protected fields
-        protected_deletions = [key for key in kwargs["keys"] if key in PROTECTED_FIELDS]
-        if protected_deletions:
-            raise ValueError(f"Cannot delete protected fields: {protected_deletions}")
-        
+
+    if action == "delete" and "keys" in kwargs:
+        _validate_no_protected_fields(kwargs["keys"])
         return original_func(kwargs["keys"])
-    
-    else:  # get
-        return original_func()
+
+    return original_func()
 
 
 # Example 3: Cache Hook - Implements simple caching for metadata reads

@@ -119,7 +119,7 @@ session_manager = MongoDBSessionManager(
     session_id="user-session-123",
     connection_string="mongodb://localhost:27017/",
     database_name="my_db",
-    feedbackHook=feedback_hook
+    feedback_hook=feedback_hook
 )
 
 # Negative feedback routes to topic_arn_bad
@@ -157,7 +157,7 @@ session_manager = MongoDBSessionManager(
     session_id="user-session",
     connection_string="mongodb://localhost:27017/",
     database_name="my_db",
-    feedbackHook=feedback_hook
+    feedback_hook=feedback_hook
 )
 
 # This triggers SNS notification
@@ -218,7 +218,7 @@ session_manager = MongoDBSessionManager(
     session_id="customer-support-001",
     connection_string=os.getenv("MONGODB_URI"),
     database_name="production_db",
-    feedbackHook=feedback_hook
+    feedback_hook=feedback_hook
 )
 ```
 
@@ -258,7 +258,7 @@ session_manager = MongoDBSessionManager(
     session_id="user-session-123",
     connection_string="mongodb://localhost:27017/",
     database_name="my_db",
-    metadataHook=metadata_hook
+    metadata_hook=metadata_hook
 )
 
 # Metadata changes are automatically sent to SQS
@@ -316,7 +316,7 @@ session_manager = MongoDBSessionManager(
     session_id="workflow-123",
     connection_string="mongodb://localhost:27017/",
     database_name="my_db",
-    metadataHook=metadata_hook
+    metadata_hook=metadata_hook
 )
 
 # Update triggers SQS message
@@ -378,7 +378,7 @@ session_manager = MongoDBSessionManager(
     session_id="workflow-456",
     connection_string=os.getenv("MONGODB_URI"),
     database_name="production_db",
-    metadataHook=metadata_hook
+    metadata_hook=metadata_hook
 )
 
 # Update workflow status - automatically propagated
@@ -457,8 +457,8 @@ session_manager = MongoDBSessionManager(
     session_id="customer-support-001",
     connection_string=os.getenv("MONGODB_URI"),
     database_name="production_db",
-    feedbackHook=feedback_hook,  # SNS for feedback
-    metadataHook=metadata_hook    # SQS for metadata
+    feedback_hook=feedback_hook,  # SNS for feedback
+    metadata_hook=metadata_hook    # SQS for metadata
 )
 
 # Feedback triggers SNS
@@ -507,7 +507,7 @@ else:
     feedback_hook = None
 
 session_manager = MongoDBSessionManager(
-    feedbackHook=feedback_hook  # None is fine
+    feedback_hook=feedback_hook  # None is fine
 )
 
 # Bad - unhandled error

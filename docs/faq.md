@@ -42,13 +42,13 @@ However, the architecture allows for other databases through the `SessionReposit
 ### What are the system requirements?
 
 **Minimum Requirements:**
-- Python 3.13 or higher
+- Python 3.12.8 or higher
 - MongoDB 4.4 or higher
 - 512 MB RAM (for development)
 - 10 GB disk space
 
 **Recommended for Production:**
-- Python 3.13+
+- Python 3.12+
 - MongoDB 6.0 or higher
 - 2 GB+ RAM
 - SSD storage
@@ -56,7 +56,7 @@ However, the architecture allows for other databases through the `SessionReposit
 
 ### Is this production-ready?
 
-Yes! The library is currently in active development (v0.1.14) and is used in production environments. Features include:
+Yes! The library is currently in active development (v0.5.0) and is used in production environments. Features include:
 
 - Comprehensive error handling
 - Connection pooling for high concurrency
@@ -138,7 +138,7 @@ uv sync
 **Check current version:**
 ```python
 from mongodb_session_manager import __version__
-print(__version__)  # e.g., "0.1.14"
+print(__version__)  # e.g., "0.5.0"
 ```
 
 ## Usage Questions
@@ -695,7 +695,7 @@ def custom_metadata_hook(original_func, action, session_id, **kwargs):
 manager = MongoDBSessionManager(
     session_id="test",
     connection_string="mongodb://localhost:27017/",
-    metadataHook=custom_metadata_hook
+    metadata_hook=custom_metadata_hook
 )
 ```
 
@@ -721,7 +721,7 @@ if is_feedback_sns_hook_available():
     manager = MongoDBSessionManager(
         session_id="user-session",
         connection_string="mongodb://localhost:27017/",
-        feedbackHook=feedback_hook
+        feedback_hook=feedback_hook
     )
 
     # Feedback is sent to appropriate SNS topic
@@ -745,7 +745,7 @@ if is_metadata_sqs_hook_available():
     manager = MongoDBSessionManager(
         session_id="user-session",
         connection_string="mongodb://localhost:27017/",
-        metadataHook=metadata_hook
+        metadata_hook=metadata_hook
     )
 
     # Metadata changes are sent to SQS

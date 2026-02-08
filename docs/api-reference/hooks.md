@@ -79,7 +79,7 @@ def my_metadata_hook(original_func, action, session_id, **kwargs):
 manager = MongoDBSessionManager(
     session_id="user-123",
     connection_string="mongodb://localhost:27017/",
-    metadataHook=my_metadata_hook
+    metadata_hook=my_metadata_hook
 )
 ```
 
@@ -130,7 +130,7 @@ def audit_metadata_hook(original_func, action, session_id, **kwargs):
 manager = MongoDBSessionManager(
     session_id="user-123",
     connection_string="mongodb://...",
-    metadataHook=audit_metadata_hook
+    metadata_hook=audit_metadata_hook
 )
 ```
 
@@ -185,7 +185,7 @@ def validation_metadata_hook(original_func, action, session_id, **kwargs):
 manager = MongoDBSessionManager(
     session_id="user-123",
     connection_string="mongodb://...",
-    metadataHook=validation_metadata_hook
+    metadata_hook=validation_metadata_hook
 )
 
 # This will raise ValueError
@@ -257,7 +257,7 @@ def caching_metadata_hook(original_func, action, session_id, **kwargs):
 manager = MongoDBSessionManager(
     session_id="user-123",
     connection_string="mongodb://...",
-    metadataHook=caching_metadata_hook
+    metadata_hook=caching_metadata_hook
 )
 
 # First call - database query
@@ -302,7 +302,7 @@ def transformation_metadata_hook(original_func, action, session_id, **kwargs):
 manager = MongoDBSessionManager(
     session_id="user-123",
     connection_string="mongodb://...",
-    metadataHook=transformation_metadata_hook
+    metadata_hook=transformation_metadata_hook
 )
 
 # Email will be normalized to lowercase
@@ -358,7 +358,7 @@ def my_feedback_hook(original_func, action, session_id, **kwargs):
 manager = MongoDBSessionManager(
     session_id="user-123",
     connection_string="mongodb://localhost:27017/",
-    feedbackHook=my_feedback_hook
+    feedback_hook=my_feedback_hook
 )
 ```
 
@@ -394,7 +394,7 @@ def audit_feedback_hook(original_func, action, session_id, **kwargs):
 manager = MongoDBSessionManager(
     session_id="user-123",
     connection_string="mongodb://...",
-    feedbackHook=audit_feedback_hook
+    feedback_hook=audit_feedback_hook
 )
 ```
 
@@ -431,7 +431,7 @@ def validation_feedback_hook(original_func, action, session_id, **kwargs):
 manager = MongoDBSessionManager(
     session_id="user-123",
     connection_string="mongodb://...",
-    feedbackHook=validation_feedback_hook
+    feedback_hook=validation_feedback_hook
 )
 ```
 
@@ -475,7 +475,7 @@ def notification_feedback_hook(original_func, action, session_id, **kwargs):
 manager = MongoDBSessionManager(
     session_id="user-123",
     connection_string="mongodb://...",
-    feedbackHook=notification_feedback_hook
+    feedback_hook=notification_feedback_hook
 )
 ```
 
@@ -538,7 +538,7 @@ def analytics_feedback_hook(original_func, action, session_id, **kwargs):
 manager = MongoDBSessionManager(
     session_id="user-123",
     connection_string="mongodb://...",
-    feedbackHook=analytics_feedback_hook
+    feedback_hook=analytics_feedback_hook
 )
 
 # Later, get analytics
@@ -636,7 +636,7 @@ Same as `FeedbackSNSHook.__init__()`.
 
 #### Returns
 
-Hook function compatible with `MongoDBSessionManager(feedbackHook=...)`
+Hook function compatible with `MongoDBSessionManager(feedback_hook=...)`
 
 #### Example
 
@@ -664,7 +664,7 @@ manager = MongoDBSessionManager(
     session_id="user-session-123",
     connection_string="mongodb://localhost:27017/",
     database_name="chat_db",
-    feedbackHook=sns_hook
+    feedback_hook=sns_hook
 )
 
 # Feedback is automatically sent to SNS
@@ -815,7 +815,7 @@ Create a metadata hook function for mongodb-session-manager.
 
 #### Returns
 
-Hook function compatible with `MongoDBSessionManager(metadataHook=...)`
+Hook function compatible with `MongoDBSessionManager(metadata_hook=...)`
 
 #### Example
 
@@ -842,7 +842,7 @@ manager = MongoDBSessionManager(
     session_id="user-session-123",
     connection_string="mongodb://localhost:27017/",
     database_name="chat_db",
-    metadataHook=sqs_hook
+    metadata_hook=sqs_hook
 )
 
 # Metadata changes are automatically sent to SQS
@@ -937,7 +937,7 @@ def create_combined_metadata_hook():
 manager = MongoDBSessionManager(
     session_id="user-123",
     connection_string="mongodb://...",
-    metadataHook=create_combined_metadata_hook()
+    metadata_hook=create_combined_metadata_hook()
 )
 ```
 
@@ -1168,7 +1168,7 @@ metadata_hook = ProductionMetadataHook(cache_ttl=300)
 manager = MongoDBSessionManager(
     session_id="user-123",
     connection_string="mongodb://localhost:27017/",
-    metadataHook=metadata_hook
+    metadata_hook=metadata_hook
 )
 ```
 
@@ -1269,7 +1269,7 @@ feedback_hook = MultiChannelFeedbackHook(
 manager = MongoDBSessionManager(
     session_id="user-123",
     connection_string="mongodb://localhost:27017/",
-    feedbackHook=feedback_hook
+    feedback_hook=feedback_hook
 )
 ```
 

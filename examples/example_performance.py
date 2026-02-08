@@ -27,7 +27,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src import (
-    MongoDBSessionManager,
     MongoDBSessionManagerFactory,
     create_mongodb_session_manager
 )
@@ -85,12 +84,13 @@ async def benchmark_with_pooling(session_ids: List[str]):
     
     for session_id in session_ids:
         # Create session manager (reuses connection from pool)
-        manager = factory.create_session_manager(session_id)
-        
+        factory.create_session_manager(session_id)
+
         # Perform some operations
-        for i in range(NUM_OPERATIONS_PER_SESSION):
+        for _ in range(NUM_OPERATIONS_PER_SESSION):
             # Simulate some operations
             # Note: check_session_exists() is not available without cache wrapper
+            pass
     
     elapsed = time.time() - start_time
     
@@ -165,7 +165,7 @@ async def main():
     time_without_pooling = await benchmark_without_pooling(session_ids[:20])  # Fewer sessions due to overhead
     time_with_pooling = await benchmark_with_pooling(session_ids)
     
-    print(f"\n=== Performance Improvement ===")
+    print("\n=== Performance Improvement ===")
     improvement = (time_without_pooling / 20) / (time_with_pooling / NUM_SESSIONS)
     print(f"Speedup: {improvement:.2f}x faster with pooling")
     
@@ -174,7 +174,7 @@ async def main():
     time_concurrent_without = simulate_concurrent_requests(session_ids[:20], use_pooling=False)
     time_concurrent_with = simulate_concurrent_requests(session_ids, use_pooling=True)
     
-    print(f"\n=== Concurrent Performance Improvement ===")
+    print("\n=== Concurrent Performance Improvement ===")
     concurrent_improvement = (time_concurrent_without / 20) / (time_concurrent_with / NUM_SESSIONS)
     print(f"Speedup: {concurrent_improvement:.2f}x faster with pooling")
     

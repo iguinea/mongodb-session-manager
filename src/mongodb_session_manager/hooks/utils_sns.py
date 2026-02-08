@@ -110,39 +110,35 @@ def publish_message(
         message = json.dumps(message, ensure_ascii=False)
 
     # Preparar parámetros
-    params = {
-        "Message": message,
+    params = {"Message": message}
+    optional_params = {
+        "TopicArn": topic_arn,
+        "PhoneNumber": phone_number,
+        "Subject": subject,
+        "MessageAttributes": message_attributes,
+        "MessageStructure": message_structure,
+        "MessageGroupId": message_group_id,
+        "MessageDeduplicationId": message_deduplication_id,
     }
-
-    if topic_arn:
-        params["TopicArn"] = topic_arn
-    if phone_number:
-        params["PhoneNumber"] = phone_number
-    if subject:
-        params["Subject"] = subject
-    if message_attributes:
-        params["MessageAttributes"] = message_attributes
-    if message_structure:
-        params["MessageStructure"] = message_structure
-
-    # Parámetros para tópicos FIFO
-    if message_group_id:
-        params["MessageGroupId"] = message_group_id
-    if message_deduplication_id:
-        params["MessageDeduplicationId"] = message_deduplication_id
+    params.update({k: v for k, v in optional_params.items() if v is not None})
 
     try:
-        response = client.publish(**params)
-        return response
+        return client.publish(**params)
     except ClientError as e:
-        error_code = e.response["Error"]["Code"]
-        if error_code == "NotFound":
-            raise ValueError(f"El tópico no existe: {topic_arn}")
-        elif error_code == "InvalidParameter":
-            raise ValueError(f"Parámetro inválido: {e}")
-        elif error_code == "AuthorizationError":
-            raise PermissionError(
-                f"Acceso denegado al tópico {topic_arn}. Verifica los permisos IAM para sns:Publish"
-            )
-        else:
-            raise
+        _handle_sns_client_error(e, topic_arn)
+
+
+def _handle_sns_client_error(error: ClientError, topic_arn: Optional[str]) -> None:
+    """Handle SNS ClientError and raise appropriate exceptions."""
+    error_code = error.response["Error"]["Code"]
+    error_map = {
+        "NotFound": ValueError(f"El tópico no existe: {topic_arn}"),
+        "InvalidParameter": ValueError(f"Parámetro inválido: {error}"),
+        "AuthorizationError": PermissionError(
+            f"Acceso denegado al tópico {topic_arn}. Verifica los permisos IAM para sns:Publish"
+        ),
+    }
+    mapped_error = error_map.get(error_code)
+    if mapped_error:
+        raise mapped_error
+    raise error

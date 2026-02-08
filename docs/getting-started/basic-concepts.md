@@ -471,7 +471,7 @@ def audit_hook(original_func, action, session_id, **kwargs):
 session_manager = MongoDBSessionManager(
     session_id="session-001",
     connection_string="mongodb://localhost:27017/",
-    metadataHook=audit_hook
+    metadata_hook=audit_hook
 )
 ```
 

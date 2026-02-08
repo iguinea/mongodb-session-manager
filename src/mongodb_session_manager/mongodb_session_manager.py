@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import warnings
 from typing import Any, Dict, List, Optional, Callable
 
 from pymongo import MongoClient
@@ -102,8 +103,8 @@ class MongoDBSessionManager(RepositorySessionManager):
         collection_name: str = "collection_name",
         client: Optional[MongoClient] = None,
         metadata_fields: Optional[List[str]] = None,
-        metadataHook: Optional[Callable[[Dict[str, Any]], None]] = None,
-        feedbackHook: Optional[Callable[[Dict[str, Any]], None]] = None,
+        metadata_hook: Optional[Callable[[Dict[str, Any]], None]] = None,
+        feedback_hook: Optional[Callable[[Dict[str, Any]], None]] = None,
         application_name: Optional[str] = None,
         **kwargs: Any,
     ) -> None:
@@ -116,11 +117,26 @@ class MongoDBSessionManager(RepositorySessionManager):
             collection_name: Name of the collection for sessions
             client: Optional pre-configured MongoClient to use
             metadata_fields: List of fields to be indexed in the metadata
-            metadataHook: Hook to be called when metadata is updated, deleted or retrieved
-            feedbackHook: Hook to be called when feedback is added
+            metadata_hook: Hook to be called when metadata is updated, deleted or retrieved
+            feedback_hook: Hook to be called when feedback is added
             application_name: Application name for session categorization (immutable after creation)
             **kwargs: Additional arguments passed to parent class and MongoClient
         """
+        # Support deprecated camelCase parameter names (metadataHook, feedbackHook)
+        if "metadataHook" in kwargs:
+            warnings.warn(
+                "metadataHook is deprecated, use metadata_hook instead",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            metadata_hook = metadata_hook or kwargs.pop("metadataHook")
+        if "feedbackHook" in kwargs:
+            warnings.warn(
+                "feedbackHook is deprecated, use feedback_hook instead",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            feedback_hook = feedback_hook or kwargs.pop("feedbackHook")
         # Extract MongoDB client kwargs
         mongo_kwargs = {}
         parent_kwargs = {}
@@ -170,12 +186,12 @@ class MongoDBSessionManager(RepositorySessionManager):
         )
         
         # Apply metadata hook if provided
-        if metadataHook:
-            self._apply_metadata_hook(metadataHook)
-        
+        if metadata_hook:
+            self._apply_metadata_hook(metadata_hook)
+
         # Apply feedback hook if provided
-        if feedbackHook:
-            self._apply_feedback_hook(feedbackHook)
+        if feedback_hook:
+            self._apply_feedback_hook(feedback_hook)
 
         logger.info(f"Initialized Itzulbira session manager for session: {session_id}")
     
@@ -227,34 +243,38 @@ class MongoDBSessionManager(RepositorySessionManager):
         """
         super().sync_agent(agent, **kwargs)
 
-        # Get metrics using get_summary() for comprehensive data
         metrics_summary = agent.event_loop_metrics.get_summary()
-
-        # Extract token usage metrics
-        accumulated_usage = metrics_summary.get("accumulated_usage", {})
-        _inputTokens = accumulated_usage.get("inputTokens", 0)
-        _outputTokens = accumulated_usage.get("outputTokens", 0)
-        _totalTokens = accumulated_usage.get("totalTokens", 0)
-        # Cache metrics for AWS Bedrock prompt caching (optional, backwards compatible)
-        _cacheReadInputTokens = accumulated_usage.get("cacheReadInputTokens", 0)
-        _cacheWriteInputTokens = accumulated_usage.get("cacheWriteInputTokens", 0)
-
-        # Extract performance metrics
         accumulated_metrics = metrics_summary.get("accumulated_metrics", {})
-        _latencyMs = accumulated_metrics.get("latencyMs", 0)
-        _timeToFirstByteMs = accumulated_metrics.get("timeToFirstByteMs", 0)
 
-        # Extract cycle metrics
-        _cycle_count = metrics_summary.get("total_cycles", 0)
-        _total_duration = metrics_summary.get("total_duration", 0.0)
-        _average_cycle_time = metrics_summary.get("average_cycle_time", 0.0)
+        if accumulated_metrics.get("latencyMs", 0) > 0:
+            accumulated_usage = metrics_summary.get("accumulated_usage", {})
+            usage_data = {
+                "inputTokens": accumulated_usage.get("inputTokens", 0),
+                "outputTokens": accumulated_usage.get("outputTokens", 0),
+                "totalTokens": accumulated_usage.get("totalTokens", 0),
+                "cacheReadInputTokens": accumulated_usage.get("cacheReadInputTokens", 0),
+                "cacheWriteInputTokens": accumulated_usage.get("cacheWriteInputTokens", 0),
+            }
+            metrics_data = {
+                "latencyMs": accumulated_metrics.get("latencyMs", 0),
+                "timeToFirstByteMs": accumulated_metrics.get("timeToFirstByteMs", 0),
+            }
+            cycle_data = {
+                "cycle_count": metrics_summary.get("total_cycles", 0),
+                "total_duration": metrics_summary.get("total_duration", 0.0),
+                "average_cycle_time": metrics_summary.get("average_cycle_time", 0.0),
+            }
+            tool_usage = self._extract_tool_usage(metrics_summary.get("tool_usage", {}))
+            self._update_last_message_metrics(agent, usage_data, metrics_data, cycle_data, tool_usage)
 
-        # Extract tool metrics (simplified structure for storage)
-        tool_usage_raw = metrics_summary.get("tool_usage", {})
-        _tool_usage = {}
+        self._capture_agent_config(agent)
+
+    def _extract_tool_usage(self, tool_usage_raw: Dict) -> Dict:
+        """Extract simplified tool usage metrics for storage."""
+        tool_usage = {}
         for tool_name, tool_data in tool_usage_raw.items():
             exec_stats = tool_data.get("execution_stats", {})
-            _tool_usage[tool_name] = {
+            tool_usage[tool_name] = {
                 "call_count": exec_stats.get("call_count", 0),
                 "success_count": exec_stats.get("success_count", 0),
                 "error_count": exec_stats.get("error_count", 0),
@@ -262,57 +282,45 @@ class MongoDBSessionManager(RepositorySessionManager):
                 "average_time": exec_stats.get("average_time", 0.0),
                 "success_rate": exec_stats.get("success_rate", 0.0),
             }
+        return tool_usage
 
-        if _latencyMs > 0:
+    def _update_last_message_metrics(
+        self, agent: Agent, usage_data: Dict, metrics_data: Dict, cycle_data: Dict, tool_usage: Dict
+    ) -> None:
+        """Update the last message in a session with event loop metrics."""
+        doc = self.session_repository.collection.find_one(
+            {"_id": self.session_id},
+            {f"agents.{agent.agent_id}.messages": {"$slice": -1}},
+        )
 
-            # Recupera el ultimo mensaje de la conversación. Será el que updatearemos las metricas obtenidas.
-            doc = self.session_repository.collection.find_one(
-                {"_id": self.session_id},
-                {f"agents.{agent.agent_id}.messages": {"$slice": -1}},
-            )
+        if not (doc and "agents" in doc and agent.agent_id in doc["agents"]):
+            return
 
-            if doc and "agents" in doc and agent.agent_id in doc["agents"]:
-                messages = doc["agents"][agent.agent_id].get("messages", [])
-                if messages:
-                    last_message_id = messages[-1]["message_id"]
+        messages = doc["agents"][agent.agent_id].get("messages", [])
+        if not messages:
+            return
 
-                    update_data = {
-                        f"agents.{agent.agent_id}.messages.$.event_loop_metrics.accumulated_metrics": {
-                            "latencyMs": _latencyMs,
-                            "timeToFirstByteMs": _timeToFirstByteMs,
-                        },
-                        f"agents.{agent.agent_id}.messages.$.event_loop_metrics.accumulated_usage": {
-                            "inputTokens": _inputTokens,
-                            "outputTokens": _outputTokens,
-                            "totalTokens": _totalTokens,
-                            "cacheReadInputTokens": _cacheReadInputTokens,
-                            "cacheWriteInputTokens": _cacheWriteInputTokens,
-                        },
-                        f"agents.{agent.agent_id}.messages.$.event_loop_metrics.cycle_metrics": {
-                            "cycle_count": _cycle_count,
-                            "total_duration": _total_duration,
-                            "average_cycle_time": _average_cycle_time,
-                        },
-                        f"agents.{agent.agent_id}.messages.$.event_loop_metrics.tool_usage": _tool_usage,
-                    }
-                    self.session_repository.collection.update_one(
-                        {
-                            "_id": self.session_id,
-                            f"agents.{agent.agent_id}.messages.message_id": last_message_id,
-                        },
-                        {"$set": update_data},
-                    )
+        last_message_id = messages[-1]["message_id"]
+        prefix = f"agents.{agent.agent_id}.messages.$.event_loop_metrics"
+        update_data = {
+            f"{prefix}.accumulated_metrics": metrics_data,
+            f"{prefix}.accumulated_usage": usage_data,
+            f"{prefix}.cycle_metrics": cycle_data,
+            f"{prefix}.tool_usage": tool_usage,
+        }
+        self.session_repository.collection.update_one(
+            {
+                "_id": self.session_id,
+                f"agents.{agent.agent_id}.messages.message_id": last_message_id,
+            },
+            {"$set": update_data},
+        )
 
-        # Capture and store agent configuration (model and system_prompt)
+    def _capture_agent_config(self, agent: Agent) -> None:
+        """Capture and store agent configuration (model and system_prompt)."""
         agent_config_update = {}
-        if hasattr(agent, "model") and agent.model:
-            # Extract model identifier as string from BedrockModel.config['model_id']
-            # or fall back to model_id attribute or str representation
-            model_id = None
-            if hasattr(agent.model, "config") and isinstance(agent.model.config, dict):
-                model_id = agent.model.config.get("model_id")
-            if not model_id:
-                model_id = getattr(agent.model, "model_id", str(agent.model))
+        model_id = self._extract_model_id(agent)
+        if model_id:
             agent_config_update[f"agents.{agent.agent_id}.agent_data.model"] = model_id
         if hasattr(agent, "system_prompt") and agent.system_prompt:
             agent_config_update[f"agents.{agent.agent_id}.agent_data.system_prompt"] = agent.system_prompt
@@ -322,7 +330,17 @@ class MongoDBSessionManager(RepositorySessionManager):
                 {"_id": self.session_id},
                 {"$set": agent_config_update},
             )
-            logger.debug(f"Captured agent configuration for {agent.agent_id}: model={model_id if 'model_id' in locals() else 'N/A'}")
+            logger.debug(f"Captured agent configuration for {agent.agent_id}: model={model_id or 'N/A'}")
+
+    def _extract_model_id(self, agent: Agent) -> Optional[str]:
+        """Extract model identifier string from agent."""
+        if not (hasattr(agent, "model") and agent.model):
+            return None
+        if hasattr(agent.model, "config") and isinstance(agent.model.config, dict):
+            model_id = agent.model.config.get("model_id")
+            if model_id:
+                return model_id
+        return getattr(agent.model, "model_id", str(agent.model))
 
     def initialize(self, agent: "Agent", **kwargs: Any) -> None:
         """Initialize an agent with a session."""
@@ -348,6 +366,46 @@ class MongoDBSessionManager(RepositorySessionManager):
     def delete_metadata(self, metadata_keys: List[str]) -> None:
         """Delete metadata keys for the session."""
         self.session_repository.delete_metadata(self.session_id, metadata_keys)
+
+    def _parse_json_param(self, value: Any, param_name: str) -> tuple:
+        """Parse a potential JSON string parameter into its Python equivalent."""
+        if value is not None and isinstance(value, str):
+            try:
+                return json.loads(value), None
+            except json.JSONDecodeError:
+                return None, f"Error: {param_name} must be a valid JSON, got: {value[:100]}..."
+        return value, None
+
+    def _handle_metadata_get(self, keys: Optional[List[str]] = None) -> str:
+        """Handle get action for the metadata tool."""
+        all_metadata = self.get_metadata()
+        if not all_metadata or "metadata" not in all_metadata:
+            return "No metadata found for this session"
+
+        metadata_dict = all_metadata["metadata"]
+        if keys:
+            filtered = {k: metadata_dict.get(k) for k in keys if k in metadata_dict}
+            if filtered:
+                return f"Metadata retrieved: {json.dumps(filtered, default=str)}"
+            return f"No metadata found for keys: {keys}"
+
+        if metadata_dict:
+            return f"All metadata: {json.dumps(metadata_dict, default=str)}"
+        return "No metadata stored in session"
+
+    def _handle_metadata_set(self, metadata: Dict[str, Any]) -> str:
+        """Handle set/update action for the metadata tool."""
+        if not metadata:
+            return "Error: metadata dictionary required for set/update action"
+        self.update_metadata(metadata)
+        return f"Successfully updated metadata fields: {list(metadata.keys())}"
+
+    def _handle_metadata_delete(self, keys: List[str]) -> str:
+        """Handle delete action for the metadata tool."""
+        if not keys:
+            return "Error: keys list required for delete action"
+        self.delete_metadata(keys)
+        return f"Successfully deleted metadata fields: {keys}"
 
     def get_metadata_tool(self):
         """Get a tool for managing session metadata.
@@ -398,66 +456,24 @@ class MongoDBSessionManager(RepositorySessionManager):
             try:
                 action = action.lower()
 
-                # Handle case where model sends metadata as JSON string instead of dict
-                if metadata is not None and isinstance(metadata, str):
-                    try:
-                        metadata = json.loads(metadata)
-                    except json.JSONDecodeError:
-                        return f"Error: metadata must be a valid JSON object, got: {metadata[:100]}..."
+                metadata, error = session_manager._parse_json_param(metadata, "metadata")
+                if error:
+                    return error
+                keys, error = session_manager._parse_json_param(keys, "keys")
+                if error:
+                    return error
 
-                # Handle case where model sends keys as JSON string instead of list
-                if keys is not None and isinstance(keys, str):
-                    try:
-                        keys = json.loads(keys)
-                    except json.JSONDecodeError:
-                        return f"Error: keys must be a valid JSON array, got: {keys[:100]}..."
+                action_handlers = {
+                    "get": lambda: session_manager._handle_metadata_get(keys),
+                    "set": lambda: session_manager._handle_metadata_set(metadata),
+                    "update": lambda: session_manager._handle_metadata_set(metadata),
+                    "delete": lambda: session_manager._handle_metadata_delete(keys),
+                }
 
-                if action == "get":
-                    # Retrieve metadata
-                    all_metadata = session_manager.get_metadata()
-                    if all_metadata and "metadata" in all_metadata:
-                        metadata_dict = all_metadata["metadata"]
-                        if keys:
-                            # Return only requested keys
-                            filtered = {
-                                k: metadata_dict.get(k)
-                                for k in keys
-                                if k in metadata_dict
-                            }
-                            if filtered:
-                                return f"Metadata retrieved: {json.dumps(filtered, default=str)}"
-                            else:
-                                return f"No metadata found for keys: {keys}"
-                        else:
-                            # Return all metadata
-                            if metadata_dict:
-                                return f"All metadata: {json.dumps(metadata_dict, default=str)}"
-                            else:
-                                return "No metadata stored in session"
-                    else:
-                        return "No metadata found for this session"
-
-                elif action in ["set", "update"]:
-                    # Update metadata
-                    if not metadata:
-                        return (
-                            "Error: metadata dictionary required for set/update action"
-                        )
-
-                    session_manager.update_metadata(metadata)
-                    updated_keys = list(metadata.keys())
-                    return f"Successfully updated metadata fields: {updated_keys}"
-
-                elif action == "delete":
-                    # Delete metadata keys
-                    if not keys:
-                        return "Error: keys list required for delete action"
-
-                    session_manager.delete_metadata(keys)
-                    return f"Successfully deleted metadata fields: {keys}"
-
-                else:
-                    return f"Error: Unknown action '{action}'. Use 'get', 'set', 'update', or 'delete'"
+                handler = action_handlers.get(action)
+                if handler:
+                    return handler()
+                return f"Error: Unknown action '{action}'. Use 'get', 'set', 'update', or 'delete'"
 
             except Exception as e:
                 logger.error(f"Error in manage_metadata tool: {e}")

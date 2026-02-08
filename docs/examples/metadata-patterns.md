@@ -708,7 +708,7 @@ session_manager = MongoDBSessionManager(
     session_id="validated-session",
     connection_string="mongodb://localhost:27017/",
     database_name="examples",
-    metadataHook=metadata_validation_hook
+    metadata_hook=metadata_validation_hook
 )
 
 # This will auto-add required fields
@@ -806,7 +806,7 @@ session_manager = MongoDBSessionManager(
     session_id="cached-session",
     connection_string="mongodb://localhost:27017/",
     database_name="examples",
-    metadataHook=cache_hook
+    metadata_hook=cache_hook
 )
 
 # First call - cache miss
@@ -925,7 +925,7 @@ session_manager = MongoDBSessionManager(
     session_id="synced-session",
     connection_string="mongodb://localhost:27017/",
     database_name="examples",
-    metadataHook=sync_hook
+    metadata_hook=sync_hook
 )
 
 # All updates are synced
@@ -1040,7 +1040,7 @@ session_manager = MongoDBSessionManager(
     session_id="combined-hooks-session",
     connection_string="mongodb://localhost:27017/",
     database_name="examples",
-    metadataHook=combined_hook
+    metadata_hook=combined_hook
 )
 
 # Operations go through both hooks

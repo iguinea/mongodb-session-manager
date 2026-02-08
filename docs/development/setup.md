@@ -21,7 +21,7 @@ Before you begin, ensure you have the following installed on your system:
 
 ### Required Software
 
-1. **Python 3.13+**
+1. **Python 3.12+**
    ```bash
    # Check your Python version
    python --version
@@ -30,8 +30,8 @@ Before you begin, ensure you have the following installed on your system:
    ```
 
    If you need to install Python:
-   - **macOS**: `brew install python@3.13`
-   - **Ubuntu/Debian**: `sudo apt-get install python3.13`
+   - **macOS**: `brew install python@3.12`
+   - **Ubuntu/Debian**: `sudo apt-get install python3.12`
    - **Windows**: Download from [python.org](https://www.python.org/downloads/)
 
 2. **MongoDB**
@@ -596,18 +596,18 @@ db.createUser({
 
 ### Python Version Issues
 
-**Problem**: Project requires Python 3.13+
+**Problem**: Project requires Python 3.12+
 
 **Solution**: Use pyenv to manage Python versions:
 ```bash
 # Install pyenv
 curl https://pyenv.run | bash
 
-# Install Python 3.13
-pyenv install 3.13.0
+# Install Python 3.12
+pyenv install 3.12.8
 
 # Set as local version
-pyenv local 3.13.0
+pyenv local 3.12.8
 ```
 
 ### Import Issues
@@ -680,7 +680,7 @@ Now that your development environment is set up:
 - **UV Documentation**: https://github.com/astral-sh/uv
 - **MongoDB Documentation**: https://docs.mongodb.com/
 - **Strands Agents**: https://github.com/strands-ai/strands-agents
-- **Python 3.13 Documentation**: https://docs.python.org/3.13/
+- **Python 3.12 Documentation**: https://docs.python.org/3.12/
 
 ## Getting Help
 

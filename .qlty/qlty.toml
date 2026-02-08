@@ -76,7 +76,7 @@ mode = "comment"
 
 [[plugin]]
 name = "ripgrep"
-mode = "comment"
+mode = "disabled"
 
 [[plugin]]
 name = "ruff"
@@ -92,3 +92,30 @@ drivers = [
 
 [[plugin]]
 name = "trufflehog"
+
+# Ignore bandit B101 (assert_used) in test files - standard in pytest
+[[triage]]
+match.plugins = ["bandit"]
+match.rules = ["bandit:B101"]
+match.file_patterns = ["**/test_*.py", "**/*_test.py", "**/conftest.py"]
+set.ignored = true
+
+# Ignore bandit B104 (hardcoded_bind_all_interfaces) in examples and backend config - intentional for dev servers
+[[triage]]
+match.plugins = ["bandit"]
+match.rules = ["bandit:B104"]
+match.file_patterns = ["examples/*.py", "session_viewer/backend/config.py"]
+set.ignored = true
+
+# Ignore radarlint parameter count in test fixtures - conftest factories need many params
+[[triage]]
+match.plugins = ["radarlint-python"]
+match.rules = ["radarlint-python:python:S107"]
+match.file_patterns = ["**/conftest.py"]
+set.ignored = true
+
+# Ignore trufflehog in README/docs - example credentials for local development
+[[triage]]
+match.plugins = ["trufflehog"]
+match.file_patterns = ["README.md", "CLAUDE.md", "docs/**/*.md"]
+set.ignored = true

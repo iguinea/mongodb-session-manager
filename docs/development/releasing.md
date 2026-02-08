@@ -34,9 +34,9 @@ MAJOR.MINOR.PATCH
 ### Examples
 
 ```
-0.1.14 -> 0.1.15  # Bug fix
-0.1.14 -> 0.2.0   # New feature
-0.1.14 -> 1.0.0   # Breaking change
+0.5.0 -> 0.5.1  # Bug fix
+0.5.0 -> 0.2.0   # New feature
+0.5.0 -> 1.0.0   # Breaking change
 ```
 
 ### Pre-Release Versions
@@ -124,7 +124,7 @@ Before starting the release process, ensure:
 
 ### Step 1: Update Version Numbers
 
-The current version is **0.1.14**. When releasing a new version, you must update version numbers in three locations:
+The current version is **0.5.0**. When releasing a new version, you must update version numbers in three locations:
 
 #### 1. Update `src/mongodb_session_manager/__init__.py`
 
@@ -133,7 +133,7 @@ The current version is **0.1.14**. When releasing a new version, you must update
 
 # ... imports ...
 
-__version__ = "0.1.15"  # Update this line
+__version__ = "0.5.1"  # Update this line
 __author__ = "Iñaki Guinea Beristain"
 __author_email__ = "iguinea@gmail.com"
 ```
@@ -145,7 +145,7 @@ __author_email__ = "iguinea@gmail.com"
 
 [project]
 name = "mongodb-session-manager"
-version = "0.1.15"  # Update this line
+version = "0.5.1"  # Update this line
 description = "MongoDB session management for Strands Agents"
 # ...
 ```
@@ -169,7 +169,7 @@ Update the CHANGELOG to document all changes in this release.
 #### Format
 
 ```markdown
-## [0.1.15] - 2025-10-15
+## [0.5.1] - 2025-10-15
 
 ### Added
 - New feature X that does Y
@@ -230,7 +230,7 @@ manager.set_metadata({"key": "value"})  # Renamed method
 At the bottom of CHANGELOG.md, add comparison link:
 
 ```markdown
-[0.1.15]: https://github.com/iguinea/mongodb-session-manager/compare/v0.1.14...v0.1.15
+[0.5.1]: https://github.com/iguinea/mongodb-session-manager/compare/v0.5.0...v0.5.1
 ```
 
 ### Step 3: Commit Version Changes
@@ -242,7 +242,7 @@ git add pyproject.toml
 git add CHANGELOG.md
 
 # Commit with version bump message
-git commit -m "chore: bump version to 0.1.15 for release
+git commit -m "chore: bump version to 0.5.1 for release
 
 - Update version in __init__.py
 - Update version in pyproject.toml
@@ -256,14 +256,14 @@ git push origin main
 
 ```bash
 # Create annotated tag
-git tag -a v0.1.15 -m "Release version 0.1.15
+git tag -a v0.5.1 -m "Release version 0.5.1
 
 - Feature: Add agent configuration persistence
 - Fix: Resolve connection pool leak
 - Docs: Update FastAPI integration examples"
 
 # Push tag to remote
-git push origin v0.1.15
+git push origin v0.5.1
 ```
 
 **Note**: Use annotated tags (`-a`) not lightweight tags. Annotated tags include tagger information and can have a message.
@@ -280,15 +280,15 @@ uv build
 # Verify build artifacts
 ls -lh dist/
 # Should see:
-# mongodb_session_manager-0.1.15.tar.gz
-# mongodb_session_manager-0.1.15-py3-none-any.whl
+# mongodb_session_manager-0.5.1.tar.gz
+# mongodb_session_manager-0.5.1-py3-none-any.whl
 ```
 
 #### Build Verification
 
 ```bash
 # Check package contents
-tar -tzf dist/mongodb_session_manager-0.1.15.tar.gz
+tar -tzf dist/mongodb_session_manager-0.5.1.tar.gz
 
 # Should include:
 # - src/mongodb_session_manager/
@@ -307,7 +307,7 @@ python -m venv test-env
 source test-env/bin/activate
 
 # Install built package
-pip install dist/mongodb_session_manager-0.1.15-py3-none-any.whl
+pip install dist/mongodb_session_manager-0.5.1-py3-none-any.whl
 
 # Test import
 python -c "from mongodb_session_manager import __version__; print(__version__)"
@@ -368,14 +368,14 @@ password = pypi-...your-token...
 
 1. Go to https://github.com/iguinea/mongodb-session-manager/releases
 2. Click "Draft a new release"
-3. Select the tag you created (v0.1.15)
-4. Release title: `v0.1.15`
+3. Select the tag you created (v0.5.1)
+4. Release title: `v0.5.1`
 5. Description: Copy from CHANGELOG.md
 
 Example release notes:
 
 ```markdown
-# MongoDB Session Manager v0.1.15
+# MongoDB Session Manager v0.5.1
 
 ## What's New
 
@@ -395,12 +395,12 @@ Example release notes:
 ## Installation
 
 ```bash
-pip install mongodb-session-manager==0.1.15
+pip install mongodb-session-manager==0.5.1
 ```
 
 ## Full Changelog
 
-See [CHANGELOG.md](https://github.com/iguinea/mongodb-session-manager/blob/v0.1.15/CHANGELOG.md) for complete details.
+See [CHANGELOG.md](https://github.com/iguinea/mongodb-session-manager/blob/v0.5.1/CHANGELOG.md) for complete details.
 
 ## Upgrade Guide
 
@@ -413,8 +413,8 @@ pip install --upgrade mongodb-session-manager
 ```
 
 6. Attach build artifacts (optional):
-   - Upload `dist/mongodb_session_manager-0.1.15.tar.gz`
-   - Upload `dist/mongodb_session_manager-0.1.15-py3-none-any.whl`
+   - Upload `dist/mongodb_session_manager-0.5.1.tar.gz`
+   - Upload `dist/mongodb_session_manager-0.5.1-py3-none-any.whl`
 
 7. Click "Publish release"
 
@@ -424,27 +424,27 @@ pip install --upgrade mongodb-session-manager
 
 1. **`src/mongodb_session_manager/__init__.py`**
    ```python
-   __version__ = "0.1.15"
+   __version__ = "0.5.1"
    ```
 
 2. **`pyproject.toml`**
    ```toml
-   version = "0.1.15"
+   version = "0.5.1"
    ```
 
 3. **`CHANGELOG.md`** (add new section)
    ```markdown
-   ## [0.1.15] - 2025-10-15
+   ## [0.5.1] - 2025-10-15
    ```
 
 Use this command to verify all versions match:
 
 ```bash
 # Check all version references
-grep -r "0.1.14" src/mongodb_session_manager/__init__.py pyproject.toml CHANGELOG.md
+grep -r "0.5.0" src/mongodb_session_manager/__init__.py pyproject.toml CHANGELOG.md
 
 # After update, verify new version
-grep -r "0.1.15" src/mongodb_session_manager/__init__.py pyproject.toml CHANGELOG.md
+grep -r "0.5.1" src/mongodb_session_manager/__init__.py pyproject.toml CHANGELOG.md
 ```
 
 ## Changelog Management
@@ -465,7 +465,7 @@ Maintain an "Unreleased" section in CHANGELOG.md:
 
 ### At Release Time
 
-1. Replace `[Unreleased]` with version and date: `## [0.1.15] - 2025-10-15`
+1. Replace `[Unreleased]` with version and date: `## [0.5.1] - 2025-10-15`
 2. Add new `[Unreleased]` section at top for next development cycle
 3. Add comparison link at bottom
 
@@ -486,13 +486,13 @@ Use these sections in order (omit empty sections):
 
 ```bash
 # Annotated tag (RECOMMENDED)
-git tag -a v0.1.15 -m "Release v0.1.15"
+git tag -a v0.5.1 -m "Release v0.5.1"
 
 # Lightweight tag (not recommended)
-git tag v0.1.15
+git tag v0.5.1
 
 # Tag with detailed message
-git tag -a v0.1.15 -m "Release v0.1.15
+git tag -a v0.5.1 -m "Release v0.5.1
 
 Major changes:
 - Agent configuration persistence
@@ -506,7 +506,7 @@ See CHANGELOG.md for full details."
 
 ```bash
 # Push specific tag
-git push origin v0.1.15
+git push origin v0.5.1
 
 # Push all tags
 git push origin --tags
@@ -519,13 +519,13 @@ git push origin --tags
 git tag
 
 # Show tag details
-git show v0.1.15
+git show v0.5.1
 
 # Delete local tag
-git tag -d v0.1.15
+git tag -d v0.5.1
 
 # Delete remote tag
-git push origin --delete v0.1.15
+git push origin --delete v0.5.1
 ```
 
 ## Building the Package
@@ -563,8 +563,8 @@ uv build --sdist
 
 ```
 dist/
-├── mongodb_session_manager-0.1.15-py3-none-any.whl    # Wheel (binary)
-└── mongodb_session_manager-0.1.15.tar.gz              # Source distribution
+├── mongodb_session_manager-0.5.1-py3-none-any.whl    # Wheel (binary)
+└── mongodb_session_manager-0.5.1.tar.gz              # Source distribution
 ```
 
 ## Testing the Build
@@ -577,7 +577,7 @@ python -m venv /tmp/test-install
 source /tmp/test-install/bin/activate
 
 # Install from wheel
-pip install dist/mongodb_session_manager-0.1.15-py3-none-any.whl
+pip install dist/mongodb_session_manager-0.5.1-py3-none-any.whl
 
 # Run basic tests
 python -c "
@@ -587,7 +587,7 @@ from mongodb_session_manager import (
     create_mongodb_session_manager
 )
 print(f'Version: {__version__}')
-assert __version__ == '0.1.15'
+assert __version__ == '0.5.1'
 print('✓ Installation successful')
 "
 
@@ -600,10 +600,10 @@ rm -rf /tmp/test-install
 
 ```bash
 # Inspect wheel contents
-unzip -l dist/mongodb_session_manager-0.1.15-py3-none-any.whl
+unzip -l dist/mongodb_session_manager-0.5.1-py3-none-any.whl
 
 # Inspect source distribution
-tar -tzf dist/mongodb_session_manager-0.1.15.tar.gz
+tar -tzf dist/mongodb_session_manager-0.5.1.tar.gz
 
 # Verify metadata
 uv run python -m pip show mongodb-session-manager
@@ -651,7 +651,7 @@ uv run twine upload --repository testpypi dist/*
 # Test installation
 pip install --index-url https://test.pypi.org/simple/ \
     --extra-index-url https://pypi.org/simple/ \
-    mongodb-session-manager==0.1.15
+    mongodb-session-manager==0.5.1
 ```
 
 ### Upload to Production PyPI
@@ -664,7 +664,7 @@ uv run twine check dist/*
 uv run twine upload dist/*
 
 # Verify on PyPI
-# Visit: https://pypi.org/project/mongodb-session-manager/0.1.15/
+# Visit: https://pypi.org/project/mongodb-session-manager/0.5.1/
 ```
 
 ## GitHub Release
@@ -672,7 +672,7 @@ uv run twine upload dist/*
 ### Release Notes Template
 
 ```markdown
-# MongoDB Session Manager v0.1.15
+# MongoDB Session Manager v0.5.1
 
 ## Highlights
 
@@ -695,12 +695,12 @@ Brief summary of major changes (2-3 sentences)
 ## Installation
 
 ```bash
-pip install mongodb-session-manager==0.1.15
+pip install mongodb-session-manager==0.5.1
 ```
 
 Or with UV:
 ```bash
-uv add mongodb-session-manager==0.1.15
+uv add mongodb-session-manager==0.5.1
 ```
 
 ## Upgrade Instructions
@@ -724,9 +724,9 @@ None in this release.
 
 ## Full Changelog
 
-**Full Changelog**: [v0.1.14...v0.1.15](https://github.com/iguinea/mongodb-session-manager/compare/v0.1.14...v0.1.15)
+**Full Changelog**: [v0.5.0...v0.5.1](https://github.com/iguinea/mongodb-session-manager/compare/v0.5.0...v0.5.1)
 
-See [CHANGELOG.md](https://github.com/iguinea/mongodb-session-manager/blob/v0.1.15/CHANGELOG.md) for complete details.
+See [CHANGELOG.md](https://github.com/iguinea/mongodb-session-manager/blob/v0.5.1/CHANGELOG.md) for complete details.
 ```
 
 ## Post-Release Tasks
@@ -776,7 +776,7 @@ For urgent bug fixes that can't wait for the next regular release:
 
 1. **Create Hotfix Branch**
    ```bash
-   git checkout -b hotfix/0.1.15-fix main
+   git checkout -b hotfix/0.5.1-fix main
    ```
 
 2. **Make Fix**
@@ -785,7 +785,7 @@ For urgent bug fixes that can't wait for the next regular release:
    - Update CHANGELOG.md
 
 3. **Bump Patch Version**
-   - 0.1.14 → 0.1.15
+   - 0.5.0 → 0.5.1
    - Update in all three locations
 
 4. **Test Thoroughly**
@@ -796,8 +796,8 @@ For urgent bug fixes that can't wait for the next regular release:
 5. **Merge and Release**
    ```bash
    git checkout main
-   git merge --no-ff hotfix/0.1.15-fix
-   git tag -a v0.1.15 -m "Hotfix: Critical bug fix"
+   git merge --no-ff hotfix/0.5.1-fix
+   git tag -a v0.5.1 -m "Hotfix: Critical bug fix"
    git push origin main --tags
    ```
 
@@ -807,13 +807,13 @@ For urgent bug fixes that can't wait for the next regular release:
 ### Hotfix Changelog
 
 ```markdown
-## [0.1.15] - 2025-10-15
+## [0.5.1] - 2025-10-15
 
 ### Fixed
 - **CRITICAL**: Fixed connection pool exhaustion causing service outages
 - Resolved memory leak in session manager factory
 
-This is a hotfix release addressing critical issues found in v0.1.14.
+This is a hotfix release addressing critical issues found in v0.5.0.
 All users are strongly encouraged to upgrade immediately.
 ```
 
@@ -822,7 +822,7 @@ All users are strongly encouraged to upgrade immediately.
 Use this checklist for every release:
 
 ```markdown
-## Release Checklist for v0.1.15
+## Release Checklist for v0.5.1
 
 ### Pre-Release
 - [ ] All tests pass
@@ -878,10 +878,10 @@ Use this checklist for every release:
 **Solution**:
 ```bash
 # Check all files
-grep -r "0.1.14" src/mongodb_session_manager/__init__.py pyproject.toml
+grep -r "0.5.0" src/mongodb_session_manager/__init__.py pyproject.toml
 
 # Update manually and verify
-grep -r "0.1.15" src/mongodb_session_manager/__init__.py pyproject.toml
+grep -r "0.5.1" src/mongodb_session_manager/__init__.py pyproject.toml
 ```
 
 ### Build Failures
@@ -912,14 +912,14 @@ uv build
 **Solution**:
 ```bash
 # Delete remote tag
-git push origin --delete v0.1.15
+git push origin --delete v0.5.1
 
 # Delete local tag
-git tag -d v0.1.15
+git tag -d v0.5.1
 
 # Recreate tag
-git tag -a v0.1.15 -m "Release v0.1.15"
-git push origin v0.1.15
+git tag -a v0.5.1 -m "Release v0.5.1"
+git push origin v0.5.1
 ```
 
 ## Additional Resources

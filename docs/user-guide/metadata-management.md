@@ -419,7 +419,7 @@ session_manager = MongoDBSessionManager(
     session_id="audited-session",
     connection_string="mongodb://localhost:27017/",
     database_name="my_db",
-    metadataHook=metadata_audit_hook  # All operations logged
+    metadata_hook=metadata_audit_hook  # All operations logged
 )
 
 # All metadata operations will be audited
@@ -473,7 +473,7 @@ session_manager = MongoDBSessionManager(
     session_id="validated-session",
     connection_string="mongodb://localhost:27017/",
     database_name="my_db",
-    metadataHook=metadata_validation_hook
+    metadata_hook=metadata_validation_hook
 )
 
 # Validation happens automatically
@@ -535,7 +535,7 @@ session_manager = MongoDBSessionManager(
     session_id="cached-session",
     connection_string="mongodb://localhost:27017/",
     database_name="my_db",
-    metadataHook=cache_hook
+    metadata_hook=cache_hook
 )
 
 # First get - cache miss
@@ -592,7 +592,7 @@ session_manager = MongoDBSessionManager(
     session_id="combined-session",
     connection_string="mongodb://localhost:27017/",
     database_name="my_db",
-    metadataHook=combined  # Both hooks active!
+    metadata_hook=combined  # Both hooks active!
 )
 
 # Operations are both audited AND validated

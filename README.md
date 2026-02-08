@@ -1,7 +1,7 @@
 # MongoDB Session Manager
 
 [![Version](https://img.shields.io/badge/version-0.5.0-blue.svg)](https://github.com/iguinea/mongodb-session-manager)
-[![Python](https://img.shields.io/badge/python-3.13+-green.svg)](https://python.org)
+[![Python](https://img.shields.io/badge/python-3.12+-green.svg)](https://python.org)
 
 A MongoDB session manager for [Strands Agents](https://github.com/strands-agents/strands-agents-python) that provides persistent storage for agent conversations and state, with connection pooling optimized for stateless environments.
 
@@ -132,8 +132,9 @@ manager = create_mongodb_session_manager(
     connection_string="mongodb://...",
     database_name="my_db",
     collection_name="agent_sessions",  # optional, default: "agent_sessions"
-    metadataHook=my_hook,              # optional
-    feedbackHook=my_hook               # optional
+    application_name="my-app",         # optional: categorize sessions
+    metadata_hook=my_hook,             # optional
+    feedback_hook=my_hook              # optional
 )
 ```
 
@@ -221,8 +222,8 @@ def my_metadata_hook(original_func, action, session_id, **kwargs):
 session_manager = MongoDBSessionManager(
     session_id="...",
     connection_string="...",
-    metadataHook=my_metadata_hook,
-    feedbackHook=my_feedback_hook
+    metadata_hook=my_metadata_hook,
+    feedback_hook=my_feedback_hook
 )
 ```
 
@@ -246,7 +247,7 @@ if is_feedback_sns_hook_available():
 
     session_manager = MongoDBSessionManager(
         session_id="...",
-        feedbackHook=hook
+        feedback_hook=hook
     )
 ```
 
@@ -331,13 +332,69 @@ Sessions are stored as nested documents:
 
 ## Documentation
 
-For comprehensive documentation, see the `/docs/` directory:
+For comprehensive documentation, see the [`docs/`](docs/) directory:
 
 - **[Getting Started](docs/getting-started/)** - Installation, quickstart, concepts
 - **[User Guides](docs/user-guide/)** - Session management, pooling, factory, metadata, feedback, AWS, streaming
 - **[Examples](docs/examples/)** - Practical examples and patterns
 - **[API Reference](docs/api-reference/)** - Complete API documentation
 - **[Architecture](docs/architecture/)** - Design decisions, data model, performance
+- **[Development](docs/development/)** - Setup, testing, contributing, releasing
+
+## Testing
+
+The project has 253 tests organized in unit and integration suites:
+
+```
+tests/
+  conftest.py                          # Shared fixtures
+  unit/                                # 224 tests (no MongoDB required)
+    test_session_repository.py
+    test_session_manager.py
+    test_connection_pool.py
+    test_session_factory.py
+    test_hooks_feedback_sns.py
+    test_hooks_metadata_sqs.py
+    test_hooks_metadata_websocket.py
+    test_hooks_utils_sns.py
+    test_hooks_utils_sqs.py
+  integration/                         # 29 tests (require MongoDB)
+    test_repository_integration.py
+    test_manager_integration.py
+    test_factory_integration.py
+```
+
+```bash
+# Install dev dependencies
+uv sync --extra dev
+
+# Run all unit tests (no MongoDB needed)
+uv run python -m pytest tests/unit/ -v
+
+# Run all tests (requires MongoDB)
+export MONGODB_CONNECTION_STRING="mongodb://mongodb:mongodb@localhost:8550/"
+uv run python -m pytest tests/ -v
+
+# Run only integration tests
+uv run python -m pytest tests/integration/ -v
+
+# Exclude integration tests
+uv run python -m pytest tests/ -m "not integration" -v
+```
+
+## Development
+
+```bash
+# Install dependencies
+uv sync
+
+# Linting and formatting
+uv run ruff check .
+uv run ruff format .
+
+# Build package
+uv build
+```
 
 ## Examples
 
@@ -348,7 +405,13 @@ uv run python examples/example_calculator_tool.py
 uv run python examples/example_fastapi_streaming.py
 uv run python examples/example_metadata_tool.py
 uv run python examples/example_feedback_hook.py
+uv run python examples/example_agent_config.py
+uv run python examples/example_metadata_update.py
+uv run python examples/example_metadata_websocket.py
+uv run python examples/example_performance.py
 ```
+
+See `examples/README.md` for detailed descriptions of each example.
 
 ## License
 

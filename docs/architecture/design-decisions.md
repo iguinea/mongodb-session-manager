@@ -815,7 +815,7 @@ def metadata_hook(original_func, action, session_id, **kwargs):
 # Application
 manager = MongoDBSessionManager(
     session_id="session-123",
-    metadataHook=metadata_hook
+    metadata_hook=metadata_hook
 )
 ```
 
