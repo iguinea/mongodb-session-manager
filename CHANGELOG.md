@@ -12,6 +12,10 @@
 - Updated README.md version badge to 0.6.1
 - Updated CLAUDE.md version reference to 0.6.1
 
+## [2026-03-17] PR #31 - Add: guardrail auditing for redact_latest_message (v0.6.0) (@iguinea)
+
+- Add: guardrail auditing for redact_latest_message (v0.6.0)
+
 ## [0.6.0] - 2026-03-17
 
 ### Added
