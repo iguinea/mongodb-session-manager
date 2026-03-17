@@ -19,6 +19,7 @@ Comprehensive guides for using all features of the library.
 - [Factory Pattern](user-guide/factory-pattern.md) - Optimized session manager creation for stateless environments
 - [Metadata Management](user-guide/metadata-management.md) - Working with session metadata
 - [Feedback System](user-guide/feedback-system.md) - Collecting and managing user feedback
+- [Guardrail Auditing](user-guide/guardrail-auditing.md) - Bedrock Guardrail intervention recording and audit trails
 - [AWS Integrations](user-guide/aws-integrations.md) - SNS and SQS hooks for real-time notifications
 - [Async Streaming](user-guide/async-streaming.md) - Real-time streaming responses
 
@@ -69,6 +70,7 @@ Contributing to the project.
 - [Optimizing for Production](architecture/performance.md)
 - [Session Persistence](user-guide/session-management.md#session-persistence)
 - [Metadata Hooks](api-reference/hooks.md#metadata-hooks)
+- [Guardrail Auditing](user-guide/guardrail-auditing.md)
 - [AWS SNS Notifications](user-guide/aws-integrations.md#sns-feedback-notifications)
 
 ### Common Tasks
@@ -101,7 +103,7 @@ uv run python examples/example_name.py
 
 ## Version
 
-This documentation is for **MongoDB Session Manager v0.6.0**.
+This documentation is for **MongoDB Session Manager v0.6.1**.
 
 Last updated: 2026-03-17
 
