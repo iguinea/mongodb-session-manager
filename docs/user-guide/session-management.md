@@ -602,7 +602,7 @@ session_manager.redact_latest_message(redacted_message, agent)
 session_manager.redact_latest_message(redacted_message, agent, action="ANONYMIZED")
 ```
 
-Each redaction automatically records a `guardrail_event` on the message and pushes an entry to the session-level `guardrail_events[]` array for centralized auditing.
+Each redaction automatically records a `guardrail_event` on the message and pushes an entry to the session-level `guardrail_events[]` array for centralized auditing. See the [Guardrail Auditing Guide](guardrail-auditing.md) for full details on querying and analyzing these events.
 
 ## Agent State Management
 

@@ -672,6 +672,7 @@ Understanding these concepts will help you use MongoDB Session Manager effective
 ✓ **Sessions** contain conversations with unique IDs
 ✓ **Agents** have separate message histories within sessions
 ✓ **Messages** are automatically persisted with metrics
+✓ **Guardrail auditing** records content moderation events automatically
 ✓ **Metadata** provides flexible session context
 ✓ **Hooks** enable custom behavior
 ✓ **Connection pooling** improves performance

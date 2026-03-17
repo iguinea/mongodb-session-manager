@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.6.1] - 2026-03-17
+
+### Added
+- **Guardrail Auditing User Guide**: New comprehensive documentation at `docs/user-guide/guardrail-auditing.md` covering automatic recording, manual redaction, custom actions, querying events, and schema reference
+- **Documentation index**: Added guardrail auditing to docs/README.md table of contents and quick links
+
+### Changed
+- Version bump to 0.6.1 across `__init__.py`, `pyproject.toml`, `CHANGELOG.md`
+- Updated `docs/getting-started/basic-concepts.md` to mention guardrail auditing as a core feature
+- Updated README.md version badge to 0.6.1
+- Updated CLAUDE.md version reference to 0.6.1
+
 ## [2026-03-17] PR #31 - Add: guardrail auditing for redact_latest_message (v0.6.0) (@iguinea)
 
 - Add: guardrail auditing for redact_latest_message (v0.6.0)
