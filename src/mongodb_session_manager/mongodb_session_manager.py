@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import warnings
+from datetime import UTC, datetime
 from typing import Any, Dict, List, Optional, Callable
 
 from pymongo import MongoClient
@@ -17,6 +18,8 @@ from strands.types.tools import JSONSchema
 from .mongodb_session_repository import MongoDBSessionRepository
 
 logger = logging.getLogger(__name__)
+
+GUARDRAIL_ACTION_BLOCKED = "BLOCKED"
 
 
 class MongoDBSessionManager(RepositorySessionManager):
@@ -184,7 +187,7 @@ class MongoDBSessionManager(RepositorySessionManager):
             session_repository=self.session_repository,
             **parent_kwargs,
         )
-        
+
         # Apply metadata hook if provided
         if metadata_hook:
             self._apply_metadata_hook(metadata_hook)
@@ -194,10 +197,10 @@ class MongoDBSessionManager(RepositorySessionManager):
             self._apply_feedback_hook(feedback_hook)
 
         logger.info(f"Initialized Itzulbira session manager for session: {session_id}")
-    
+
     def _apply_metadata_hook(self, hook: Callable) -> None:
         """Apply the metadata hook as a decorator to metadata methods.
-        
+
         The hook will be called with:
         - original_func: The original method being wrapped
         - action: "update", "get", or "delete"
@@ -206,20 +209,26 @@ class MongoDBSessionManager(RepositorySessionManager):
         """
         # Wrap update_metadata
         original_update = self.update_metadata
+
         def wrapped_update(metadata: Dict[str, Any]) -> None:
             return hook(original_update, "update", self.session_id, metadata=metadata)
+
         self.update_metadata = wrapped_update
-        
+
         # Wrap get_metadata
         original_get = self.get_metadata
+
         def wrapped_get() -> Dict[str, Any]:
             return hook(original_get, "get", self.session_id)
+
         self.get_metadata = wrapped_get
-        
+
         # Wrap delete_metadata
         original_delete = self.delete_metadata
+
         def wrapped_delete(metadata_keys: List[str]) -> None:
             return hook(original_delete, "delete", self.session_id, keys=metadata_keys)
+
         self.delete_metadata = wrapped_delete
 
     def append_message(self, message: Message, agent: Agent) -> None:
@@ -229,8 +238,38 @@ class MongoDBSessionManager(RepositorySessionManager):
     def redact_latest_message(
         self, redact_message: Message, agent: Agent, **kwargs: Any
     ) -> None:
-        """Redact the latest message for an agent."""
+        """Redact the latest message and record guardrail event."""
         super().redact_latest_message(redact_message, agent, **kwargs)
+
+        action = kwargs.get("action", GUARDRAIL_ACTION_BLOCKED)
+        last_message_id = self._get_last_message_id(agent)
+        if last_message_id is not None:
+            self._record_guardrail_event(agent, last_message_id, action=action)
+
+    def _record_guardrail_event(
+        self, agent: Agent, message_id: int, action: str = GUARDRAIL_ACTION_BLOCKED
+    ) -> None:
+        """Record guardrail intervention at message and session level."""
+        now = datetime.now(UTC)
+        guardrail_event = {"action": action, "timestamp": now}
+        session_event = {
+            "message_id": message_id,
+            "agent_id": agent.agent_id,
+            **guardrail_event,
+        }
+
+        self.session_repository.collection.update_one(
+            {
+                "_id": self.session_id,
+                f"agents.{agent.agent_id}.messages.message_id": message_id,
+            },
+            {
+                "$set": {
+                    f"agents.{agent.agent_id}.messages.$.guardrail_event": guardrail_event
+                },
+                "$push": {"guardrail_events": session_event},
+            },
+        )
 
     def sync_agent(self, agent: Agent, **kwargs: Any) -> None:
         """Sync agent data and capture model/system_prompt.
@@ -252,8 +291,12 @@ class MongoDBSessionManager(RepositorySessionManager):
                 "inputTokens": accumulated_usage.get("inputTokens", 0),
                 "outputTokens": accumulated_usage.get("outputTokens", 0),
                 "totalTokens": accumulated_usage.get("totalTokens", 0),
-                "cacheReadInputTokens": accumulated_usage.get("cacheReadInputTokens", 0),
-                "cacheWriteInputTokens": accumulated_usage.get("cacheWriteInputTokens", 0),
+                "cacheReadInputTokens": accumulated_usage.get(
+                    "cacheReadInputTokens", 0
+                ),
+                "cacheWriteInputTokens": accumulated_usage.get(
+                    "cacheWriteInputTokens", 0
+                ),
             }
             metrics_data = {
                 "latencyMs": accumulated_metrics.get("latencyMs", 0),
@@ -265,7 +308,9 @@ class MongoDBSessionManager(RepositorySessionManager):
                 "average_cycle_time": metrics_summary.get("average_cycle_time", 0.0),
             }
             tool_usage = self._extract_tool_usage(metrics_summary.get("tool_usage", {}))
-            self._update_last_message_metrics(agent, usage_data, metrics_data, cycle_data, tool_usage)
+            self._update_last_message_metrics(
+                agent, usage_data, metrics_data, cycle_data, tool_usage
+            )
 
         self._capture_agent_config(agent)
 
@@ -284,23 +329,29 @@ class MongoDBSessionManager(RepositorySessionManager):
             }
         return tool_usage
 
-    def _update_last_message_metrics(
-        self, agent: Agent, usage_data: Dict, metrics_data: Dict, cycle_data: Dict, tool_usage: Dict
-    ) -> None:
-        """Update the last message in a session with event loop metrics."""
+    def _get_last_message_id(self, agent: Agent) -> Optional[int]:
+        """Get the message_id of the last message for an agent."""
         doc = self.session_repository.collection.find_one(
             {"_id": self.session_id},
             {f"agents.{agent.agent_id}.messages": {"$slice": -1}},
         )
-
         if not (doc and "agents" in doc and agent.agent_id in doc["agents"]):
-            return
-
+            return None
         messages = doc["agents"][agent.agent_id].get("messages", [])
-        if not messages:
-            return
+        return messages[-1]["message_id"] if messages else None
 
-        last_message_id = messages[-1]["message_id"]
+    def _update_last_message_metrics(
+        self,
+        agent: Agent,
+        usage_data: Dict,
+        metrics_data: Dict,
+        cycle_data: Dict,
+        tool_usage: Dict,
+    ) -> None:
+        """Update the last message in a session with event loop metrics."""
+        last_message_id = self._get_last_message_id(agent)
+        if last_message_id is None:
+            return
         prefix = f"agents.{agent.agent_id}.messages.$.event_loop_metrics"
         update_data = {
             f"{prefix}.accumulated_metrics": metrics_data,
@@ -323,14 +374,18 @@ class MongoDBSessionManager(RepositorySessionManager):
         if model_id:
             agent_config_update[f"agents.{agent.agent_id}.agent_data.model"] = model_id
         if hasattr(agent, "system_prompt") and agent.system_prompt:
-            agent_config_update[f"agents.{agent.agent_id}.agent_data.system_prompt"] = agent.system_prompt
+            agent_config_update[f"agents.{agent.agent_id}.agent_data.system_prompt"] = (
+                agent.system_prompt
+            )
 
         if agent_config_update:
             self.session_repository.collection.update_one(
                 {"_id": self.session_id},
                 {"$set": agent_config_update},
             )
-            logger.debug(f"Captured agent configuration for {agent.agent_id}: model={model_id or 'N/A'}")
+            logger.debug(
+                f"Captured agent configuration for {agent.agent_id}: model={model_id or 'N/A'}"
+            )
 
     def _extract_model_id(self, agent: Agent) -> Optional[str]:
         """Extract model identifier string from agent."""
@@ -373,7 +428,10 @@ class MongoDBSessionManager(RepositorySessionManager):
             try:
                 return json.loads(value), None
             except json.JSONDecodeError:
-                return None, f"Error: {param_name} must be a valid JSON, got: {value[:100]}..."
+                return (
+                    None,
+                    f"Error: {param_name} must be a valid JSON, got: {value[:100]}...",
+                )
         return value, None
 
     def _handle_metadata_get(self, keys: Optional[List[str]] = None) -> str:
@@ -456,7 +514,9 @@ class MongoDBSessionManager(RepositorySessionManager):
             try:
                 action = action.lower()
 
-                metadata, error = session_manager._parse_json_param(metadata, "metadata")
+                metadata, error = session_manager._parse_json_param(
+                    metadata, "metadata"
+                )
                 if error:
                     return error
                 keys, error = session_manager._parse_json_param(keys, "keys")
@@ -480,7 +540,7 @@ class MongoDBSessionManager(RepositorySessionManager):
                 return f"Error managing metadata: {str(e)}"
 
         return manage_metadata
-    
+
     def _apply_feedback_hook(self, hook: Callable) -> None:
         """Apply the feedback hook as a decorator to feedback methods.
 
@@ -492,15 +552,22 @@ class MongoDBSessionManager(RepositorySessionManager):
         """
         # Wrap add_feedback
         original_add = self.add_feedback
+
         def wrapped_add(feedback: Dict[str, Any]) -> None:
-            return hook(original_add, "add", self.session_id,
-                       session_manager=self, feedback=feedback)
+            return hook(
+                original_add,
+                "add",
+                self.session_id,
+                session_manager=self,
+                feedback=feedback,
+            )
+
         self.add_feedback = wrapped_add
-    
+
     def add_feedback(self, feedback: Dict[str, Any]) -> None:
         """Add feedback to the session."""
         self.session_repository.add_feedback(self.session_id, feedback)
-    
+
     def get_feedbacks(self) -> List[Dict[str, Any]]:
         """Get all feedbacks for the session."""
         return self.session_repository.get_feedbacks(self.session_id)
@@ -550,8 +617,7 @@ class MongoDBSessionManager(RepositorySessionManager):
         """
         try:
             doc = self.session_repository.collection.find_one(
-                {"_id": self.session_id},
-                {f"agents.{agent_id}.agent_data": 1}
+                {"_id": self.session_id}, {f"agents.{agent_id}.agent_data": 1}
             )
 
             if not doc or "agents" not in doc or agent_id not in doc["agents"]:
@@ -563,7 +629,7 @@ class MongoDBSessionManager(RepositorySessionManager):
             return {
                 "agent_id": agent_id,
                 "model": agent_data.get("model"),
-                "system_prompt": agent_data.get("system_prompt")
+                "system_prompt": agent_data.get("system_prompt"),
             }
         except Exception as e:
             logger.error(f"Failed to get agent config for {agent_id}: {e}")
@@ -573,7 +639,7 @@ class MongoDBSessionManager(RepositorySessionManager):
         self,
         agent_id: str,
         model: Optional[str] = None,
-        system_prompt: Optional[str] = None
+        system_prompt: Optional[str] = None,
     ) -> None:
         """Update model or system_prompt for a specific agent.
 
@@ -615,14 +681,15 @@ class MongoDBSessionManager(RepositorySessionManager):
 
         try:
             result = self.session_repository.collection.update_one(
-                {"_id": self.session_id},
-                {"$set": update_fields}
+                {"_id": self.session_id}, {"$set": update_fields}
             )
 
             if result.matched_count == 0:
                 raise ValueError(f"Session {self.session_id} not found")
 
-            logger.info(f"Updated agent config for {agent_id}: {list(update_fields.keys())}")
+            logger.info(
+                f"Updated agent config for {agent_id}: {list(update_fields.keys())}"
+            )
         except Exception as e:
             logger.error(f"Failed to update agent config for {agent_id}: {e}")
             raise
@@ -642,8 +709,7 @@ class MongoDBSessionManager(RepositorySessionManager):
         """
         try:
             doc = self.session_repository.collection.find_one(
-                {"_id": self.session_id},
-                {"agents": 1}
+                {"_id": self.session_id}, {"agents": 1}
             )
 
             if not doc or "agents" not in doc:
@@ -653,11 +719,13 @@ class MongoDBSessionManager(RepositorySessionManager):
             agents_list = []
             for agent_id, agent_obj in doc["agents"].items():
                 agent_data = agent_obj.get("agent_data", {})
-                agents_list.append({
-                    "agent_id": agent_id,
-                    "model": agent_data.get("model"),
-                    "system_prompt": agent_data.get("system_prompt")
-                })
+                agents_list.append(
+                    {
+                        "agent_id": agent_id,
+                        "model": agent_data.get("model"),
+                        "system_prompt": agent_data.get("system_prompt"),
+                    }
+                )
 
             return agents_list
         except Exception as e:
@@ -680,8 +748,7 @@ class MongoDBSessionManager(RepositorySessionManager):
         """
         try:
             doc = self.session_repository.collection.find_one(
-                {"_id": self.session_id},
-                {f"agents.{agent_id}.messages": 1}
+                {"_id": self.session_id}, {f"agents.{agent_id}.messages": 1}
             )
             if doc and "agents" in doc and agent_id in doc["agents"]:
                 return len(doc["agents"][agent_id].get("messages", []))

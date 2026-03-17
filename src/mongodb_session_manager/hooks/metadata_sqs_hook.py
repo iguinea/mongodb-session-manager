@@ -113,9 +113,7 @@ from typing import Dict, Any, List
 try:
     from .utils_sqs import send_message
 except ImportError:
-    logging.warning(
-        "utils_sqs not available. Please ensure boto3 is installed."
-    )
+    logging.warning("utils_sqs not available. Please ensure boto3 is installed.")
     send_message = None
 
 logger = logging.getLogger(__name__)

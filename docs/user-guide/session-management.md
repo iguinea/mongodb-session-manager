@@ -79,7 +79,8 @@ graph TD
         }
     },
     "metadata": {"priority": "high"},
-    "feedbacks": []
+    "feedbacks": [],
+    "guardrail_events": []
 }
 ```
 
@@ -583,7 +584,7 @@ Each message contains:
 
 ### Redacting Messages
 
-Sometimes you need to redact or modify messages:
+Sometimes you need to redact or modify messages. When Bedrock Guardrails blocks content, `redact_latest_message` is called automatically. You can also call it manually:
 
 ```python
 from strands.types.content import Message
@@ -594,9 +595,14 @@ redacted_message = Message(
     content="[REDACTED FOR PRIVACY]"
 )
 
-# Redact the latest message
+# Redact the latest message (records guardrail event with action="BLOCKED")
 session_manager.redact_latest_message(redacted_message, agent)
+
+# Redact with custom action
+session_manager.redact_latest_message(redacted_message, agent, action="ANONYMIZED")
 ```
+
+Each redaction automatically records a `guardrail_event` on the message and pushes an entry to the session-level `guardrail_events[]` array for centralized auditing.
 
 ## Agent State Management
 

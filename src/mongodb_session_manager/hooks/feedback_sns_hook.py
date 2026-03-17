@@ -124,9 +124,7 @@ from datetime import datetime, timezone
 try:
     from .utils_sns import publish_message
 except ImportError:
-    logging.warning(
-        "utils_sns not available. Please ensure boto3 is installed."
-    )
+    logging.warning("utils_sns not available. Please ensure boto3 is installed.")
     publish_message = None
 
 logger = logging.getLogger(__name__)
@@ -226,7 +224,9 @@ class FeedbackSNSHook:
             logger.error(f"Error applying template: {e}")
             return template
 
-    async def on_feedback_add(self, session_id: str, feedback: Dict[str, Any], **kwargs) -> None:
+    async def on_feedback_add(
+        self, session_id: str, feedback: Dict[str, Any], **kwargs
+    ) -> None:
         """
         Hook called when feedback is added
 
@@ -274,8 +274,12 @@ class FeedbackSNSHook:
             subject = f"{subject_prefix_text}{base_subject}"
 
             # Retrieve session viewer password from session_manager
-            session_manager = kwargs.get('session_manager')
-            session_viewer_password = session_manager.get_session_viewer_password() if session_manager else "N/A"
+            session_manager = kwargs.get("session_manager")
+            session_viewer_password = (
+                session_manager.get_session_viewer_password()
+                if session_manager
+                else "N/A"
+            )
 
             # Format message with prefix
             base_message = f"Password: {session_viewer_password}\n\nSession: {session_id}\n\n{comment}"
@@ -401,8 +405,11 @@ def create_feedback_hook(
                         loop = asyncio.get_running_loop()
                         # We're in an async context, create task
                         loop.create_task(
-                            sns_hook.on_feedback_add(session_id, kwargs["feedback"],
-                                                    session_manager=kwargs.get("session_manager"))
+                            sns_hook.on_feedback_add(
+                                session_id,
+                                kwargs["feedback"],
+                                session_manager=kwargs.get("session_manager"),
+                            )
                         )
                     except RuntimeError:
                         # No running loop, run in a new thread to avoid blocking
@@ -410,8 +417,11 @@ def create_feedback_hook(
 
                         def run_hook():
                             asyncio.run(
-                                sns_hook.on_feedback_add(session_id, kwargs["feedback"],
-                                                        session_manager=kwargs.get("session_manager"))
+                                sns_hook.on_feedback_add(
+                                    session_id,
+                                    kwargs["feedback"],
+                                    session_manager=kwargs.get("session_manager"),
+                                )
                             )
 
                         thread = threading.Thread(target=run_hook, daemon=True)

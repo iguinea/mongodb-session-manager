@@ -90,7 +90,9 @@ class MongoDBSessionManagerFactory:
         coll_name = collection_name or self.collection_name
         meta_fields = metadata_fields or self.metadata_fields
         # Use provided application_name or fall back to factory default
-        app_name = application_name if application_name is not None else self.application_name
+        app_name = (
+            application_name if application_name is not None else self.application_name
+        )
 
         # Create session manager with shared client
         manager = MongoDBSessionManager(

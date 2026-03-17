@@ -706,6 +706,114 @@ class TestCacheHitRateCalculation:
         assert rate == 0
 
 
+# ---------------------------------------------------------------------------
+# redact_latest_message / guardrail events
+# ---------------------------------------------------------------------------
+
+
+class TestRedactLatestMessage:
+    def test_redact_latest_message_calls_super(self, manager, mock_repo):
+        agent = MagicMock()
+        agent.agent_id = "test-agent"
+        mock_repo.collection.find_one.return_value = {
+            "agents": {"test-agent": {"messages": [{"message_id": 1}]}}
+        }
+        redact_msg = {"role": "user", "content": [{"text": "***"}]}
+        with patch.object(
+            MongoDBSessionManager.__bases__[0], "redact_latest_message"
+        ) as mock_super:
+            manager.redact_latest_message(redact_msg, agent)
+            mock_super.assert_called_once_with(redact_msg, agent)
+
+    def test_redact_latest_message_records_guardrail_event_on_message(
+        self, manager, mock_repo
+    ):
+        agent = MagicMock()
+        agent.agent_id = "test-agent"
+        mock_repo.collection.find_one.return_value = {
+            "agents": {"test-agent": {"messages": [{"message_id": 5}]}}
+        }
+        with patch.object(MongoDBSessionManager.__bases__[0], "redact_latest_message"):
+            manager.redact_latest_message(
+                {"role": "user", "content": [{"text": "***"}]}, agent
+            )
+        # Find the update_one call that sets guardrail_event on the message
+        calls = mock_repo.collection.update_one.call_args_list
+        guardrail_msg_call = None
+        for c in calls:
+            set_data = c[0][1].get("$set", {})
+            if any("guardrail_event" in k for k in set_data.keys()):
+                guardrail_msg_call = c
+                break
+        assert guardrail_msg_call is not None
+        set_data = guardrail_msg_call[0][1]["$set"]
+        key = "agents.test-agent.messages.$.guardrail_event"
+        assert set_data[key]["action"] == "BLOCKED"
+        assert "timestamp" in set_data[key]
+
+    def test_redact_latest_message_records_guardrail_event_on_session(
+        self, manager, mock_repo
+    ):
+        agent = MagicMock()
+        agent.agent_id = "test-agent"
+        mock_repo.collection.find_one.return_value = {
+            "agents": {"test-agent": {"messages": [{"message_id": 5}]}}
+        }
+        with patch.object(MongoDBSessionManager.__bases__[0], "redact_latest_message"):
+            manager.redact_latest_message(
+                {"role": "user", "content": [{"text": "***"}]}, agent
+            )
+        # The $push to guardrail_events is in the same update_one as $set
+        calls = mock_repo.collection.update_one.call_args_list
+        push_call = None
+        for c in calls:
+            push_data = c[0][1].get("$push", {})
+            if "guardrail_events" in push_data:
+                push_call = c
+                break
+        assert push_call is not None
+        event = push_call[0][1]["$push"]["guardrail_events"]
+        assert event["message_id"] == 5
+        assert event["agent_id"] == "test-agent"
+        assert event["action"] == "BLOCKED"
+        # Verify it's the same call that also sets guardrail_event on the message
+        assert "$set" in push_call[0][1]
+
+    def test_redact_latest_message_custom_action(self, manager, mock_repo):
+        agent = MagicMock()
+        agent.agent_id = "test-agent"
+        mock_repo.collection.find_one.return_value = {
+            "agents": {"test-agent": {"messages": [{"message_id": 1}]}}
+        }
+        with patch.object(MongoDBSessionManager.__bases__[0], "redact_latest_message"):
+            manager.redact_latest_message(
+                {"role": "user", "content": [{"text": "***"}]},
+                agent,
+                action="ANONYMIZED",
+            )
+        calls = mock_repo.collection.update_one.call_args_list
+        # Check the message-level guardrail_event has custom action
+        for c in calls:
+            set_data = c[0][1].get("$set", {})
+            for k, v in set_data.items():
+                if "guardrail_event" in k:
+                    assert v["action"] == "ANONYMIZED"
+                    return
+        pytest.fail("guardrail_event with custom action not found")
+
+    def test_redact_latest_message_no_messages_does_not_crash(self, manager, mock_repo):
+        agent = MagicMock()
+        agent.agent_id = "test-agent"
+        mock_repo.collection.find_one.return_value = {
+            "agents": {"test-agent": {"messages": []}}
+        }
+        with patch.object(MongoDBSessionManager.__bases__[0], "redact_latest_message"):
+            # Should not raise
+            manager.redact_latest_message(
+                {"role": "user", "content": [{"text": "***"}]}, agent
+            )
+
+
 class TestToolUsageProcessing:
     """Migrated from test_cache_metrics.py: TestToolUsageProcessing."""
 

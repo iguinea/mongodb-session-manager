@@ -39,11 +39,14 @@ MONGO_CONNECTION = os.getenv(
 )
 DATABASE_NAME = os.getenv("DATABASE_NAME", "metadata_hook_demo")
 
+
 # Example 1: Audit Hook - Logs all metadata operations
-def metadata_audit_hook(original_func: Callable, action: str, session_id: str, **kwargs):
+def metadata_audit_hook(
+    original_func: Callable, action: str, session_id: str, **kwargs
+):
     """
     Hook that audits all metadata operations.
-    
+
     Args:
         original_func: The original function (update_metadata, get_metadata, or delete_metadata)
         action: The action being performed ("update", "get", "delete")
@@ -53,12 +56,14 @@ def metadata_audit_hook(original_func: Callable, action: str, session_id: str, *
     # Log before operation
     logger.info(f"[METADATA AUDIT] Starting {action} on session {session_id}")
     if action == "update" and "metadata" in kwargs:
-        logger.info(f"[METADATA AUDIT] Update data: {json.dumps(kwargs['metadata'], default=str)}")
+        logger.info(
+            f"[METADATA AUDIT] Update data: {json.dumps(kwargs['metadata'], default=str)}"
+        )
     elif action == "delete" and "keys" in kwargs:
         logger.info(f"[METADATA AUDIT] Delete keys: {kwargs['keys']}")
-    
+
     start_time = time.time()
-    
+
     try:
         # Execute original function
         if action == "update":
@@ -67,16 +72,18 @@ def metadata_audit_hook(original_func: Callable, action: str, session_id: str, *
             result = original_func(kwargs["keys"])
         else:  # get
             result = original_func()
-        
+
         # Log after operation
         elapsed_time = time.time() - start_time
         logger.info(f"[METADATA AUDIT] {action} completed in {elapsed_time:.3f}s")
-        
+
         if action == "get" and result:
-            logger.info(f"[METADATA AUDIT] Retrieved {len(result.get('metadata', {}))} metadata fields")
-        
+            logger.info(
+                f"[METADATA AUDIT] Retrieved {len(result.get('metadata', {}))} metadata fields"
+            )
+
         return result
-        
+
     except Exception as e:
         logger.error(f"[METADATA AUDIT] Error in {action}: {str(e)}")
         raise
@@ -84,7 +91,10 @@ def metadata_audit_hook(original_func: Callable, action: str, session_id: str, *
 
 # Example 2: Validation Hook - Validates metadata before operations
 PROTECTED_FIELDS = {"_id", "session_id", "created_at", "internal_status"}
-REQUIRED_FIELDS = {"last_updated": lambda: datetime.now().isoformat(), "updated_by": lambda: "system"}
+REQUIRED_FIELDS = {
+    "last_updated": lambda: datetime.now().isoformat(),
+    "updated_by": lambda: "system",
+}
 MAX_VALUE_LENGTH = 1000
 
 
@@ -106,10 +116,14 @@ def _validate_value_lengths(metadata):
     """Validate that string values don't exceed max length."""
     for key, value in metadata.items():
         if isinstance(value, str) and len(value) > MAX_VALUE_LENGTH:
-            raise ValueError(f"Value for '{key}' exceeds maximum length of {MAX_VALUE_LENGTH}")
+            raise ValueError(
+                f"Value for '{key}' exceeds maximum length of {MAX_VALUE_LENGTH}"
+            )
 
 
-def metadata_validation_hook(original_func: Callable, action: str, session_id: str, **kwargs):
+def metadata_validation_hook(
+    original_func: Callable, action: str, session_id: str, **kwargs
+):
     """
     Hook that validates metadata operations before executing them.
     """
@@ -133,11 +147,11 @@ def metadata_validation_hook(original_func: Callable, action: str, session_id: s
 # Example 3: Cache Hook - Implements simple caching for metadata reads
 class MetadataCacheHook:
     """Hook that implements caching for metadata operations."""
-    
+
     def __init__(self, ttl_seconds: int = 60):
         self.cache = {}
         self.ttl_seconds = ttl_seconds
-    
+
     def __call__(self, original_func: Callable, action: str, session_id: str, **kwargs):
         if action == "get":
             # Check cache
@@ -147,20 +161,20 @@ class MetadataCacheHook:
                 if time.time() - timestamp < self.ttl_seconds:
                     logger.info(f"[CACHE] Hit for session {session_id}")
                     return cached_data
-            
+
             # Cache miss - fetch and cache
             logger.info(f"[CACHE] Miss for session {session_id}")
             result = original_func()
             self.cache[cache_key] = (result, time.time())
             return result
-        
+
         elif action in ["update", "delete"]:
             # Invalidate cache on write operations
             cache_key = f"{session_id}:metadata"
             if cache_key in self.cache:
                 del self.cache[cache_key]
                 logger.info(f"[CACHE] Invalidated for session {session_id}")
-            
+
             # Execute operation
             if action == "update":
                 return original_func(kwargs["metadata"])
@@ -171,6 +185,7 @@ class MetadataCacheHook:
 # Example 4: Combined Hook - Chains multiple hooks together
 def create_combined_hook(*hooks):
     """Creates a hook that chains multiple hooks together."""
+
     def combined_hook(original_func: Callable, action: str, session_id: str, **kwargs):
         # Apply hooks in reverse order to maintain proper chaining
         def apply_hook(func, hook):
@@ -182,13 +197,14 @@ def create_combined_hook(*hooks):
                 else:
                     # This is for hook calls
                     return hook(func, action, session_id, **kw)
+
             return wrapped_func
-        
+
         # Build the chain
         current_func = original_func
         for hook in reversed(hooks):
             current_func = apply_hook(current_func, hook)
-        
+
         # Execute with the kwargs
         if action == "update":
             return current_func(kwargs["metadata"])
@@ -196,153 +212,144 @@ def create_combined_hook(*hooks):
             return current_func(kwargs["keys"])
         else:  # get
             return current_func()
-    
+
     return combined_hook
 
 
 def print_section(title: str):
     """Helper to print formatted section headers."""
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f" {title}")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
 
 async def main():
     print_section("MongoDB Session Manager - Metadata Hook Examples")
-    
+
     # Example 1: Using audit hook
     print_section("Example 1: Audit Hook")
-    
+
     session_manager = MongoDBSessionManager(
         session_id="audit-demo-session",
         connection_string=MONGO_CONNECTION,
         database_name=DATABASE_NAME,
         collection_name="audit_sessions",
-        metadataHook=metadata_audit_hook
+        metadataHook=metadata_audit_hook,
     )
-    
+
     # All operations will be audited
-    session_manager.update_metadata({
-        "user_id": "user-123",
-        "status": "active",
-        "preferences": {"theme": "dark"}
-    })
-    
+    session_manager.update_metadata(
+        {"user_id": "user-123", "status": "active", "preferences": {"theme": "dark"}}
+    )
+
     metadata = session_manager.get_metadata()
     print(f"Retrieved metadata: {json.dumps(metadata.get('metadata', {}), indent=2)}")
-    
+
     session_manager.delete_metadata(["preferences"])
     session_manager.close()
-    
+
     # Example 2: Using validation hook
     print_section("Example 2: Validation Hook")
-    
+
     session_manager = MongoDBSessionManager(
         session_id="validation-demo-session",
         connection_string=MONGO_CONNECTION,
         database_name=DATABASE_NAME,
         collection_name="validated_sessions",
-        metadataHook=metadata_validation_hook
+        metadataHook=metadata_validation_hook,
     )
-    
+
     try:
         # This will auto-add required fields
-        session_manager.update_metadata({
-            "user_name": "Alice",
-            "department": "Engineering"
-        })
-        
+        session_manager.update_metadata(
+            {"user_name": "Alice", "department": "Engineering"}
+        )
+
         # This will fail - protected field
-        session_manager.update_metadata({
-            "_id": "cannot-change-this"
-        })
+        session_manager.update_metadata({"_id": "cannot-change-this"})
     except ValueError as e:
         print(f"Validation error (expected): {e}")
-    
+
     session_manager.close()
-    
+
     # Example 3: Using cache hook
     print_section("Example 3: Cache Hook")
-    
+
     cache_hook = MetadataCacheHook(ttl_seconds=5)
     session_manager = MongoDBSessionManager(
         session_id="cache-demo-session",
         connection_string=MONGO_CONNECTION,
         database_name=DATABASE_NAME,
         collection_name="cached_sessions",
-        metadataHook=cache_hook
+        metadataHook=cache_hook,
     )
-    
+
     # First call - cache miss
     session_manager.update_metadata({"data": "initial"})
     session_manager.get_metadata()  # Cache miss
-    
+
     # Second call - cache hit
     session_manager.get_metadata()  # Cache hit
-    
+
     # Update invalidates cache
     session_manager.update_metadata({"data": "updated"})
     session_manager.get_metadata()  # Cache miss
-    
+
     session_manager.close()
-    
+
     # Example 4: Combined hooks
     print_section("Example 4: Combined Hooks")
-    
+
     # Combine audit and validation
-    combined_hook = create_combined_hook(
-        metadata_audit_hook,
-        metadata_validation_hook
-    )
-    
+    combined_hook = create_combined_hook(metadata_audit_hook, metadata_validation_hook)
+
     session_manager = MongoDBSessionManager(
         session_id="combined-demo-session",
         connection_string=MONGO_CONNECTION,
         database_name=DATABASE_NAME,
         collection_name="combined_sessions",
-        metadataHook=combined_hook
+        metadataHook=combined_hook,
     )
-    
+
     # Operations will be both audited and validated
-    session_manager.update_metadata({
-        "project": "metadata-hooks",
-        "version": "1.0.0"
-    })
-    
+    session_manager.update_metadata({"project": "metadata-hooks", "version": "1.0.0"})
+
     # Show that validation added required fields
     metadata = session_manager.get_metadata()
-    print(f"Combined hook result: {json.dumps(metadata.get('metadata', {}), indent=2, default=str)}")
-    
+    print(
+        f"Combined hook result: {json.dumps(metadata.get('metadata', {}), indent=2, default=str)}"
+    )
+
     session_manager.close()
-    
+
     # Example 5: Using hook with agent
     print_section("Example 5: Hook with Agent Integration")
-    
+
     session_manager = MongoDBSessionManager(
         session_id="agent-hook-demo",
         connection_string=MONGO_CONNECTION,
         database_name=DATABASE_NAME,
         collection_name="agent_sessions",
-        metadataHook=metadata_audit_hook
+        metadataHook=metadata_audit_hook,
     )
-    
+
     # Create agent
     agent = Agent(
         model="eu.anthropic.claude-sonnet-4-20250514-v1:0",
         agent_id="hooked-agent",
         session_manager=session_manager,
         tools=[session_manager.get_metadata_tool()],
-        system_prompt="You are a helpful assistant. Use the metadata tool when asked."
+        system_prompt="You are a helpful assistant. Use the metadata tool when asked.",
     )
-    
+
     # Agent operations will trigger the hook
     response = await agent.invoke_async(
         "Please set metadata field 'conversation_topic' to 'metadata hooks demo'"
     )
     print(f"Agent response: {response}")
-    
+
     session_manager.close()
-    
+
     print_section("Summary")
     print("Demonstrated metadata hooks:")
     print("✓ Audit Hook - Logs all operations")

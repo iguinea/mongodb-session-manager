@@ -9,13 +9,16 @@ from pydantic import BaseModel, Field
 # Search Models
 # ============================================================================
 
+
 class SessionPreview(BaseModel):
     """Preview of a session in search results."""
 
     session_id: str = Field(..., description="Unique session identifier")
     created_at: datetime = Field(..., description="Session creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp")
-    metadata: Dict[str, Any] = Field(default_factory=dict, description="Session metadata")
+    metadata: Dict[str, Any] = Field(
+        default_factory=dict, description="Session metadata"
+    )
     agents_count: int = Field(..., description="Number of agents in session")
     messages_count: int = Field(..., description="Total number of messages")
     feedbacks_count: int = Field(..., description="Number of feedbacks")
@@ -35,6 +38,7 @@ class SessionSearchResponse(BaseModel):
 # Session Detail Models
 # ============================================================================
 
+
 class MessageContent(BaseModel):
     """Content of a message."""
 
@@ -52,7 +56,9 @@ class TimelineMessage(BaseModel):
     role: Literal["user", "assistant"] = Field(..., description="Message role")
     content: List[Dict[str, Any]] = Field(..., description="Message content")
     message_id: int = Field(..., description="Message ID within agent conversation")
-    metrics: Optional[Dict[str, Any]] = Field(None, description="Event loop metrics if available")
+    metrics: Optional[Dict[str, Any]] = Field(
+        None, description="Event loop metrics if available"
+    )
 
 
 class TimelineFeedback(BaseModel):
@@ -75,7 +81,9 @@ class AgentSummary(BaseModel):
     model: Optional[str] = Field(None, description="Model used by agent")
     system_prompt: Optional[str] = Field(None, description="System prompt")
     created_at: Optional[datetime] = Field(None, description="Agent creation timestamp")
-    updated_at: Optional[datetime] = Field(None, description="Agent last update timestamp")
+    updated_at: Optional[datetime] = Field(
+        None, description="Agent last update timestamp"
+    )
 
 
 class SessionDetail(BaseModel):
@@ -84,14 +92,21 @@ class SessionDetail(BaseModel):
     session_id: str = Field(..., description="Unique session identifier")
     created_at: datetime = Field(..., description="Session creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp")
-    metadata: Dict[str, Any] = Field(default_factory=dict, description="Session metadata")
-    timeline: List[TimelineItem] = Field(..., description="Unified chronological timeline")
-    agents_summary: Dict[str, AgentSummary] = Field(..., description="Summary of all agents")
+    metadata: Dict[str, Any] = Field(
+        default_factory=dict, description="Session metadata"
+    )
+    timeline: List[TimelineItem] = Field(
+        ..., description="Unified chronological timeline"
+    )
+    agents_summary: Dict[str, AgentSummary] = Field(
+        ..., description="Summary of all agents"
+    )
 
 
 # ============================================================================
 # Metadata Fields Models
 # ============================================================================
+
 
 class FieldInfo(BaseModel):
     """Information about an indexed field.
@@ -108,14 +123,13 @@ class FieldInfo(BaseModel):
           "values": ["active", "completed", "failed"]
         }
     """
+
     field: str = Field(..., description="Field name")
     type: Literal["string", "date", "number", "boolean", "enum"] = Field(
-        ...,
-        description="Detected field type"
+        ..., description="Detected field type"
     )
     values: Optional[List[Any]] = Field(
-        None,
-        description="Possible values for enum fields"
+        None, description="Possible values for enum fields"
     )
 
 
@@ -127,12 +141,15 @@ class MetadataFieldsResponse(BaseModel):
     type information for better frontend rendering.
     """
 
-    fields: List[FieldInfo] = Field(..., description="List of indexed fields with type info")
+    fields: List[FieldInfo] = Field(
+        ..., description="List of indexed fields with type info"
+    )
 
 
 # ============================================================================
 # Health Check Models
 # ============================================================================
+
 
 class ConnectionPoolStats(BaseModel):
     """MongoDB connection pool statistics."""
@@ -146,6 +163,10 @@ class HealthResponse(BaseModel):
     """Health check response."""
 
     status: Literal["healthy", "unhealthy"] = Field(..., description="Service status")
-    mongodb: Literal["connected", "disconnected"] = Field(..., description="MongoDB connection status")
-    connection_pool: Optional[ConnectionPoolStats] = Field(None, description="Connection pool stats")
+    mongodb: Literal["connected", "disconnected"] = Field(
+        ..., description="MongoDB connection status"
+    )
+    connection_pool: Optional[ConnectionPoolStats] = Field(
+        None, description="Connection pool stats"
+    )
     error: Optional[str] = Field(None, description="Error message if unhealthy")

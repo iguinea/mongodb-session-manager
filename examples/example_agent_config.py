@@ -44,7 +44,7 @@ async def main():
         session_id="config-demo-session",
         connection_string="mongodb://mongodb:mongodb@host.docker.internal:8550/",
         database_name="itzulbira_examples",
-        collection_name="config_sessions"
+        collection_name="config_sessions",
     )
     print(f"✅ Session created: {session_manager.session_id}\n")
 
@@ -60,7 +60,7 @@ async def main():
         name="Customer Support",
         model="eu.anthropic.claude-sonnet-4-20250514-v1:0",
         system_prompt="You are a friendly customer support agent. Help users with their questions.",
-        session_manager=session_manager
+        session_manager=session_manager,
     )
 
     # Agent 2: Technical analyst (same model, different system prompt)
@@ -69,7 +69,7 @@ async def main():
         name="Technical Analyst",
         model="eu.anthropic.claude-sonnet-4-20250514-v1:0",  # Same model as support agent
         system_prompt="You are a technical analyst. Provide detailed technical analysis.",
-        session_manager=session_manager
+        session_manager=session_manager,
     )
 
     # Use the agents (this triggers sync_agent which captures configuration)
@@ -120,7 +120,9 @@ async def main():
         print(f"Agent {i}:")
         print(f"  Agent ID: {agent['agent_id']}")
         print(f"  Model: {agent.get('model', 'Not captured yet')}")
-        print(f"  System Prompt: {agent.get('system_prompt', 'Not captured yet')[:50]}...")
+        print(
+            f"  System Prompt: {agent.get('system_prompt', 'Not captured yet')[:50]}..."
+        )
         print()
 
     # =========================================================================
@@ -132,13 +134,13 @@ async def main():
     print("Updating support agent to use a different model...")
     session_manager.update_agent_config(
         "support-agent",
-        model="eu.anthropic.claude-haiku-4-20250514-v1:0"  # Faster model
+        model="eu.anthropic.claude-haiku-4-20250514-v1:0",  # Faster model
     )
 
     print("Updating analyst agent's system prompt...")
     session_manager.update_agent_config(
         "analyst-agent",
-        system_prompt="You are a senior technical analyst with 10 years of experience. Provide in-depth analysis."
+        system_prompt="You are a senior technical analyst with 10 years of experience. Provide in-depth analysis.",
     )
 
     print("\nVerifying updates:")
@@ -146,7 +148,9 @@ async def main():
     print(f"  Support agent model: {updated_support.get('model', 'N/A')}")
 
     updated_analyst = session_manager.get_agent_config("analyst-agent")
-    print(f"  Analyst agent prompt: {updated_analyst.get('system_prompt', 'N/A')[:60]}...")
+    print(
+        f"  Analyst agent prompt: {updated_analyst.get('system_prompt', 'N/A')[:60]}..."
+    )
     print()
 
     # =========================================================================

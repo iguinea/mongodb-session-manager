@@ -193,9 +193,9 @@ def redact_latest_message(
 ) -> None
 ```
 
-Redact the latest message in the conversation for the specified agent.
+Redact the latest message and record a guardrail event for auditing.
 
-This method updates the most recent message for an agent, typically used for content moderation or to correct mistakes. The message's `updated_at` timestamp is automatically updated while preserving the original `created_at`.
+**NEW in v0.6.0**: This method now automatically records guardrail intervention events at both the message level (`guardrail_event` field) and the session level (`guardrail_events[]` array). This provides a complete audit trail of content moderation actions.
 
 #### Parameters
 
@@ -203,17 +203,35 @@ This method updates the most recent message for an agent, typically used for con
 
 - **agent** (`Agent`): The Strands Agent instance whose message should be redacted.
 
-- **kwargs** (`Any`): Additional keyword arguments passed to the underlying repository.
+- **kwargs** (`Any`): Additional keyword arguments:
+  - **action** (`str`, default: `"BLOCKED"`): The guardrail action to record. Use the `GUARDRAIL_ACTION_BLOCKED` constant or any custom string (e.g., `"ANONYMIZED"`, `"FILTERED"`).
+
+#### Guardrail Event Recording
+
+When called, the method:
+1. Delegates to the parent `RepositorySessionManager.redact_latest_message()` to persist the redacted message
+2. Records a `guardrail_event` on the message document: `{"action": "BLOCKED", "timestamp": "..."}`
+3. Pushes an entry to the session-level `guardrail_events[]` array: `{"message_id": N, "agent_id": "...", "action": "BLOCKED", "timestamp": "..."}`
+
+Both updates are performed in a single MongoDB operation for efficiency.
 
 #### Example
 
 ```python
-# Redact the last message
+from mongodb_session_manager.mongodb_session_manager import GUARDRAIL_ACTION_BLOCKED
+
+# Redact with default action (BLOCKED)
 redacted = Message(
     role="assistant",
     content="[Content removed for privacy]"
 )
 manager.redact_latest_message(redacted, agent)
+
+# Redact with custom action
+manager.redact_latest_message(redacted, agent, action="ANONYMIZED")
+
+# Using the constant
+manager.redact_latest_message(redacted, agent, action=GUARDRAIL_ACTION_BLOCKED)
 ```
 
 ---
@@ -230,7 +248,7 @@ Synchronize agent data and automatically capture event loop metrics and agent co
 
 This method performs three key operations:
 1. Saves the current agent state to MongoDB
-2. **NEW v0.5.0**: Captures and persists agent configuration (model, system_prompt)
+2. Captures and persists agent configuration (model, system_prompt)
 3. Captures and stores event loop metrics (latency, token usage) from the agent's most recent interaction
 
 The metrics are automatically extracted from `agent.event_loop_metrics.accumulated_metrics` and `agent.event_loop_metrics.accumulated_usage`, and stored in the `event_loop_metrics` field of the latest assistant message.
@@ -635,7 +653,7 @@ for fb in feedbacks:
 
 ## Agent Configuration Methods
 
-**NEW in v0.5.0**: These methods enable retrieval and management of agent configuration (model and system_prompt).
+These methods enable retrieval and management of agent configuration (model and system_prompt).
 
 ### `get_agent_config`
 
