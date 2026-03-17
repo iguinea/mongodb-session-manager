@@ -1,5 +1,10 @@
 # Changelog
 
+## [2026-03-17] PR #33 - Docs: guardrail auditing guide (v0.6.1) (@iguinea)
+
+- Docs: add guardrail auditing guide and bump version to 0.6.1
+- Merge: resolve CHANGELOG.md conflict with origin/main
+
 ## [0.6.1] - 2026-03-17
 
 ### Added
