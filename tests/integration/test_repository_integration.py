@@ -217,6 +217,55 @@ class TestMessageLifecycle:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Redact message lifecycle
+# ---------------------------------------------------------------------------
+
+
+class TestRedactMessageLifecycle:
+    def test_redact_message_persists_and_reads(self, repo, unique_session_id):
+        session = Session(session_id=unique_session_id, session_type="default")
+        repo.create_session(session)
+
+        agent = SessionAgent(
+            agent_id="a1",
+            state={},
+            conversation_manager_state={},
+        )
+        repo.create_agent(unique_session_id, agent)
+
+        msg = SessionMessage(
+            message_id=1,
+            message={"role": "user", "content": [{"text": "sensitive data"}]},
+        )
+        repo.create_message(unique_session_id, "a1", msg)
+
+        # Update with redact_message
+        redacted = SessionMessage(
+            message_id=1,
+            message={"role": "user", "content": [{"text": "sensitive data"}]},
+            redact_message={"role": "user", "content": [{"text": "***"}]},
+        )
+        repo.update_message(unique_session_id, "a1", redacted)
+
+        result = repo.read_message(unique_session_id, "a1", 1)
+        assert result is not None
+        assert result.redact_message is not None
+        assert result.redact_message["content"][0]["text"] == "***"
+
+        # to_message() should return the redacted content
+        message = result.to_message()
+        assert message["content"][0]["text"] == "***"
+
+    def test_guardrail_events_field_exists_on_creation(self, repo, unique_session_id):
+        session = Session(session_id=unique_session_id, session_type="default")
+        repo.create_session(session)
+
+        doc = repo.collection.find_one({"_id": unique_session_id})
+        assert "guardrail_events" in doc
+        assert doc["guardrail_events"] == []
+
+
 class TestMetadataLifecycle:
     def test_update_and_get(self, repo, unique_session_id):
         session = Session(session_id=unique_session_id, session_type="default")

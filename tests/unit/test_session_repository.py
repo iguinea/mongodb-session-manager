@@ -597,6 +597,108 @@ class TestFeedbackOperations:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Guardrail event filtering
+# ---------------------------------------------------------------------------
+
+
+class TestGuardrailEventFiltering:
+    def test_create_session_includes_guardrail_events_field(
+        self, mock_repository, mock_mongo_collection
+    ):
+        session = Session(session_id="s1", session_type="default")
+        mock_repository.create_session(session)
+
+        doc = mock_mongo_collection.insert_one.call_args[0][0]
+        assert "guardrail_events" in doc
+        assert doc["guardrail_events"] == []
+
+    def test_read_message_filters_guardrail_event(
+        self, mock_repository, mock_mongo_collection
+    ):
+        mock_mongo_collection.find_one.return_value = {
+            "agents": {
+                "a1": {
+                    "messages": [
+                        {
+                            "message_id": 1,
+                            "message": {"role": "user", "content": [{"text": "Hi"}]},
+                            "created_at": datetime.now(UTC),
+                            "updated_at": datetime.now(UTC),
+                            "guardrail_event": {
+                                "action": "BLOCKED",
+                                "timestamp": datetime.now(UTC),
+                            },
+                        }
+                    ]
+                }
+            }
+        }
+        result = mock_repository.read_message("s1", "a1", 1)
+        assert result is not None
+        assert result.message_id == 1
+
+    def test_list_messages_filters_guardrail_event(
+        self, mock_repository, mock_mongo_collection
+    ):
+        mock_mongo_collection.find_one.return_value = {
+            "agents": {
+                "a1": {
+                    "messages": [
+                        {
+                            "message_id": 1,
+                            "message": {"role": "user", "content": [{"text": "Hi"}]},
+                            "created_at": datetime.now(UTC),
+                            "updated_at": datetime.now(UTC),
+                            "guardrail_event": {
+                                "action": "BLOCKED",
+                                "timestamp": datetime.now(UTC),
+                            },
+                        }
+                    ]
+                }
+            }
+        }
+        result = mock_repository.list_messages("s1", "a1")
+        assert len(result) == 1
+        assert result[0].message_id == 1
+
+    def test_update_message_with_redact_message(
+        self, mock_repository, mock_mongo_collection
+    ):
+        mock_mongo_collection.find_one.return_value = {
+            "agents": {
+                "a1": {
+                    "messages": [
+                        {
+                            "message_id": 1,
+                            "message": {
+                                "role": "user",
+                                "content": [{"text": "original"}],
+                            },
+                            "created_at": datetime.now(UTC),
+                            "updated_at": datetime.now(UTC),
+                        }
+                    ]
+                }
+            }
+        }
+        msg = SessionMessage(
+            message_id=1,
+            message={"role": "user", "content": [{"text": "original"}]},
+            redact_message={"role": "user", "content": [{"text": "***"}]},
+        )
+        mock_repository.update_message("s1", "a1", msg)
+        assert mock_mongo_collection.update_one.called
+        update_call = mock_mongo_collection.update_one.call_args
+        set_data = update_call[0][1]["$set"]
+        msg_key = "agents.a1.messages.0"
+        assert set_data[msg_key]["redact_message"] == {
+            "role": "user",
+            "content": [{"text": "***"}],
+        }
+
+
 class TestClose:
     def test_closes_when_owns_client(self, mock_mongo_client, mock_mongo_collection):
         with patch.object(MongoDBSessionRepository, "_ensure_indexes"):

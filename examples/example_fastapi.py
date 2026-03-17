@@ -76,9 +76,7 @@ async def lifespan(app: FastAPI):
     # 2. From global: get_global_factory() (simpler but less flexible)
     app.state.session_factory = factory
 
-    logger.info(
-        "MongoDB session factory initialized with connection pooling"
-    )
+    logger.info("MongoDB session factory initialized with connection pooling")
 
     yield  # Application runs
 
@@ -179,7 +177,6 @@ async def get_metrics(request: Request):
     except Exception as e:
         logger.error(f"Error getting metrics: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
 
 
 # Example of how to run the application

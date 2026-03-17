@@ -33,9 +33,9 @@ DATABASE_NAME = os.getenv("DATABASE_NAME", "metadata_demo")
 
 def print_section(title: str):
     """Helper to print formatted section headers."""
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f" {title}")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
 
 def _format_value(value):
@@ -64,9 +64,12 @@ async def _run_demo(session_manager, agent):
     # Step 1: Initialize with some metadata
     print_section("Step 1: Setting Initial Metadata")
     initial_metadata = {
-        "user_id": "user-12345", "user_name": "Alice Johnson",
-        "session_type": "support", "priority": "high",
-        "department": "customer_service", "created_by": "system",
+        "user_id": "user-12345",
+        "user_name": "Alice Johnson",
+        "session_type": "support",
+        "priority": "high",
+        "department": "customer_service",
+        "created_by": "system",
     }
     session_manager.update_metadata(initial_metadata)
     _print_metadata_dict("Initial metadata set:", initial_metadata)
@@ -75,7 +78,8 @@ async def _run_demo(session_manager, agent):
     # Step 2: Update only specific fields (preserving others)
     print_section("Step 2: Updating Specific Fields")
     update_fields = {
-        "priority": "medium", "assigned_to": "agent-bob",
+        "priority": "medium",
+        "assigned_to": "agent-bob",
         "last_updated": datetime.now().isoformat(),
     }
     session_manager.update_metadata(update_fields)
@@ -108,10 +112,13 @@ async def _run_demo(session_manager, agent):
     print("User: What's my priority level and who is assigned to help me?")
     print(f"Agent: {response}")
 
-    session_manager.update_metadata({
-        "last_interaction": datetime.now().isoformat(),
-        "messages_count": 1, "agent_responded": True,
-    })
+    session_manager.update_metadata(
+        {
+            "last_interaction": datetime.now().isoformat(),
+            "messages_count": 1,
+            "agent_responded": True,
+        }
+    )
     session_manager.sync_agent(agent)
 
     print_section("Summary")

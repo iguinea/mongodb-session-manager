@@ -18,6 +18,18 @@ logger = logging.getLogger(__name__)
 
 TIMEZONE_UTC_SUFFIX = "+00:00"
 
+# Fields stored on message documents that SessionMessage.__init__() does not accept.
+# Used to filter them out when reconstructing SessionMessage objects.
+_MESSAGE_EXCLUDED_FIELDS = frozenset(
+    [
+        "event_loop_metrics",
+        "latency_ms",
+        "input_tokens",
+        "output_tokens",
+        "guardrail_event",
+    ]
+)
+
 
 class MongoDBSessionRepository(SessionRepository):
     """MongoDB implementation of SessionRepository interface for persistent session storage.
@@ -227,6 +239,7 @@ class MongoDBSessionRepository(SessionRepository):
             "agents": {},
             "metadata": {},
             "feedbacks": [],
+            "guardrail_events": [],
         }
 
         if self.metadata_fields:
@@ -447,12 +460,10 @@ class MongoDBSessionRepository(SessionRepository):
             # Find message by ID
             for msg_data in messages:
                 if msg_data.get("message_id") == message_id:
-                    # Filter out metrics fields that SessionMessage doesn't accept
-                    # event_loop_metrics is the custom metrics we store
-                    # latency_ms, input_tokens, output_tokens are no longer accepted in strands-agents 1.12.0+
-                    metrics_fields = ["event_loop_metrics", "latency_ms", "input_tokens", "output_tokens"]
                     filtered_msg_data = {
-                        k: v for k, v in msg_data.items() if k not in metrics_fields
+                        k: v
+                        for k, v in msg_data.items()
+                        if k not in _MESSAGE_EXCLUDED_FIELDS
                     }
                     return SessionMessage(**filtered_msg_data)
 
@@ -565,12 +576,10 @@ class MongoDBSessionRepository(SessionRepository):
                 try:
                     logger.debug(f"Message {i} structure: {list(msg_data.keys())}")
 
-                    # Filter out metrics fields that SessionMessage doesn't accept
-                    # event_loop_metrics is the custom metrics we store
-                    # latency_ms, input_tokens, output_tokens are no longer accepted in strands-agents 1.12.0+
-                    metrics_fields = ["event_loop_metrics", "latency_ms", "input_tokens", "output_tokens"]
                     filtered_msg_data = {
-                        k: v for k, v in msg_data.items() if k not in metrics_fields
+                        k: v
+                        for k, v in msg_data.items()
+                        if k not in _MESSAGE_EXCLUDED_FIELDS
                     }
 
                     result.append(SessionMessage(**filtered_msg_data))
@@ -638,18 +647,15 @@ class MongoDBSessionRepository(SessionRepository):
         """Add feedback to the session."""
         try:
             # Add created_at timestamp
-            feedback_doc = {
-                **feedback,
-                "created_at": datetime.now(UTC)
-            }
+            feedback_doc = {**feedback, "created_at": datetime.now(UTC)}
 
             # Push feedback to array and update session timestamp
             self.collection.update_one(
                 {"_id": session_id},
                 {
                     "$push": {"feedbacks": feedback_doc},
-                    "$set": {"updated_at": datetime.now(UTC)}
-                }
+                    "$set": {"updated_at": datetime.now(UTC)},
+                },
             )
             logger.info(f"Added feedback to session {session_id}")
         except PyMongoError as e:
@@ -659,10 +665,7 @@ class MongoDBSessionRepository(SessionRepository):
     def get_feedbacks(self, session_id: str) -> List[Dict[str, Any]]:
         """Get all feedbacks for the session."""
         try:
-            doc = self.collection.find_one(
-                {"_id": session_id},
-                {"feedbacks": 1}
-            )
+            doc = self.collection.find_one({"_id": session_id}, {"feedbacks": 1})
 
             if not doc:
                 logger.debug(f"Session not found: {session_id}")
@@ -687,8 +690,7 @@ class MongoDBSessionRepository(SessionRepository):
         """
         try:
             doc = self.collection.find_one(
-                {"_id": session_id},
-                {"session_viewer_password": 1}
+                {"_id": session_id}, {"session_viewer_password": 1}
             )
 
             if not doc:
@@ -699,7 +701,9 @@ class MongoDBSessionRepository(SessionRepository):
             if password:
                 logger.debug(f"Retrieved viewer password for session {session_id}")
             else:
-                logger.warning(f"Session {session_id} has no viewer password (legacy session?)")
+                logger.warning(
+                    f"Session {session_id} has no viewer password (legacy session?)"
+                )
 
             return password
         except PyMongoError as e:
@@ -721,10 +725,7 @@ class MongoDBSessionRepository(SessionRepository):
             PyMongoError: If database operation fails
         """
         try:
-            doc = self.collection.find_one(
-                {"_id": session_id},
-                {"application_name": 1}
-            )
+            doc = self.collection.find_one({"_id": session_id}, {"application_name": 1})
 
             if not doc:
                 logger.debug(f"Session not found: {session_id}")
@@ -732,5 +733,7 @@ class MongoDBSessionRepository(SessionRepository):
 
             return doc.get("application_name")
         except PyMongoError as e:
-            logger.error(f"Failed to get application_name for session {session_id}: {e}")
+            logger.error(
+                f"Failed to get application_name for session {session_id}: {e}"
+            )
             raise

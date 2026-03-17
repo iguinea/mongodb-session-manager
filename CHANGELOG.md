@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.6.0] - 2026-03-17
+
+### Added
+- **Guardrail Auditing**: `redact_latest_message` now records guardrail events at both message and session level
+  - `guardrail_event` field on redacted messages with `action` and `timestamp`
+  - `guardrail_events[]` array at session level for centralized audit trail
+  - Configurable `action` parameter via kwargs (default: `"BLOCKED"`)
+- **`GUARDRAIL_ACTION_BLOCKED` constant** for type-safe guardrail action references
+- **`_MESSAGE_EXCLUDED_FIELDS` constant** in repository for centralized field filtering
+- **`_get_last_message_id` helper** in session manager for DRY message lookup
+- New unit tests: 5 tests for `redact_latest_message` / guardrail events, 4 tests for guardrail filtering in repository
+- New integration tests: 2 tests for redact message lifecycle and guardrail_events field creation
+
+### Changed
+- **strands-agents dependency**: bumped from `>=1.23.0` to `>=1.30.0`
+- `_record_guardrail_event` uses a single MongoDB `update_one` combining `$set` + `$push` (was 2 separate calls + 1 find)
+- `_update_last_message_metrics` refactored to use shared `_get_last_message_id` helper
+- `read_message` and `list_messages` now use `_MESSAGE_EXCLUDED_FIELDS` constant instead of inline list
+
+### Migration Notes
+- **Breaking**: Requires `strands-agents>=1.30.0` — update your dependency
+- **Schema**: New `guardrail_events: []` field added to session documents on creation. Existing sessions without this field are unaffected (guardrail events simply won't be recorded for them)
+- **No API changes**: All existing code continues to work unchanged
+
 ## [2026-02-08] PR #26 - Chore: remove obsolete feature plans, playground chat, and viewer.txt (@iguinea)
 
 - Chore: remove obsolete feature plans, playground chat, and viewer.txt

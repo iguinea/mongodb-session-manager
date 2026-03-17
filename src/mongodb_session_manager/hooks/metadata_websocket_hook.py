@@ -362,14 +362,18 @@ def create_metadata_hook(
             if action == "update" and "metadata" in kwargs:
                 result = original_func(kwargs["metadata"])
                 _dispatch_async(
-                    websocket_hook.on_metadata_change(session_id, kwargs["metadata"], action),
+                    websocket_hook.on_metadata_change(
+                        session_id, kwargs["metadata"], action
+                    ),
                     "sending metadata update to WebSocket",
                 )
             elif action == "delete" and "keys" in kwargs:
                 result = original_func(kwargs["keys"])
                 deleted_metadata = _build_delete_metadata(original_func, kwargs["keys"])
                 _dispatch_async(
-                    websocket_hook.on_metadata_change(session_id, deleted_metadata, action),
+                    websocket_hook.on_metadata_change(
+                        session_id, deleted_metadata, action
+                    ),
                     "sending metadata delete to WebSocket",
                 )
             else:

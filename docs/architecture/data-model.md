@@ -79,6 +79,14 @@ Each document represents a complete session with all its agents, messages, and m
             "created_at": ISODate("2024-01-22T17:00:00.000Z")
         }
     ],
+    "guardrail_events": [
+        {
+            "message_id": 3,
+            "agent_id": "support-agent",
+            "action": "BLOCKED",
+            "timestamp": ISODate("2024-01-22T15:00:00.000Z")
+        }
+    ],
     "agents": {
         "support-agent": {
             "agent_data": {
@@ -1040,6 +1048,55 @@ db.sessions.aggregate([
     }}
 ])
 ```
+
+## Guardrail Events Array
+
+**NEW in v0.6.0**
+
+### Structure
+
+```json
+{
+    "guardrail_events": [
+        {
+            "message_id": 3,
+            "agent_id": "support-agent",
+            "action": "BLOCKED",
+            "timestamp": ISODate("2024-01-22T15:00:00.000Z")
+        }
+    ]
+}
+```
+
+**Type**: Array of guardrail event objects
+**Purpose**: Centralized audit trail of guardrail interventions (e.g., Bedrock Guardrails blocking content)
+**Default**: Empty array `[]`
+
+### Guardrail Event Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `message_id` | Integer | The message_id of the redacted message |
+| `agent_id` | String | The agent that triggered the guardrail |
+| `action` | String | The guardrail action (default: `"BLOCKED"`, can be custom like `"ANONYMIZED"`) |
+| `timestamp` | ISODate | When the guardrail event was recorded |
+
+### Message-Level Guardrail Event
+
+In addition to the session-level array, each redacted message also stores a `guardrail_event` field:
+
+```json
+{
+    "message_id": 3,
+    "message": {"role": "user", "content": [{"text": "***"}]},
+    "guardrail_event": {
+        "action": "BLOCKED",
+        "timestamp": ISODate("2024-01-22T15:00:00.000Z")
+    }
+}
+```
+
+This field is automatically filtered out when reconstructing `SessionMessage` objects (it is not a field accepted by `SessionMessage.__init__()`).
 
 ## Index Strategy
 

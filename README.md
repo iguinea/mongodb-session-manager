@@ -1,6 +1,6 @@
 # MongoDB Session Manager
 
-[![Version](https://img.shields.io/badge/version-0.5.0-blue.svg)](https://github.com/iguinea/mongodb-session-manager)
+[![Version](https://img.shields.io/badge/version-0.6.0-blue.svg)](https://github.com/iguinea/mongodb-session-manager)
 [![Python](https://img.shields.io/badge/python-3.12+-green.svg)](https://python.org)
 
 A MongoDB session manager for [Strands Agents](https://github.com/strands-agents/strands-agents-python) that provides persistent storage for agent conversations and state, with connection pooling optimized for stateless environments.
@@ -13,6 +13,7 @@ A MongoDB session manager for [Strands Agents](https://github.com/strands-agents
 - **Event Loop Metrics**: Automatic capture of tokens, latency, TTFB from Strands SDK
 - **Agent State Persistence**: Store and restore agent state across sessions
 - **Metadata Management**: Partial updates, field deletion, and built-in agent tool
+- **Guardrail Auditing**: Automatic recording of Bedrock Guardrail interventions at message and session level
 - **Feedback System**: Store user ratings and comments with hooks
 - **AWS Integration**: Optional SNS, SQS, and WebSocket hooks for notifications
 - **Factory Pattern**: Optimized for FastAPI and stateless frameworks
@@ -154,6 +155,7 @@ Main class extending `RepositorySessionManager` from Strands SDK.
 | `add_feedback(feedback)` | Store user feedback with rating and comment |
 | `get_feedbacks()` | Retrieve all feedback for the session |
 | `get_application_name()` | Get session's application name (read-only, immutable) |
+| `redact_latest_message(msg, agent)` | Redact latest message and record guardrail event |
 | `close()` | Close database connections |
 
 #### `MongoDBSessionManagerFactory`
@@ -326,6 +328,9 @@ Sessions are stored as nested documents:
     "metadata": {"priority": "high"},
     "feedbacks": [
         {"rating": "up", "comment": "Helpful!", "created_at": "..."}
+    ],
+    "guardrail_events": [
+        {"message_id": 2, "agent_id": "agent-id", "action": "BLOCKED", "timestamp": "..."}
     ]
 }
 ```
@@ -343,12 +348,12 @@ For comprehensive documentation, see the [`docs/`](docs/) directory:
 
 ## Testing
 
-The project has 253 tests organized in unit and integration suites:
+The project has 264 tests organized in unit and integration suites:
 
 ```
 tests/
   conftest.py                          # Shared fixtures
-  unit/                                # 224 tests (no MongoDB required)
+  unit/                                # 233 tests (no MongoDB required)
     test_session_repository.py
     test_session_manager.py
     test_connection_pool.py
@@ -358,7 +363,7 @@ tests/
     test_hooks_metadata_websocket.py
     test_hooks_utils_sns.py
     test_hooks_utils_sqs.py
-  integration/                         # 29 tests (require MongoDB)
+  integration/                         # 31 tests (require MongoDB)
     test_repository_integration.py
     test_manager_integration.py
     test_factory_integration.py

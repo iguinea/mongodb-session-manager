@@ -92,9 +92,7 @@ async def lifespan(app: FastAPI):
     # Store factory in app state for access in endpoints
     app.state.session_factory = factory
 
-    logging.info(
-        "MongoDB session factory initialized with connection pooling"
-    )
+    logging.info("MongoDB session factory initialized with connection pooling")
 
     yield  # Application runs
 
@@ -155,7 +153,7 @@ Eres un asistente de IA que responde siempre en formato mark down.
 * Con esta información ya puedes empezar a recuperar información sobre el cliente de lo sistemas de información.
 
 * Los tipos de casos son:
-{chr(10).join(f'- {case_type}' for case_type in CaseType.list_values())}
+{chr(10).join(f"- {case_type}" for case_type in CaseType.list_values())}
 
 * Si identificas el tipo de caso, usa la herramienta 'set_state' para establecer el 'case_type' en la metadata de la sesión.
 

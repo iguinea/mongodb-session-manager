@@ -76,13 +76,14 @@ Sessions stored as single documents with embedded data:
   session_id, application_name, session_viewer_password, created_at, updated_at,
   agents: { agent_id: { agent_data: {model, system_prompt, state}, messages: [...] } },
   metadata: {...},
-  feedbacks: [{rating, comment, created_at}]
+  feedbacks: [{rating, comment, created_at}],
+  guardrail_events: [{message_id, agent_id, action, timestamp}]
 }
 ```
 
 **Note:** `application_name` is a top-level immutable field set at session creation. Use it to categorize sessions by application (e.g., "customer-support-bot", "sales-assistant").
 
-Messages include `event_loop_metrics` with: `accumulated_usage` (tokens, cache), `accumulated_metrics` (latency, TTFB), `cycle_metrics`, `tool_usage`
+Messages include `event_loop_metrics` with: `accumulated_usage` (tokens, cache), `accumulated_metrics` (latency, TTFB), `cycle_metrics`, `tool_usage`. Redacted messages may include `guardrail_event` with `action` and `timestamp`.
 
 ## Key Usage Patterns
 
@@ -172,7 +173,7 @@ When releasing, update version in **three places**:
 2. `pyproject.toml` (`version`)
 3. `CHANGELOG.md` (add release entry)
 
-Current version: **0.5.0**
+Current version: **0.6.0**
 
 ## Workflow Rules
 

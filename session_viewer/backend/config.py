@@ -74,9 +74,9 @@ class Settings(BaseSettings):
 
     # Rate Limiting Configuration (CWE-307 Prevention)
     # Format: "{count}/{period}" where period is: second, minute, hour, day
-    rate_limit_auth: str = "5/minute"       # Authentication endpoints - strict
-    rate_limit_search: str = "30/minute"    # Search endpoints - moderate
-    rate_limit_read: str = "60/minute"      # Read endpoints - permissive
+    rate_limit_auth: str = "5/minute"  # Authentication endpoints - strict
+    rate_limit_search: str = "30/minute"  # Search endpoints - moderate
+    rate_limit_read: str = "60/minute"  # Read endpoints - permissive
     rate_limit_metadata: str = "10/minute"  # Metadata endpoints - cached in frontend
 
     # Security Headers Configuration (CWE-693 Prevention)
@@ -159,9 +159,7 @@ class Settings(BaseSettings):
 
         # Use default development connection string if nothing else worked
         if not self.mongodb_connection_string:
-            self.mongodb_connection_string = (
-                "mongodb://localhost:27017/"
-            )
+            self.mongodb_connection_string = "mongodb://localhost:27017/"
             print("Using default development MongoDB connection string")
 
         return self
@@ -182,10 +180,10 @@ class Settings(BaseSettings):
             self.backend_password = random_password
 
             print("WARNING: No SESSION_VIEWER_BACKEND_PASSWORD configured!")
+            print(f"Using auto-generated password: {random_password}")
             print(
-                f"Using auto-generated password: {random_password}"
+                "For production, set SESSION_VIEWER_BACKEND_PASSWORD environment variable"
             )
-            print("For production, set SESSION_VIEWER_BACKEND_PASSWORD environment variable")
             print("This password will change on every restart!")
 
         if len(self.backend_password) < 8:
