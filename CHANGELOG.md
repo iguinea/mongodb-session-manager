@@ -1,5 +1,10 @@
 # Changelog
 
+## [2026-03-18] PR #36 - Add: enriched guardrail metrics (v0.6.2) (@iguinea)
+
+- Add: enriched guardrail metrics with GuardrailTrace support (v0.6.2)
+- Merge: resolve CHANGELOG.md conflict with origin/main
+
 ## [0.6.2] - 2026-03-18
 
 ### Added
