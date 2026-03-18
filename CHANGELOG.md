@@ -1,5 +1,9 @@
 # Changelog
 
+## [2026-03-18] PR #34 - Fix: align guardrail docs message schema (@iguinea)
+
+- Fix: align guardrail-auditing.md message schema with data-model.md
+
 ## [2026-03-17] PR #33 - Docs: guardrail auditing guide (v0.6.1) (@iguinea)
 
 - Docs: add guardrail auditing guide and bump version to 0.6.1
