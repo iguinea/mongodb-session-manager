@@ -813,6 +813,194 @@ class TestRedactLatestMessage:
                 {"role": "user", "content": [{"text": "***"}]}, agent
             )
 
+    def test_redact_with_guardrail_trace_stores_enriched_event(
+        self, manager, mock_repo
+    ):
+        agent = MagicMock()
+        agent.agent_id = "test-agent"
+        mock_repo.collection.find_one.return_value = {
+            "agents": {"test-agent": {"messages": [{"message_id": 5}]}}
+        }
+        trace = {
+            "inputAssessment": {
+                "contentPolicy": {
+                    "filters": [
+                        {"type": "HATE", "confidence": "HIGH"},
+                        {"type": "VIOLENCE", "confidence": "MEDIUM"},
+                    ]
+                }
+            },
+            "outputAssessments": [],
+        }
+        with patch.object(MongoDBSessionManager.__bases__[0], "redact_latest_message"):
+            manager.redact_latest_message(
+                {"role": "user", "content": [{"text": "***"}]},
+                agent,
+                guardrail_trace=trace,
+            )
+        calls = mock_repo.collection.update_one.call_args_list
+        for c in calls:
+            set_data = c[0][1].get("$set", {})
+            for k, v in set_data.items():
+                if "guardrail_event" in k:
+                    assert v["trace"] == trace
+                    assert "HATE/HIGH" in v["policies_triggered"]["contentPolicy"]
+                    assert "VIOLENCE/MEDIUM" in v["policies_triggered"]["contentPolicy"]
+                    return
+        pytest.fail("enriched guardrail_event not found")
+
+    def test_redact_with_guardrail_trace_session_event_excludes_full_trace(
+        self, manager, mock_repo
+    ):
+        agent = MagicMock()
+        agent.agent_id = "test-agent"
+        mock_repo.collection.find_one.return_value = {
+            "agents": {"test-agent": {"messages": [{"message_id": 5}]}}
+        }
+        trace = {
+            "inputAssessment": {
+                "contentPolicy": {"filters": [{"type": "HATE", "confidence": "HIGH"}]}
+            },
+            "outputAssessments": [],
+        }
+        with patch.object(MongoDBSessionManager.__bases__[0], "redact_latest_message"):
+            manager.redact_latest_message(
+                {"role": "user", "content": [{"text": "***"}]},
+                agent,
+                guardrail_trace=trace,
+            )
+        calls = mock_repo.collection.update_one.call_args_list
+        for c in calls:
+            push_data = c[0][1].get("$push", {})
+            if "guardrail_events" in push_data:
+                event = push_data["guardrail_events"]
+                assert "trace" not in event
+                assert "HATE/HIGH" in event["policies_triggered"]["contentPolicy"]
+                return
+        pytest.fail("session guardrail_events push not found")
+
+    def test_redact_with_stop_reason(self, manager, mock_repo):
+        agent = MagicMock()
+        agent.agent_id = "test-agent"
+        mock_repo.collection.find_one.return_value = {
+            "agents": {"test-agent": {"messages": [{"message_id": 3}]}}
+        }
+        with patch.object(MongoDBSessionManager.__bases__[0], "redact_latest_message"):
+            manager.redact_latest_message(
+                {"role": "user", "content": [{"text": "***"}]},
+                agent,
+                stop_reason="guardrail_intervened",
+            )
+        calls = mock_repo.collection.update_one.call_args_list
+        for c in calls:
+            set_data = c[0][1].get("$set", {})
+            for k, v in set_data.items():
+                if "guardrail_event" in k:
+                    assert v["stop_reason"] == "guardrail_intervened"
+                    break
+            push_data = c[0][1].get("$push", {})
+            if "guardrail_events" in push_data:
+                assert (
+                    push_data["guardrail_events"]["stop_reason"]
+                    == "guardrail_intervened"
+                )
+
+    def test_redact_without_trace_is_backward_compatible(self, manager, mock_repo):
+        agent = MagicMock()
+        agent.agent_id = "test-agent"
+        mock_repo.collection.find_one.return_value = {
+            "agents": {"test-agent": {"messages": [{"message_id": 1}]}}
+        }
+        with patch.object(MongoDBSessionManager.__bases__[0], "redact_latest_message"):
+            manager.redact_latest_message(
+                {"role": "user", "content": [{"text": "***"}]}, agent
+            )
+        calls = mock_repo.collection.update_one.call_args_list
+        for c in calls:
+            set_data = c[0][1].get("$set", {})
+            for k, v in set_data.items():
+                if "guardrail_event" in k:
+                    assert set(v.keys()) == {"action", "timestamp"}
+                    return
+        pytest.fail("backward-compatible guardrail_event not found")
+
+
+# ---------------------------------------------------------------------------
+# _extract_guardrail_summary
+# ---------------------------------------------------------------------------
+
+
+class TestExtractGuardrailSummary:
+    def test_content_policy(self, manager):
+        trace = {
+            "inputAssessment": {
+                "contentPolicy": {
+                    "filters": [
+                        {"type": "HATE", "confidence": "HIGH"},
+                        {"type": "VIOLENCE", "confidence": "MEDIUM"},
+                    ]
+                }
+            },
+            "outputAssessments": [],
+        }
+        result = manager._extract_guardrail_summary(trace)
+        assert result["contentPolicy"] == ["HATE/HIGH", "VIOLENCE/MEDIUM"]
+
+    def test_multiple_policies(self, manager):
+        trace = {
+            "inputAssessment": {
+                "contentPolicy": {"filters": [{"type": "HATE", "confidence": "HIGH"}]},
+                "topicPolicy": {
+                    "topics": [{"name": "financial-advice", "action": "DENY"}]
+                },
+                "sensitiveInformationPolicy": {
+                    "piiEntities": [{"type": "EMAIL", "action": "ANONYMIZED"}],
+                    "regexes": [],
+                },
+            },
+            "outputAssessments": [],
+        }
+        result = manager._extract_guardrail_summary(trace)
+        assert "HATE/HIGH" in result["contentPolicy"]
+        assert "financial-advice/DENY" in result["topicPolicy"]
+        assert "EMAIL/ANONYMIZED" in result["sensitiveInformationPolicy"]
+
+    def test_empty_trace(self, manager):
+        assert manager._extract_guardrail_summary({}) == {}
+
+    def test_none_trace(self, manager):
+        assert manager._extract_guardrail_summary(None) == {}
+
+    def test_contextual_grounding_policy(self, manager):
+        trace = {
+            "inputAssessment": {},
+            "outputAssessments": [
+                {
+                    "contextualGroundingPolicy": {
+                        "filters": [
+                            {"type": "GROUNDING", "score": 0.3, "threshold": 0.7}
+                        ]
+                    }
+                }
+            ],
+        }
+        result = manager._extract_guardrail_summary(trace)
+        assert "GROUNDING/0.3/0.7" in result["contextualGroundingPolicy"]
+
+    def test_word_policy(self, manager):
+        trace = {
+            "inputAssessment": {
+                "wordPolicy": {
+                    "customWords": [{"match": "badword"}],
+                    "managedWordLists": [{"type": "PROFANITY", "match": "damnit"}],
+                }
+            },
+            "outputAssessments": [],
+        }
+        result = manager._extract_guardrail_summary(trace)
+        assert "badword" in result["wordPolicy"]
+        assert "PROFANITY/damnit" in result["wordPolicy"]
+
 
 class TestToolUsageProcessing:
     """Migrated from test_cache_metrics.py: TestToolUsageProcessing."""

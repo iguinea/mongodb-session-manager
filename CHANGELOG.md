@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.6.2] - 2026-03-18
+
+### Added
+- **Enriched Guardrail Metrics** (Issue #32): `redact_latest_message` now accepts `stop_reason` and `guardrail_trace` kwargs
+  - `policies_triggered` summary auto-extracted from GuardrailTrace (contentPolicy, topicPolicy, wordPolicy, sensitiveInformationPolicy, contextualGroundingPolicy)
+  - Full `trace` stored at message level; lightweight summary at session level
+  - `stop_reason` recorded at both message and session level
+  - Backward-compatible: events without new fields remain valid
+- **`GUARDRAIL_STOP_REASONS` constant** (`frozenset`) for known stop reasons
+- **`_extract_guardrail_summary` helper** for parsing GuardrailTrace into queryable format
+- 11 new unit tests for enriched guardrail metrics and summary extraction
+
+### Changed
+- Version bump to 0.6.2 across `__init__.py`, `pyproject.toml`, `CHANGELOG.md`
+- Updated guardrail auditing documentation with enriched schema and usage examples
+- Updated README.md version badge, CLAUDE.md version and schema references
+
 ## [2026-03-18] PR #34 - Fix: align guardrail docs message schema (@iguinea)
 
 - Fix: align guardrail-auditing.md message schema with data-model.md

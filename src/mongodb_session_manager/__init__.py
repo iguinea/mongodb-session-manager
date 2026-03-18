@@ -3,6 +3,7 @@
 from .mongodb_session_manager import (
     MongoDBSessionManager,
     create_mongodb_session_manager,
+    GUARDRAIL_STOP_REASONS,
 )
 from .mongodb_session_repository import MongoDBSessionRepository
 from .mongodb_connection_pool import MongoDBConnectionPool
@@ -56,6 +57,8 @@ __all__ = [
     "MongoDBSessionRepository",
     "MongoDBConnectionPool",
     "MongoDBSessionManagerFactory",
+    # Constants
+    "GUARDRAIL_STOP_REASONS",
     # Factory functions
     "create_mongodb_session_manager",
     "initialize_global_factory",
@@ -114,6 +117,6 @@ __all__.extend(
     ]
 )
 
-__version__ = "0.6.1"
+__version__ = "0.6.2"
 __author__ = "Iñaki Guinea Beristain"
 __author_email__ = "iguinea@gmail.com"

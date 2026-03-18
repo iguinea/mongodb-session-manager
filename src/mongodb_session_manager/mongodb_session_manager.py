@@ -20,6 +20,7 @@ from .mongodb_session_repository import MongoDBSessionRepository
 logger = logging.getLogger(__name__)
 
 GUARDRAIL_ACTION_BLOCKED = "BLOCKED"
+GUARDRAIL_STOP_REASONS = frozenset(["guardrail_intervened", "content_filtered"])
 
 
 class MongoDBSessionManager(RepositorySessionManager):
@@ -242,21 +243,48 @@ class MongoDBSessionManager(RepositorySessionManager):
         super().redact_latest_message(redact_message, agent, **kwargs)
 
         action = kwargs.get("action", GUARDRAIL_ACTION_BLOCKED)
+        stop_reason = kwargs.get("stop_reason")
+        guardrail_trace = kwargs.get("guardrail_trace")
         last_message_id = self._get_last_message_id(agent)
         if last_message_id is not None:
-            self._record_guardrail_event(agent, last_message_id, action=action)
+            self._record_guardrail_event(
+                agent,
+                last_message_id,
+                action=action,
+                stop_reason=stop_reason,
+                guardrail_trace=guardrail_trace,
+            )
 
     def _record_guardrail_event(
-        self, agent: Agent, message_id: int, action: str = GUARDRAIL_ACTION_BLOCKED
+        self,
+        agent: Agent,
+        message_id: int,
+        action: str = GUARDRAIL_ACTION_BLOCKED,
+        stop_reason: Optional[str] = None,
+        guardrail_trace: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Record guardrail intervention at message and session level."""
         now = datetime.now(UTC)
-        guardrail_event = {"action": action, "timestamp": now}
-        session_event = {
+        policies_triggered = self._extract_guardrail_summary(guardrail_trace)
+
+        guardrail_event: Dict[str, Any] = {"action": action, "timestamp": now}
+        if stop_reason:
+            guardrail_event["stop_reason"] = stop_reason
+        if policies_triggered:
+            guardrail_event["policies_triggered"] = policies_triggered
+        if guardrail_trace:
+            guardrail_event["trace"] = guardrail_trace
+
+        session_event: Dict[str, Any] = {
             "message_id": message_id,
             "agent_id": agent.agent_id,
-            **guardrail_event,
+            "action": action,
+            "timestamp": now,
         }
+        if stop_reason:
+            session_event["stop_reason"] = stop_reason
+        if policies_triggered:
+            session_event["policies_triggered"] = policies_triggered
 
         self.session_repository.collection.update_one(
             {
@@ -270,6 +298,58 @@ class MongoDBSessionManager(RepositorySessionManager):
                 "$push": {"guardrail_events": session_event},
             },
         )
+
+    # Policy extraction rules: (policy_name, list_path, format_fields)
+    _POLICY_EXTRACTORS = [
+        ("contentPolicy", ("contentPolicy", "filters"), ("type", "confidence")),
+        ("topicPolicy", ("topicPolicy", "topics"), ("name", "action")),
+        ("wordPolicy", ("wordPolicy", "customWords"), ("match",)),
+        ("wordPolicy", ("wordPolicy", "managedWordLists"), ("type", "match")),
+        (
+            "sensitiveInformationPolicy",
+            ("sensitiveInformationPolicy", "piiEntities"),
+            ("type", "action"),
+        ),
+        (
+            "sensitiveInformationPolicy",
+            ("sensitiveInformationPolicy", "regexes"),
+            ("name", "action"),
+        ),
+        (
+            "contextualGroundingPolicy",
+            ("contextualGroundingPolicy", "filters"),
+            ("type", "score", "threshold"),
+        ),
+    ]
+
+    @staticmethod
+    def _extract_guardrail_summary(
+        trace: Optional[Dict[str, Any]],
+    ) -> Dict[str, List[str]]:
+        """Extract a queryable summary of triggered policies from a GuardrailTrace.
+
+        Returns a dict keyed by policy name with lists of triggered filter descriptions.
+        Example: {"contentPolicy": ["HATE/HIGH", "VIOLENCE/MEDIUM"]}
+        """
+        if not trace:
+            return {}
+
+        assessments: List[Dict] = []
+        if "inputAssessment" in trace:
+            assessments.append(trace["inputAssessment"])
+        assessments.extend(trace.get("outputAssessments", []))
+
+        summary: Dict[str, List[str]] = {}
+        for assessment in assessments:
+            for policy_name, (
+                policy_key,
+                list_key,
+            ), fields in MongoDBSessionManager._POLICY_EXTRACTORS:
+                for item in assessment.get(policy_key, {}).get(list_key, []):
+                    desc = "/".join(str(item.get(f, "UNKNOWN")) for f in fields)
+                    summary.setdefault(policy_name, []).append(desc)
+
+        return summary
 
     def sync_agent(self, agent: Agent, **kwargs: Any) -> None:
         """Sync agent data and capture model/system_prompt.
