@@ -24,7 +24,7 @@ Both updates happen in a single MongoDB operation for efficiency.
 
 #### Message-Level Event
 
-Each redacted message gets a `guardrail_event` field:
+Each redacted message gets a `guardrail_event` field. When a GuardrailTrace is available, the event includes enriched data:
 
 ```json
 {
@@ -32,16 +32,23 @@ Each redacted message gets a `guardrail_event` field:
   "message": {"role": "assistant", "content": [{"text": "[Content blocked by guardrail]"}]},
   "guardrail_event": {
     "action": "BLOCKED",
-    "timestamp": "2026-03-17T10:00:00Z"
+    "timestamp": "2026-03-17T10:00:00Z",
+    "stop_reason": "guardrail_intervened",
+    "policies_triggered": {
+      "contentPolicy": ["HATE/HIGH", "VIOLENCE/MEDIUM"],
+      "topicPolicy": ["financial-advice/DENY"],
+      "sensitiveInformationPolicy": ["EMAIL/ANONYMIZED"]
+    },
+    "trace": { "inputAssessment": {}, "outputAssessments": [] }
   }
 }
 ```
 
-> **Note:** The `message` field uses the Strands SDK's nested format. The `guardrail_event` field is automatically filtered out when reading messages via the API.
+> **Note:** The `message` field uses the Strands SDK's nested format. The `guardrail_event` field is automatically filtered out when reading messages via the API. Fields `stop_reason`, `policies_triggered`, and `trace` are only present when the corresponding data is provided via kwargs.
 
 #### Session-Level Audit Trail
 
-The session document maintains a centralized `guardrail_events[]` array:
+The session document maintains a centralized `guardrail_events[]` array (without the full `trace` to keep it lightweight):
 
 ```json
 {
@@ -51,7 +58,11 @@ The session document maintains a centralized `guardrail_events[]` array:
       "message_id": 3,
       "agent_id": "support-agent",
       "action": "BLOCKED",
-      "timestamp": "2026-03-17T10:00:00Z"
+      "timestamp": "2026-03-17T10:00:00Z",
+      "stop_reason": "guardrail_intervened",
+      "policies_triggered": {
+        "contentPolicy": ["HATE/HIGH"]
+      }
     },
     {
       "message_id": 7,
@@ -113,6 +124,34 @@ session_manager.redact_latest_message(redacted, agent, action="ANONYMIZED")
 # Using the constant
 session_manager.redact_latest_message(redacted, agent, action=GUARDRAIL_ACTION_BLOCKED)
 ```
+
+### Enriched Redaction with GuardrailTrace (v0.6.2+)
+
+Pass `stop_reason` and `guardrail_trace` via kwargs to store enriched guardrail data:
+
+```python
+# With stop_reason and guardrail trace
+guardrail_trace = {
+    "inputAssessment": {
+        "contentPolicy": {
+            "filters": [
+                {"type": "HATE", "confidence": "HIGH"},
+                {"type": "VIOLENCE", "confidence": "MEDIUM"}
+            ]
+        }
+    },
+    "outputAssessments": []
+}
+
+session_manager.redact_latest_message(
+    redacted, agent,
+    action="BLOCKED",
+    stop_reason="guardrail_intervened",
+    guardrail_trace=guardrail_trace,
+)
+```
+
+The `policies_triggered` summary is automatically extracted from the trace for efficient querying. The full trace is stored only at the message level; session-level events include the summary but not the full trace.
 
 ### Custom Actions
 
@@ -195,6 +234,8 @@ for r in results:
 | `guardrail_events[].agent_id` | `str` | ID of the agent whose message was redacted |
 | `guardrail_events[].action` | `str` | Action taken (e.g., `"BLOCKED"`, `"ANONYMIZED"`) |
 | `guardrail_events[].timestamp` | `datetime` | When the intervention occurred |
+| `guardrail_events[].stop_reason` | `str` | *(optional)* Stop reason from the model (e.g., `"guardrail_intervened"`) |
+| `guardrail_events[].policies_triggered` | `Object` | *(optional)* Summary of triggered policies by category |
 
 ### Message-Level Fields
 
@@ -203,14 +244,21 @@ for r in results:
 | `guardrail_event` | `Object` | Present only on redacted messages |
 | `guardrail_event.action` | `str` | Action taken |
 | `guardrail_event.timestamp` | `datetime` | When the intervention occurred |
+| `guardrail_event.stop_reason` | `str` | *(optional)* Stop reason from the model |
+| `guardrail_event.policies_triggered` | `Object` | *(optional)* Summary of triggered policies |
+| `guardrail_event.trace` | `Object` | *(optional)* Full GuardrailTrace with input/output assessments |
 
-## Future Enhancements
+### Policies Triggered Format
 
-See [Issue #32](https://github.com/iguinea/mongodb-session-manager/issues/32) for planned enhancements to capture richer guardrail metrics from the Strands SDK, including:
+The `policies_triggered` field is a dictionary keyed by policy name with lists of queryable filter descriptions:
 
-- Full `GuardrailTrace` with input/output assessments
-- Policy details (ContentPolicy, TopicPolicy, WordPolicy, SensitiveInformationPolicy, ContextualGroundingPolicy)
-- Confidence levels and stop reasons
+| Policy | Format | Example |
+|--------|--------|---------|
+| `contentPolicy` | `"TYPE/CONFIDENCE"` | `"HATE/HIGH"`, `"VIOLENCE/MEDIUM"` |
+| `topicPolicy` | `"NAME/ACTION"` | `"financial-advice/DENY"` |
+| `wordPolicy` | `"MATCH"` or `"TYPE/MATCH"` | `"badword"`, `"PROFANITY/damnit"` |
+| `sensitiveInformationPolicy` | `"TYPE/ACTION"` | `"EMAIL/ANONYMIZED"` |
+| `contextualGroundingPolicy` | `"TYPE/SCORE/THRESHOLD"` | `"GROUNDING/0.3/0.7"` |
 
 ## See Also
 
