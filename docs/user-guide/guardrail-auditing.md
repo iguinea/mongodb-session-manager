@@ -29,14 +29,15 @@ Each redacted message gets a `guardrail_event` field:
 ```json
 {
   "message_id": 3,
-  "role": "assistant",
-  "content": "[Content blocked by guardrail]",
+  "message": {"role": "assistant", "content": [{"text": "[Content blocked by guardrail]"}]},
   "guardrail_event": {
     "action": "BLOCKED",
     "timestamp": "2026-03-17T10:00:00Z"
   }
 }
 ```
+
+> **Note:** The `message` field uses the Strands SDK's nested format. The `guardrail_event` field is automatically filtered out when reading messages via the API.
 
 #### Session-Level Audit Trail
 
