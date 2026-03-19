@@ -1,5 +1,9 @@
 # Changelog
 
+## [2026-03-19] PR #38 - Chore: fix qlty audit findings (@iguinea)
+
+- Chore: fix qlty audit findings — type annotations and triage rules
+
 ## [2026-03-19] PR #37 - Refactor: simplify core modules (v0.7.0) (@iguinea)
 
 - Refactor: simplify core modules — fix bugs, eliminate duplication, im…
