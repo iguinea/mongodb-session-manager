@@ -153,13 +153,26 @@ def unique_session_id():
 
 @pytest.fixture
 def cleanup_session(mongodb_connection):
-    """Yield a cleanup helper that deletes a session document after the test."""
+    """Yield a cleanup helper that deletes a session document after the test.
+
+    Uses an independent MongoClient for teardown to avoid errors when
+    the manager's client has already been closed.
+    """
     created = []
 
     def _register(collection, session_id):
-        created.append((collection, session_id))
+        db_name = collection.database.name
+        col_name = collection.name
+        created.append((db_name, col_name, session_id))
 
     yield _register
 
-    for collection, session_id in created:
-        collection.delete_one({"_id": session_id})
+    if created:
+        from pymongo import MongoClient
+
+        client = MongoClient(mongodb_connection)
+        try:
+            for db_name, col_name, session_id in created:
+                client[db_name][col_name].delete_one({"_id": session_id})
+        finally:
+            client.close()

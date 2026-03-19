@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.8.1] - 2026-03-19
+
+### Fixed
+- **Integration Tests**: Fix `bson.errors.InvalidDocument: cannot encode MagicMock` in `test_agent_config_roundtrip` and `test_list_agents` — mock agents now configure `state`, `_interrupt_state`, and `conversation_manager` with serializable values
+- **Integration Tests**: Fix teardown `Cannot use MongoClient after close` errors — `cleanup_session` fixture now uses an independent MongoClient for cleanup instead of reusing the manager's closed client
+
 ## [2026-03-19] PR #39 - Fix: deadlock, docs audit, broken tests (v0.8.0) (@iguinea)
 
 - Fix: deadlock in connection pool, docs audit, and broken test imports…
