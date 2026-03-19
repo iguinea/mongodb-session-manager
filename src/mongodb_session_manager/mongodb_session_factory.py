@@ -137,7 +137,7 @@ _global_factory: Optional[MongoDBSessionManagerFactory] = None
 def initialize_global_factory(
     connection_string: str,
     database_name: str = "database_name",
-    collection_name: str = "virtualagent_sessions",
+    collection_name: str = "collection_name",
     metadata_fields: Optional[List[str]] = None,
     application_name: Optional[str] = None,
     **client_kwargs: Any,

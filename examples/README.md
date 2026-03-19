@@ -86,7 +86,6 @@ uv run python examples/example_name.py
 | Script | Description | Documentation |
 |--------|-------------|---------------|
 | [example_performance.py](example_performance.py) | Performance benchmarks comparing pooling vs no pooling | [📚 Guide](../docs/architecture/performance.md) |
-| [example_stream_async.py](example_stream_async.py) | Async streaming responses with real-time metrics | [📚 Guide](../docs/user-guide/async-streaming.md) |
 
 **Features demonstrated:**
 - Connection pooling performance benefits
@@ -104,7 +103,7 @@ uv run python examples/example_name.py
 - **Factory Pattern**: `example_fastapi.py`, `example_fastapi_streaming.py`
 - **Metadata**: `example_metadata_*.py` (5 examples)
 - **Feedback**: `example_feedback_hook.py`
-- **Streaming**: `example_stream_async.py`, `example_fastapi_streaming.py`
+- **Streaming**: `example_fastapi_streaming.py`
 - **Agent Config**: `example_agent_config.py` ⭐ NEW
 
 ### By Use Case

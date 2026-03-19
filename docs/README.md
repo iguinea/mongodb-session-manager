@@ -93,6 +93,11 @@ Run these scripts to see features in action:
 | [example_metadata_tool.py](../examples/example_metadata_tool.py) | Agent managing metadata autonomously | [Guide](examples/metadata-patterns.md) |
 | [example_metadata_hook.py](../examples/example_metadata_hook.py) | Metadata hooks (audit, validation, caching) | [Guide](examples/metadata-patterns.md) |
 | [example_feedback_hook.py](../examples/example_feedback_hook.py) | Feedback hooks (audit, validation, notifications) | [Guide](examples/feedback-patterns.md) |
+| [example_metadata_tool_direct.py](../examples/example_metadata_tool_direct.py) | Direct usage of the metadata tool | [Guide](examples/metadata-patterns.md) |
+| [example_metadata_update.py](../examples/example_metadata_update.py) | Metadata update with field preservation | [Guide](examples/metadata-patterns.md) |
+| [example_metadata_production.py](../examples/example_metadata_production.py) | Production customer support scenario | [Guide](examples/metadata-patterns.md) |
+| [example_metadata_websocket.py](../examples/example_metadata_websocket.py) | WebSocket metadata hook pattern | [Guide](examples/aws-patterns.md) |
+| [example_performance.py](../examples/example_performance.py) | Performance benchmarks (pooling vs no pooling) | [Guide](architecture/performance.md) |
 
 **Run any example:**
 ```bash
@@ -103,9 +108,9 @@ uv run python examples/example_name.py
 
 ## Version
 
-This documentation is for **MongoDB Session Manager v0.7.0**.
+This documentation is for **MongoDB Session Manager v0.8.0**.
 
-Last updated: 2026-03-17
+Last updated: 2026-03-19
 
 ## Support
 

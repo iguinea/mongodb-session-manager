@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.8.0] - 2026-03-19
+
+### Fixed
+- **Connection Pool**: Fix deadlock — `Lock` replaced with `RLock` to prevent deadlock when `initialize()` is called with `_instance=None` (lock acquired in `initialize()` then re-acquired in `__new__`)
+- **Tests**: Fix broken imports — `_dispatch_async` moved to `utils_async` in v0.7.0 but test imports were not updated
+- **Tests**: Fix connection pool fixture — reset `_user_kwargs`/`_resolved_kwargs` instead of non-existent `_client_kwargs`
+- **Factory**: Fix inconsistent `collection_name` default in `initialize_global_factory()` — was `"virtualagent_sessions"`, now `"collection_name"` matching all other constructors
+
+### Docs
+- **pyproject.toml**: Fix TOML structure — `keywords` and `classifiers` were inside `[[project.authors]]` instead of `[project]`
+- **pyproject.toml**: Remove invalid Python 3.11 classifier (requires `>=3.12.8`)
+- **pyproject.toml**: Remove duplicate `[dependency-groups] dev` section (conflicting pytest versions)
+- **CLAUDE.md**: Fix deprecated camelCase `metadataHook`/`feedbackHook` — replaced with `metadata_hook`/`feedback_hook`
+- **CLAUDE.md**: Fix Python version `3.13+` → `3.12+` (matches `requires-python`)
+- **README.md**: Fix incorrect `collection_name` default (`"agent_sessions"` → `"collection_name"`)
+- **README.md**: Fix test count (`264` → `274`: 243 unit + 31 integration)
+- **README.md**: Add missing methods to API table (`get_agent_config`, `update_agent_config`, `list_agents`, `get_message_count`, `get_session_viewer_password`)
+- **README.md**: Add missing fields to MongoDB schema (`session_type`, `session_viewer_password`)
+- **docs/README.md**: Complete executable examples table (added 5 missing examples)
+- **docs/README.md**: Update last modified date
+- **examples/README.md**: Remove reference to non-existent `example_stream_async.py`
+
+### Added
+- **pyrightconfig.json**: Pyright configuration for venv resolution (fixes `reportMissingImports`)
+
+### Changed
+- Version bump to 0.8.0 across `__init__.py`, `pyproject.toml`, `CHANGELOG.md`, `README.md`, `docs/README.md`, `CLAUDE.md`
+
 ## [2026-03-19] PR #38 - Chore: fix qlty audit findings (@iguinea)
 
 - Chore: fix qlty audit findings — type annotations and triage rules

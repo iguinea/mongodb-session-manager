@@ -1,6 +1,6 @@
 # MongoDB Session Manager
 
-[![Version](https://img.shields.io/badge/version-0.7.0-blue.svg)](https://github.com/iguinea/mongodb-session-manager)
+[![Version](https://img.shields.io/badge/version-0.8.0-blue.svg)](https://github.com/iguinea/mongodb-session-manager)
 [![Python](https://img.shields.io/badge/python-3.12+-green.svg)](https://python.org)
 
 A MongoDB session manager for [Strands Agents](https://github.com/strands-agents/strands-agents-python) that provides persistent storage for agent conversations and state, with connection pooling optimized for stateless environments.
@@ -132,7 +132,7 @@ manager = create_mongodb_session_manager(
     session_id="unique-session-id",
     connection_string="mongodb://...",
     database_name="my_db",
-    collection_name="agent_sessions",  # optional, default: "agent_sessions"
+    collection_name="my_sessions",     # optional, default: "collection_name"
     application_name="my-app",         # optional: categorize sessions
     metadata_hook=my_hook,             # optional
     feedback_hook=my_hook              # optional
@@ -155,6 +155,11 @@ Main class extending `RepositorySessionManager` from Strands SDK.
 | `add_feedback(feedback)` | Store user feedback with rating and comment |
 | `get_feedbacks()` | Retrieve all feedback for the session |
 | `get_application_name()` | Get session's application name (read-only, immutable) |
+| `get_agent_config(agent_id)` | Get agent configuration (model, system_prompt) |
+| `update_agent_config(agent_id, ...)` | Update agent model or system_prompt |
+| `list_agents()` | List all agents in the session with their configurations |
+| `get_message_count(agent_id)` | Get message count for a specific agent |
+| `get_session_viewer_password()` | Get the auto-generated Session Viewer password |
 | `redact_latest_message(msg, agent)` | Redact latest message and record guardrail event |
 | `close()` | Close database connections |
 
@@ -293,7 +298,9 @@ Sessions are stored as nested documents:
 {
     "_id": "session-id",
     "session_id": "session-id",
+    "session_type": "default",
     "application_name": "my-app",
+    "session_viewer_password": "auto-generated-32-char-string",
     "created_at": "2024-01-15T09:00:00Z",
     "updated_at": "2024-01-22T14:30:00Z",
     "agents": {
@@ -348,12 +355,12 @@ For comprehensive documentation, see the [`docs/`](docs/) directory:
 
 ## Testing
 
-The project has 264 tests organized in unit and integration suites:
+The project has 274 tests organized in unit and integration suites:
 
 ```
 tests/
   conftest.py                          # Shared fixtures
-  unit/                                # 233 tests (no MongoDB required)
+  unit/                                # 243 tests (no MongoDB required)
     test_session_repository.py
     test_session_manager.py
     test_connection_pool.py

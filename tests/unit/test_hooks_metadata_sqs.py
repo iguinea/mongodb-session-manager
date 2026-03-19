@@ -8,8 +8,8 @@ import pytest
 from mongodb_session_manager.hooks.metadata_sqs_hook import (
     MetadataSQSHook,
     create_metadata_hook,
-    _dispatch_async,
 )
+from mongodb_session_manager.hooks.utils_async import dispatch_async as _dispatch_async
 
 
 @pytest.fixture

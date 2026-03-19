@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 MongoDB Session Manager - A MongoDB session manager library for Strands Agents that provides persistent storage for agent conversations and state, with connection pooling optimized for stateless environments.
 
-**Tech Stack:** Python 3.13+, UV package manager, MongoDB, Strands Agents SDK
+**Tech Stack:** Python 3.12+, UV package manager, MongoDB, Strands Agents SDK
 
 ## Development Commands
 
@@ -138,8 +138,8 @@ def my_hook(original_func, action, session_id, **kwargs):
 
 session_manager = MongoDBSessionManager(
     session_id="...",
-    metadataHook=my_hook,    # For metadata operations
-    feedbackHook=my_hook     # For feedback operations
+    metadata_hook=my_hook,    # For metadata operations
+    feedback_hook=my_hook     # For feedback operations
 )
 ```
 
@@ -152,6 +152,11 @@ hook = create_feedback_sns_hook(
     topic_arn_bad="arn:aws:sns:...:feedback-bad",
     topic_arn_neutral="arn:aws:sns:...:feedback-neutral",
     subject_prefix_bad="[URGENT] "  # Template support
+)
+
+session_manager = MongoDBSessionManager(
+    session_id="...",
+    feedback_hook=hook  # Pass hook to session manager
 )
 ```
 
@@ -173,7 +178,7 @@ When releasing, update version in **three places**:
 2. `pyproject.toml` (`version`)
 3. `CHANGELOG.md` (add release entry)
 
-Current version: **0.7.0**
+Current version: **0.8.0**
 
 ## Workflow Rules
 
