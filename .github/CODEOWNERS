@@ -4,9 +4,6 @@
 # Core library
 /src/ @iguinea
 
-# Session Viewer
-/session_viewer/ @iguinea
-
 # CI/CD and tooling
 /.github/ @iguinea
 /CLAUDE.md @iguinea

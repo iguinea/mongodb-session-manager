@@ -38,9 +38,6 @@ uv add --dev <package-name>
 cd playground/chat && make backend-fastapi-streaming  # Port 8880
 cd playground/chat && make frontend                   # Port 8881
 
-# Run Session Viewer
-cd session_viewer/backend && make dev   # Port 8882
-cd session_viewer/frontend && make run  # Port 8883
 ```
 
 ## Architecture
@@ -160,16 +157,6 @@ session_manager = MongoDBSessionManager(
 )
 ```
 
-
-## Session Viewer Application
-
-Located in `session_viewer/`:
-- **Backend** (port 8882): FastAPI REST API with dynamic filtering, pagination, unified timeline
-- **Frontend** (port 8883): Vanilla JS + Tailwind CSS, 3-panel layout
-
-Key endpoints: `/health`, `/api/v1/metadata-fields`, `/api/v1/sessions/search`, `/api/v1/sessions/{session_id}`
-
-Configuration via `session_viewer/backend/.env` - see `.env.example`
 
 ## Version Management
 
