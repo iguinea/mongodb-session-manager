@@ -1,5 +1,9 @@
 # Changelog
 
+## [2026-03-19] PR #41 - Chore: remove session_viewer application (@iguinea)
+
+- Chore: remove session_viewer application
+
 ## [2026-03-19] PR #40 - Fix: integration test failures (v0.8.1) (@iguinea)
 
 - Fix: integration test failures — MagicMock BSON encoding and teardown…
