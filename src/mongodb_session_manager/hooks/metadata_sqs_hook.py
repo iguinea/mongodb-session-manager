@@ -108,7 +108,7 @@ import json
 import logging
 import asyncio
 from datetime import UTC, datetime
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 from .utils_async import dispatch_async
 
@@ -210,7 +210,7 @@ class MetadataSQSHook:
             )
 
 
-def create_metadata_hook(queue_url: str, metadata_fields: List[str] = None):
+def create_metadata_hook(queue_url: str, metadata_fields: Optional[List[str]] = None):
     """
     Create a single metadata hook function for mongodb-session-manager
 

@@ -539,7 +539,7 @@ class MongoDBSessionManager(RepositorySessionManager):
         self.delete_metadata(keys)
         return f"Successfully deleted metadata fields: {keys}"
 
-    def get_metadata_tool(self):
+    def get_metadata_tool(self) -> Callable:
         """Get a tool for managing session metadata.
 
         Returns:
