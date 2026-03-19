@@ -121,6 +121,8 @@ import asyncio
 from typing import Dict, Any, Optional
 from datetime import datetime, timezone
 
+from .utils_async import dispatch_async
+
 try:
     from .utils_sns import publish_message
 except ImportError:
@@ -285,7 +287,6 @@ class FeedbackSNSHook:
             base_message = f"Password: {session_viewer_password}\n\nSession: {session_id}\n\n{comment}"
             message = f"{body_prefix_text}{base_message}"
 
-            message = message.replace("_SESSION_ID_", session_id)
             # Log the message for debugging
             logger.debug(
                 f"Sending feedback notification to SNS topic {topic_arn}: {subject}"
@@ -399,35 +400,14 @@ def create_feedback_hook(
                 result = original_func(kwargs["feedback"])
 
                 # Send SNS notification asynchronously
-                try:
-                    # Get current event loop if available, otherwise create a new one
-                    try:
-                        loop = asyncio.get_running_loop()
-                        # We're in an async context, create task
-                        loop.create_task(
-                            sns_hook.on_feedback_add(
-                                session_id,
-                                kwargs["feedback"],
-                                session_manager=kwargs.get("session_manager"),
-                            )
-                        )
-                    except RuntimeError:
-                        # No running loop, run in a new thread to avoid blocking
-                        import threading
-
-                        def run_hook():
-                            asyncio.run(
-                                sns_hook.on_feedback_add(
-                                    session_id,
-                                    kwargs["feedback"],
-                                    session_manager=kwargs.get("session_manager"),
-                                )
-                            )
-
-                        thread = threading.Thread(target=run_hook, daemon=True)
-                        thread.start()
-                except Exception as e:
-                    logger.error(f"Error sending feedback notification to SNS: {e}")
+                dispatch_async(
+                    sns_hook.on_feedback_add(
+                        session_id,
+                        kwargs["feedback"],
+                        session_manager=kwargs.get("session_manager"),
+                    ),
+                    "sending feedback notification to SNS",
+                )
             else:
                 # For other operations, just call original
                 result = original_func()

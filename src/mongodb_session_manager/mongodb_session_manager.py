@@ -23,6 +23,28 @@ GUARDRAIL_ACTION_BLOCKED = "BLOCKED"
 GUARDRAIL_STOP_REASONS = frozenset(["guardrail_intervened", "content_filtered"])
 
 
+_MONGO_CLIENT_OPTIONS = frozenset(
+    {
+        "maxPoolSize",
+        "minPoolSize",
+        "maxIdleTimeMS",
+        "waitQueueTimeoutMS",
+        "serverSelectionTimeoutMS",
+        "connectTimeoutMS",
+        "socketTimeoutMS",
+        "compressors",
+        "retryWrites",
+        "retryReads",
+        "w",
+        "journal",
+        "fsync",
+        "authSource",
+        "authMechanism",
+        "tlsAllowInvalidCertificates",
+    }
+)
+
+
 class MongoDBSessionManager(RepositorySessionManager):
     """MongoDB Session Manager for Strands Agents with comprehensive session persistence and metadata management.
 
@@ -145,28 +167,8 @@ class MongoDBSessionManager(RepositorySessionManager):
         mongo_kwargs = {}
         parent_kwargs = {}
 
-        # Common MongoDB client options
-        mongo_options = {
-            "maxPoolSize",
-            "minPoolSize",
-            "maxIdleTimeMS",
-            "waitQueueTimeoutMS",
-            "serverSelectionTimeoutMS",
-            "connectTimeoutMS",
-            "socketTimeoutMS",
-            "compressors",
-            "retryWrites",
-            "retryReads",
-            "w",
-            "journal",
-            "fsync",
-            "authSource",
-            "authMechanism",
-            "tlsAllowInvalidCertificates",
-        }
-
         for key, value in kwargs.items():
-            if key in mongo_options:
+            if key in _MONGO_CLIENT_OPTIONS:
                 mongo_kwargs[key] = value
             else:
                 parent_kwargs[key] = value
@@ -232,10 +234,6 @@ class MongoDBSessionManager(RepositorySessionManager):
 
         self.delete_metadata = wrapped_delete
 
-    def append_message(self, message: Message, agent: Agent) -> None:
-        """Append a message to the session."""
-        super().append_message(message, agent)
-
     def redact_latest_message(
         self, redact_message: Message, agent: Agent, **kwargs: Any
     ) -> None:
@@ -267,11 +265,18 @@ class MongoDBSessionManager(RepositorySessionManager):
         now = datetime.now(UTC)
         policies_triggered = self._extract_guardrail_summary(guardrail_trace)
 
-        guardrail_event: Dict[str, Any] = {"action": action, "timestamp": now}
+        # Shared optional fields (present only when truthy)
+        optional: Dict[str, Any] = {}
         if stop_reason:
-            guardrail_event["stop_reason"] = stop_reason
+            optional["stop_reason"] = stop_reason
         if policies_triggered:
-            guardrail_event["policies_triggered"] = policies_triggered
+            optional["policies_triggered"] = policies_triggered
+
+        guardrail_event: Dict[str, Any] = {
+            "action": action,
+            "timestamp": now,
+            **optional,
+        }
         if guardrail_trace:
             guardrail_event["trace"] = guardrail_trace
 
@@ -280,11 +285,8 @@ class MongoDBSessionManager(RepositorySessionManager):
             "agent_id": agent.agent_id,
             "action": action,
             "timestamp": now,
+            **optional,
         }
-        if stop_reason:
-            session_event["stop_reason"] = stop_reason
-        if policies_triggered:
-            session_event["policies_triggered"] = policies_triggered
 
         self.session_repository.collection.update_one(
             {
@@ -415,7 +417,7 @@ class MongoDBSessionManager(RepositorySessionManager):
             {"_id": self.session_id},
             {f"agents.{agent.agent_id}.messages": {"$slice": -1}},
         )
-        if not (doc and "agents" in doc and agent.agent_id in doc["agents"]):
+        if not MongoDBSessionRepository._agent_exists(doc, agent.agent_id):
             return None
         messages = doc["agents"][agent.agent_id].get("messages", [])
         return messages[-1]["message_id"] if messages else None
@@ -477,17 +479,9 @@ class MongoDBSessionManager(RepositorySessionManager):
                 return model_id
         return getattr(agent.model, "model_id", str(agent.model))
 
-    def initialize(self, agent: "Agent", **kwargs: Any) -> None:
-        """Initialize an agent with a session."""
-        super().initialize(agent, **kwargs)
-
     def close(self) -> None:
         """Close the underlying MongoDB connection."""
-        # Access the repository through the parent class attribute
-        if hasattr(self, "session_repository") and hasattr(
-            self.session_repository, "close"
-        ):
-            self.session_repository.close()
+        self.session_repository.close()
 
     # CUSTOM METHODS
     def update_metadata(self, metadata: Dict[str, Any]) -> None:
@@ -603,17 +597,14 @@ class MongoDBSessionManager(RepositorySessionManager):
                 if error:
                     return error
 
-                action_handlers = {
-                    "get": lambda: session_manager._handle_metadata_get(keys),
-                    "set": lambda: session_manager._handle_metadata_set(metadata),
-                    "update": lambda: session_manager._handle_metadata_set(metadata),
-                    "delete": lambda: session_manager._handle_metadata_delete(keys),
-                }
-
-                handler = action_handlers.get(action)
-                if handler:
-                    return handler()
-                return f"Error: Unknown action '{action}'. Use 'get', 'set', 'update', or 'delete'"
+                if action == "get":
+                    return session_manager._handle_metadata_get(keys)
+                elif action in ("set", "update"):
+                    return session_manager._handle_metadata_set(metadata)
+                elif action == "delete":
+                    return session_manager._handle_metadata_delete(keys)
+                else:
+                    return f"Error: Unknown action '{action}'. Use 'get', 'set', 'update', or 'delete'"
 
             except Exception as e:
                 logger.error(f"Error in manage_metadata tool: {e}")
@@ -700,7 +691,7 @@ class MongoDBSessionManager(RepositorySessionManager):
                 {"_id": self.session_id}, {f"agents.{agent_id}.agent_data": 1}
             )
 
-            if not doc or "agents" not in doc or agent_id not in doc["agents"]:
+            if not MongoDBSessionRepository._agent_exists(doc, agent_id):
                 logger.debug(f"Agent {agent_id} not found in session {self.session_id}")
                 return None
 
@@ -830,7 +821,7 @@ class MongoDBSessionManager(RepositorySessionManager):
             doc = self.session_repository.collection.find_one(
                 {"_id": self.session_id}, {f"agents.{agent_id}.messages": 1}
             )
-            if doc and "agents" in doc and agent_id in doc["agents"]:
+            if MongoDBSessionRepository._agent_exists(doc, agent_id):
                 return len(doc["agents"][agent_id].get("messages", []))
             return 0
         except Exception as e:

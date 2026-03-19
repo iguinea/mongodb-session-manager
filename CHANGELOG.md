@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.7.0] - 2026-03-19
+
+### Refactored — Code Simplification & Quality Improvements
+- **Repository**: Fix `__dict__` mutation in `create_agent`, `update_agent`, `create_message`, `update_message` — now uses `.copy()` to avoid modifying caller objects
+- **Repository**: Consolidate timestamps with single `now = datetime.now(UTC)` per method (was creating microsecond discrepancies)
+- **Repository**: Extract helpers `_parse_iso_datetime`, `_agent_exists`, `_filter_message_data` to eliminate code duplication
+- **Repository**: Add `_AGENT_CONFIG_FIELDS` constant (replaces hardcoded `["model", "system_prompt"]`)
+- **Repository**: Reduce `list_messages` logging from INFO to DEBUG
+- **Connection Pool**: Fix logging bug — labels said `minPoolSize` for `retryWrites`/`retryReads` values
+- **Connection Pool**: Thread-safe `initialize` and `close` (now protected by `_lock`)
+- **Connection Pool**: Fix stats reporting — store `_resolved_kwargs` (merged defaults) instead of only user kwargs
+- **Connection Pool**: Remove credential exposure from `get_pool_stats` (connection_string no longer returned)
+- **Connection Pool**: Replace mutable class-level `_client_kwargs = {}` with `Optional[Dict] = None`
+- **Manager**: Extract `_MONGO_CLIENT_OPTIONS` as module-level frozenset constant
+- **Manager**: Remove pass-through methods `append_message` and `initialize` (just called super)
+- **Manager**: Simplify `close()` — remove redundant `hasattr` checks
+- **Manager**: Use `MongoDBSessionRepository._agent_exists()` in 3 methods for consistency
+- **Manager**: Replace `action_handlers` dict+lambdas with if/elif in metadata tool
+- **Factory**: Remove unused `_indexes_created` cache
+- **Factory**: Fix inconsistent `or` vs `is not None` parameter fallback
+- **Hooks**: Extract shared `dispatch_async` to `hooks/utils_async.py` (was duplicated in 3 files)
+- **Hooks**: Fix `datetime.now()` without timezone in SQS and WebSocket hooks → `datetime.now(UTC)`
+- **Hooks**: Remove dead code `_SESSION_ID_` replacement in feedback SNS hook
+- **Hooks**: Remove dead code `create_metadata_hooks` (plural) in SQS hook
+- **Hooks**: Cache boto3 clients per-region in `utils_sns.py` and `utils_sqs.py` (was creating new TCP connection per call)
+
+### Changed
+- Version bump to 0.7.0 across `__init__.py`, `pyproject.toml`, `CHANGELOG.md`
+- Updated version references in README.md, docs/README.md, CLAUDE.md
+
 ## [2026-03-18] PR #36 - Add: enriched guardrail metrics (v0.6.2) (@iguinea)
 
 - Add: enriched guardrail metrics with GuardrailTrace support (v0.6.2)

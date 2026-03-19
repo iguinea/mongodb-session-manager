@@ -30,6 +30,9 @@ _MESSAGE_EXCLUDED_FIELDS = frozenset(
     ]
 )
 
+# Fields stored on agent documents for auditing that SessionAgent.__init__() does not accept.
+_AGENT_CONFIG_FIELDS = frozenset(["model", "system_prompt"])
+
 
 class MongoDBSessionRepository(SessionRepository):
     """MongoDB implementation of SessionRepository interface for persistent session storage.
@@ -218,6 +221,21 @@ class MongoDBSessionRepository(SessionRepository):
         except PyMongoError as e:
             logger.warning(f"Failed to create indexes: {e}")
 
+    @staticmethod
+    def _parse_iso_datetime(dt_str: str) -> datetime:
+        """Convert ISO 8601 string (possibly with Z suffix) to Python datetime."""
+        return datetime.fromisoformat(dt_str.replace("Z", TIMEZONE_UTC_SUFFIX))
+
+    @staticmethod
+    def _agent_exists(doc: Optional[Dict], agent_id: str) -> bool:
+        """Check if an agent exists in a session document."""
+        return bool(doc and "agents" in doc and agent_id in doc["agents"])
+
+    @staticmethod
+    def _filter_message_data(msg_data: Dict) -> Dict:
+        """Filter out fields that SessionMessage.__init__() does not accept."""
+        return {k: v for k, v in msg_data.items() if k not in _MESSAGE_EXCLUDED_FIELDS}
+
     def create_session(self, session: Session, **kwargs: Any) -> Session:
         """Create a new Session in MongoDB.
 
@@ -226,6 +244,7 @@ class MongoDBSessionRepository(SessionRepository):
         """
         # Generate secure 32-character alphanumeric password
         # secrets.token_urlsafe(24) generates ~32 chars in base64url encoding
+        now = datetime.now(UTC)
         session_viewer_password = secrets.token_urlsafe(24)
 
         session_doc = {
@@ -234,8 +253,8 @@ class MongoDBSessionRepository(SessionRepository):
             "application_name": self.application_name,
             "session_type": session.session_type,
             "session_viewer_password": session_viewer_password,
-            "created_at": datetime.now(UTC),
-            "updated_at": datetime.now(UTC),
+            "created_at": now,
+            "updated_at": now,
             "agents": {},
             "metadata": {},
             "feedbacks": [],
@@ -282,22 +301,16 @@ class MongoDBSessionRepository(SessionRepository):
         self, session_id: str, session_agent: SessionAgent, **kwargs: Any
     ) -> None:
         """Create a new Agent in a Session."""
-
-        agent_data = session_agent.__dict__
-
-        agent_data["created_at"] = datetime.fromisoformat(
-            session_agent.created_at.replace("Z", TIMEZONE_UTC_SUFFIX)
-        )
-
-        agent_data["updated_at"] = datetime.fromisoformat(
-            session_agent.updated_at.replace("Z", TIMEZONE_UTC_SUFFIX)
-        )
+        now = datetime.now(UTC)
+        agent_data = session_agent.__dict__.copy()
+        agent_data["created_at"] = self._parse_iso_datetime(session_agent.created_at)
+        agent_data["updated_at"] = self._parse_iso_datetime(session_agent.updated_at)
 
         agent_doc = {
             "agent_data": agent_data,
             "messages": [],
-            "created_at": datetime.now(UTC),
-            "updated_at": datetime.now(UTC),
+            "created_at": now,
+            "updated_at": now,
         }
 
         try:
@@ -306,7 +319,7 @@ class MongoDBSessionRepository(SessionRepository):
                 {
                     "$set": {
                         f"agents.{session_agent.agent_id}": agent_doc,
-                        "updated_at": datetime.now(UTC),
+                        "updated_at": now,
                     }
                 },
             )
@@ -331,17 +344,14 @@ class MongoDBSessionRepository(SessionRepository):
                 {"_id": session_id}, {f"agents.{agent_id}": 1}
             )
 
-            if not doc or "agents" not in doc or agent_id not in doc["agents"]:
+            if not self._agent_exists(doc, agent_id):
                 logger.debug(f"Agent {agent_id} not found in session {session_id}")
                 return None
 
             agent_data = doc["agents"][agent_id]["agent_data"]
 
-            # Filter out config fields that SessionAgent doesn't accept
-            # These are stored for auditing but are not part of SessionAgent schema
-            config_fields = ["model", "system_prompt"]
             filtered_agent_data = {
-                k: v for k, v in agent_data.items() if k not in config_fields
+                k: v for k, v in agent_data.items() if k not in _AGENT_CONFIG_FIELDS
             }
 
             session_agent = SessionAgent(**filtered_agent_data)
@@ -356,15 +366,10 @@ class MongoDBSessionRepository(SessionRepository):
         self, session_id: str, session_agent: SessionAgent, **kwargs: Any
     ) -> None:
         """Update an Agent in a Session."""
-        agent_data = session_agent.__dict__
-
-        agent_data["created_at"] = datetime.fromisoformat(
-            session_agent.created_at.replace("Z", TIMEZONE_UTC_SUFFIX)
-        )
-
-        agent_data["updated_at"] = datetime.fromisoformat(
-            session_agent.updated_at.replace("Z", TIMEZONE_UTC_SUFFIX)
-        )
+        now = datetime.now(UTC)
+        agent_data = session_agent.__dict__.copy()
+        agent_data["created_at"] = self._parse_iso_datetime(session_agent.created_at)
+        agent_data["updated_at"] = self._parse_iso_datetime(session_agent.updated_at)
 
         try:
             # Preserve original created_at timestamp
@@ -372,12 +377,8 @@ class MongoDBSessionRepository(SessionRepository):
                 {"_id": session_id}, {f"agents.{session_agent.agent_id}.created_at": 1}
             )
 
-            created_at = datetime.now(UTC)
-            if (
-                existing
-                and "agents" in existing
-                and session_agent.agent_id in existing["agents"]
-            ):
+            created_at = now
+            if self._agent_exists(existing, session_agent.agent_id):
                 created_at = existing["agents"][session_agent.agent_id].get(
                     "created_at", created_at
                 )
@@ -387,11 +388,9 @@ class MongoDBSessionRepository(SessionRepository):
                 {
                     "$set": {
                         f"agents.{session_agent.agent_id}.agent_data": agent_data,
-                        f"agents.{session_agent.agent_id}.updated_at": datetime.now(
-                            UTC
-                        ),
+                        f"agents.{session_agent.agent_id}.updated_at": now,
                         f"agents.{session_agent.agent_id}.created_at": created_at,
-                        "updated_at": datetime.now(UTC),
+                        "updated_at": now,
                     }
                 },
             )
@@ -415,10 +414,10 @@ class MongoDBSessionRepository(SessionRepository):
         **kwargs: Any,
     ) -> None:
         """Create a new Message for the Agent."""
-
-        message_data = session_message.__dict__
-        message_data["created_at"] = datetime.now(UTC)
-        message_data["updated_at"] = datetime.now(UTC)
+        now = datetime.now(UTC)
+        message_data = session_message.__dict__.copy()
+        message_data["created_at"] = now
+        message_data["updated_at"] = now
 
         try:
             result = self.collection.update_one(
@@ -426,8 +425,8 @@ class MongoDBSessionRepository(SessionRepository):
                 {
                     "$push": {f"agents.{agent_id}.messages": message_data},
                     "$set": {
-                        f"agents.{agent_id}.updated_at": datetime.now(UTC),
-                        "updated_at": datetime.now(UTC),
+                        f"agents.{agent_id}.updated_at": now,
+                        "updated_at": now,
                     },
                 },
             )
@@ -452,7 +451,7 @@ class MongoDBSessionRepository(SessionRepository):
                 {"_id": session_id}, {f"agents.{agent_id}.messages": 1}
             )
 
-            if not doc or "agents" not in doc or agent_id not in doc["agents"]:
+            if not self._agent_exists(doc, agent_id):
                 return None
 
             messages = doc["agents"][agent_id].get("messages", [])
@@ -460,12 +459,7 @@ class MongoDBSessionRepository(SessionRepository):
             # Find message by ID
             for msg_data in messages:
                 if msg_data.get("message_id") == message_id:
-                    filtered_msg_data = {
-                        k: v
-                        for k, v in msg_data.items()
-                        if k not in _MESSAGE_EXCLUDED_FIELDS
-                    }
-                    return SessionMessage(**filtered_msg_data)
+                    return SessionMessage(**self._filter_message_data(msg_data))
 
             logger.debug(f"Message {message_id} not found")
             return None
@@ -483,7 +477,7 @@ class MongoDBSessionRepository(SessionRepository):
     ) -> None:
         """Update a Message (usually for redaction)."""
 
-        message_data = session_message.__dict__
+        message_data = session_message.__dict__.copy()
 
         try:
             # First, get the current messages to find the index
@@ -491,7 +485,7 @@ class MongoDBSessionRepository(SessionRepository):
                 {"_id": session_id}, {f"agents.{agent_id}.messages": 1}
             )
 
-            if not doc or "agents" not in doc or agent_id not in doc["agents"]:
+            if not self._agent_exists(doc, agent_id):
                 raise ValueError(f"Agent {agent_id} not found in session {session_id}")
 
             messages = doc["agents"][agent_id].get("messages", [])
@@ -548,18 +542,11 @@ class MongoDBSessionRepository(SessionRepository):
                 {"_id": session_id}, {f"agents.{agent_id}.messages": 1}
             )
 
-            if not doc:
-                logger.warning(f"No document found for session {session_id}")
-                return []
-
-            if "agents" not in doc or agent_id not in doc["agents"]:
-                logger.warning(f"Agent {agent_id} not found in session {session_id}")
+            if not doc or not self._agent_exists(doc, agent_id):
+                logger.debug(f"Agent {agent_id} not found in session {session_id}")
                 return []
 
             messages = doc["agents"][agent_id].get("messages", [])
-            logger.info(
-                f"Found {len(messages)} raw messages for agent {agent_id} in session {session_id}"
-            )
 
             # Sort messages by created_at (oldest first - chronological order)
             messages.sort(key=lambda x: x.get("created_at", ""), reverse=False)
@@ -574,21 +561,12 @@ class MongoDBSessionRepository(SessionRepository):
             result = []
             for i, msg_data in enumerate(messages):
                 try:
-                    logger.debug(f"Message {i} structure: {list(msg_data.keys())}")
-
-                    filtered_msg_data = {
-                        k: v
-                        for k, v in msg_data.items()
-                        if k not in _MESSAGE_EXCLUDED_FIELDS
-                    }
-
-                    result.append(SessionMessage(**filtered_msg_data))
+                    result.append(SessionMessage(**self._filter_message_data(msg_data)))
                 except Exception as e:
                     logger.error(f"Failed to convert message {i}: {e}")
-                    logger.error(f"Message data: {msg_data}")
 
-            logger.info(
-                f"Successfully converted {len(result)} messages for agent {agent_id}"
+            logger.debug(
+                f"Listed {len(result)} messages for agent {agent_id} in session {session_id}"
             )
             return result
 
@@ -646,15 +624,14 @@ class MongoDBSessionRepository(SessionRepository):
     def add_feedback(self, session_id: str, feedback: Dict[str, Any]) -> None:
         """Add feedback to the session."""
         try:
-            # Add created_at timestamp
-            feedback_doc = {**feedback, "created_at": datetime.now(UTC)}
+            now = datetime.now(UTC)
+            feedback_doc = {**feedback, "created_at": now}
 
-            # Push feedback to array and update session timestamp
             self.collection.update_one(
                 {"_id": session_id},
                 {
                     "$push": {"feedbacks": feedback_doc},
-                    "$set": {"updated_at": datetime.now(UTC)},
+                    "$set": {"updated_at": now},
                 },
             )
             logger.info(f"Added feedback to session {session_id}")

@@ -132,8 +132,10 @@ Comparison with SQS Hook:
 import json
 import logging
 import asyncio
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Dict, Any, List, Optional
+
+from .utils_async import dispatch_async
 
 try:
     import boto3
@@ -235,7 +237,7 @@ class MetadataWebSocketHook:
                 "session_id": session_id,
                 "operation": operation,
                 "metadata": relevant_metadata,
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
 
             # Convert to JSON string
@@ -286,23 +288,6 @@ class MetadataWebSocketHook:
                 f"Error sending metadata to WebSocket for session {session_id}: {e}",
                 exc_info=True,
             )
-
-
-def _dispatch_async(coro, error_context: str) -> None:
-    """Dispatch an async coroutine in the current event loop or a new thread."""
-    try:
-        loop = asyncio.get_running_loop()
-        loop.create_task(coro)
-    except RuntimeError:
-        import threading
-
-        def run_in_thread():
-            asyncio.run(coro)
-
-        thread = threading.Thread(target=run_in_thread, daemon=True)
-        thread.start()
-    except Exception as e:
-        logger.error(f"Error {error_context}: {e}")
 
 
 def _build_delete_metadata(original_func, keys: List) -> Dict[str, Any]:
@@ -361,7 +346,7 @@ def create_metadata_hook(
             """Wrapper that adapts to mongodb-session-manager hook interface."""
             if action == "update" and "metadata" in kwargs:
                 result = original_func(kwargs["metadata"])
-                _dispatch_async(
+                dispatch_async(
                     websocket_hook.on_metadata_change(
                         session_id, kwargs["metadata"], action
                     ),
@@ -370,7 +355,7 @@ def create_metadata_hook(
             elif action == "delete" and "keys" in kwargs:
                 result = original_func(kwargs["keys"])
                 deleted_metadata = _build_delete_metadata(original_func, kwargs["keys"])
-                _dispatch_async(
+                dispatch_async(
                     websocket_hook.on_metadata_change(
                         session_id, deleted_metadata, action
                     ),
