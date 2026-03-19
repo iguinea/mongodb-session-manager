@@ -16,7 +16,8 @@ def reset_connection_pool():
     MongoDBConnectionPool._instance = None
     MongoDBConnectionPool._client = None
     MongoDBConnectionPool._connection_string = None
-    MongoDBConnectionPool._client_kwargs = {}
+    MongoDBConnectionPool._user_kwargs = None
+    MongoDBConnectionPool._resolved_kwargs = None
 
 
 # ---------------------------------------------------------------------------

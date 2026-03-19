@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from threading import Lock
+from threading import RLock
 from typing import Any, Dict, Optional
 
 from pymongo import MongoClient
@@ -21,7 +21,7 @@ class MongoDBConnectionPool:
     """
 
     _instance: Optional[MongoDBConnectionPool] = None
-    _lock: Lock = Lock()
+    _lock: RLock = RLock()
     _client: Optional[MongoClient] = None
     _connection_string: Optional[str] = None
     _user_kwargs: Optional[Dict[str, Any]] = None

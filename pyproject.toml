@@ -1,9 +1,17 @@
 [project]
 name = "mongodb-session-manager"
-version = "0.7.0"
+version = "0.8.0"
 description = "MongoDB session management for Strands Agents"
 readme = "README.md"
 requires-python = ">=3.12.8"
+keywords = ["strands", "agents", "mongodb", "session", "management"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
 dependencies = [
     "boto3>=1.42.0",
     "fastapi>=0.128.0",
@@ -17,7 +25,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.0.0",
+    "pytest>=9.0.2",
     "pytest-cov>=6.0.0",
     "pytest-mock>=3.14.0",
     "pytest-asyncio>=1.0.0",
@@ -26,15 +34,6 @@ dev = [
 [[project.authors]]
 name = "Iñaki Guinea Beristain"
 email = "iguinea@gmail.com"
-keywords = ["strands", "agents", "mongodb", "session", "management"]
-classifiers = [
-    "Development Status :: 3 - Alpha",
-    "Intended Audience :: Developers",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
-]
 
 [project.urls]
 Homepage = "https://github.com/iguinea/mongodb-session-manager"
@@ -54,9 +53,3 @@ markers = [
     "slow: tests that take a long time to run",
 ]
 addopts = "-v --tb=short"
-
-[dependency-groups]
-dev = [
-    "pytest>=9.0.2",
-]
-

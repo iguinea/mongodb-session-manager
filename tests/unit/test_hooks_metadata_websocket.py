@@ -9,9 +9,9 @@ import pytest
 from mongodb_session_manager.hooks.metadata_websocket_hook import (
     MetadataWebSocketHook,
     create_metadata_hook,
-    _dispatch_async,
     _build_delete_metadata,
 )
+from mongodb_session_manager.hooks.utils_async import dispatch_async as _dispatch_async
 
 
 @pytest.fixture
