@@ -1,5 +1,9 @@
 # Changelog
 
+## [2026-03-19] PR #39 - Fix: deadlock, docs audit, broken tests (v0.8.0) (@iguinea)
+
+- Fix: deadlock in connection pool, docs audit, and broken test imports…
+
 ## [0.8.0] - 2026-03-19
 
 ### Fixed
