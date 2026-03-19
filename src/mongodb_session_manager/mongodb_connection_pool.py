@@ -24,7 +24,8 @@ class MongoDBConnectionPool:
     _lock: Lock = Lock()
     _client: Optional[MongoClient] = None
     _connection_string: Optional[str] = None
-    _client_kwargs: Dict[str, Any] = {}
+    _user_kwargs: Optional[Dict[str, Any]] = None
+    _resolved_kwargs: Optional[Dict[str, Any]] = None
 
     def __new__(cls) -> MongoDBConnectionPool:
         """Ensure singleton pattern."""
@@ -45,64 +46,66 @@ class MongoDBConnectionPool:
         Returns:
             The MongoClient instance
         """
-        instance = cls()
+        with cls._lock:
+            instance = cls._instance or cls()
 
-        # If already initialized with same connection string, return existing client
-        if (
-            instance._client is not None
-            and instance._connection_string == connection_string
-            and instance._client_kwargs == kwargs
-        ):
-            logger.debug("Returning existing MongoDB client from pool")
-            return instance._client
+            # If already initialized with same connection string, return existing client
+            if (
+                instance._client is not None
+                and instance._connection_string == connection_string
+                and instance._user_kwargs == kwargs
+            ):
+                logger.debug("Returning existing MongoDB client from pool")
+                return instance._client
 
-        # Close existing client if connection parameters changed
-        if instance._client is not None:
-            logger.info("Connection parameters changed, recreating MongoDB client")
+            # Close existing client if connection parameters changed
+            if instance._client is not None:
+                logger.info("Connection parameters changed, recreating MongoDB client")
+                try:
+                    instance._client.close()
+                except Exception as e:
+                    logger.warning(f"Error closing previous MongoDB client: {e}")
+                instance._client = None
+
+            # Create new client with optimized defaults for high concurrency
+            default_kwargs = {
+                "maxPoolSize": 100,
+                "minPoolSize": 10,
+                "maxIdleTimeMS": 30000,
+                "waitQueueTimeoutMS": 5000,
+                "serverSelectionTimeoutMS": 5000,
+                "connectTimeoutMS": 10000,
+                "socketTimeoutMS": 30000,
+                "retryWrites": True,
+                "retryReads": True,
+            }
+
+            # Merge with user-provided kwargs (user kwargs take precedence)
+            merged_kwargs = {**default_kwargs, **kwargs}
+
             try:
-                instance._client.close()
-            except Exception as e:
-                logger.warning(f"Error closing previous MongoDB client: {e}")
-            instance._client = None
+                instance._client = MongoClient(connection_string, **merged_kwargs)
+                instance._connection_string = connection_string
+                instance._user_kwargs = kwargs
+                instance._resolved_kwargs = merged_kwargs
 
-        # Create new client with optimized defaults for high concurrency
-        default_kwargs = {
-            "maxPoolSize": 100,  # Maximum connections in the pool
-            "minPoolSize": 10,  # Minimum connections to maintain
-            "maxIdleTimeMS": 30000,  # Close idle connections after 30s
-            "waitQueueTimeoutMS": 5000,  # Timeout waiting for connection
-            "serverSelectionTimeoutMS": 5000,  # Server selection timeout
-            "connectTimeoutMS": 10000,  # Initial connection timeout
-            "socketTimeoutMS": 30000,  # Socket operation timeout
-            "retryWrites": True,  # Automatic retry for write operations
-            "retryReads": True,  # Automatic retry for read operations
-        }
+                # Test the connection
+                instance._client.admin.command("ping")
 
-        # Merge with user-provided kwargs (user kwargs take precedence)
-        merged_kwargs = {**default_kwargs, **kwargs}
+                logger.info(
+                    f"MongoDB connection pool initialized - "
+                    f"maxPoolSize: {merged_kwargs['maxPoolSize']}, "
+                    f"minPoolSize: {merged_kwargs['minPoolSize']}, "
+                    f"retryWrites: {merged_kwargs['retryWrites']}, "
+                    f"retryReads: {merged_kwargs['retryReads']}"
+                )
 
-        try:
-            instance._client = MongoClient(connection_string, **merged_kwargs)
-            instance._connection_string = connection_string
-            instance._client_kwargs = kwargs
+                return instance._client
 
-            # Test the connection
-            instance._client.admin.command("ping")
-
-            logger.info(
-                f"MongoDB connection pool initialized - "
-                f"maxPoolSize: {merged_kwargs['maxPoolSize']}, "
-                f"minPoolSize: {merged_kwargs['minPoolSize']}"
-                f"minPoolSize: {merged_kwargs['retryWrites']}"
-                f"minPoolSize: {merged_kwargs['retryReads']}"
-            )
-
-            return instance._client
-
-        except PyMongoError as e:
-            logger.error(f"Failed to initialize MongoDB connection pool: {e}")
-            instance._client = None
-            raise
+            except PyMongoError as e:
+                logger.error(f"Failed to initialize MongoDB connection pool: {e}")
+                instance._client = None
+                raise
 
     @classmethod
     def get_client(cls) -> Optional[MongoClient]:
@@ -117,17 +120,19 @@ class MongoDBConnectionPool:
     @classmethod
     def close(cls) -> None:
         """Close the MongoDB connection pool."""
-        instance = cls()
-        if instance._client is not None:
-            try:
-                instance._client.close()
-                logger.info("MongoDB connection pool closed")
-            except Exception as e:
-                logger.error(f"Error closing MongoDB connection pool: {e}")
-            finally:
-                instance._client = None
-                instance._connection_string = None
-                instance._client_kwargs = {}
+        with cls._lock:
+            instance = cls._instance or cls()
+            if instance._client is not None:
+                try:
+                    instance._client.close()
+                    logger.info("MongoDB connection pool closed")
+                except Exception as e:
+                    logger.error(f"Error closing MongoDB connection pool: {e}")
+                finally:
+                    instance._client = None
+                    instance._connection_string = None
+                    instance._user_kwargs = None
+                    instance._resolved_kwargs = None
 
     @classmethod
     def get_pool_stats(cls) -> Dict[str, Any]:
@@ -141,16 +146,15 @@ class MongoDBConnectionPool:
             return {"status": "not_initialized"}
 
         try:
-            # Get server info and connection pool stats
             server_info = instance._client.server_info()
+            resolved = instance._resolved_kwargs or {}
 
             stats = {
                 "status": "connected",
-                "connection_string": instance._connection_string,
                 "server_version": server_info.get("version", "unknown"),
                 "pool_config": {
-                    "maxPoolSize": instance._client_kwargs.get("maxPoolSize", 100),
-                    "minPoolSize": instance._client_kwargs.get("minPoolSize", 0),
+                    "maxPoolSize": resolved.get("maxPoolSize"),
+                    "minPoolSize": resolved.get("minPoolSize"),
                 },
             }
 

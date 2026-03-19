@@ -12,9 +12,12 @@ import boto3
 from botocore.exceptions import ClientError, NoCredentialsError
 
 
+_sqs_clients: Dict[str, Any] = {}
+
+
 def _get_sqs_client(region_name: Optional[str] = None):
     """
-    Crear un cliente SQS reutilizable.
+    Get or create a cached SQS client for the given region.
 
     Args:
         region_name: Región AWS donde está la cola (por defecto: desde el entorno)
@@ -28,9 +31,13 @@ def _get_sqs_client(region_name: Optional[str] = None):
     if not region_name:
         region_name = os.environ.get("AWS_DEFAULT_REGION", "eu-west-1")
 
+    if region_name in _sqs_clients:
+        return _sqs_clients[region_name]
+
     try:
-        session = boto3.Session()
-        return session.client(service_name="sqs", region_name=region_name)
+        client = boto3.Session().client(service_name="sqs", region_name=region_name)
+        _sqs_clients[region_name] = client
+        return client
     except NoCredentialsError:
         raise NoCredentialsError()
 

@@ -107,8 +107,10 @@ Security Considerations:
 import json
 import logging
 import asyncio
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Dict, Any, List
+
+from .utils_async import dispatch_async
 
 try:
     from .utils_sqs import send_message
@@ -171,7 +173,7 @@ class MetadataSQSHook:
                 "event": "metadata_update",
                 "operation": operation,
                 "metadata": relevant_metadata,
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
 
             # Convert to JSON string
@@ -208,46 +210,6 @@ class MetadataSQSHook:
             )
 
 
-# Helper function to create hook configuration
-def create_metadata_hooks(queue_url: str) -> Dict[str, Any]:
-    """
-    Create hook configuration for mongodb-session-manager
-
-    Args:
-        queue_url: Full SQS queue URL
-
-    Returns:
-        Dictionary with hook functions for set, update, and delete operations
-    """
-    try:
-        hook = MetadataSQSHook(queue_url)
-        return {
-            "on_metadata_set": hook.on_metadata_change,
-            "on_metadata_update": hook.on_metadata_change,
-            "on_metadata_delete": hook.on_metadata_change,
-        }
-    except Exception as e:
-        logger.error(f"Failed to create metadata hooks: {e}")
-        return {}
-
-
-def _dispatch_async(coro, error_context: str) -> None:
-    """Dispatch an async coroutine in the current event loop or a new thread."""
-    try:
-        loop = asyncio.get_running_loop()
-        loop.create_task(coro)
-    except RuntimeError:
-        import threading
-
-        def run_in_thread():
-            asyncio.run(coro)
-
-        thread = threading.Thread(target=run_in_thread, daemon=True)
-        thread.start()
-    except Exception as e:
-        logger.error(f"Error {error_context}: {e}")
-
-
 def create_metadata_hook(queue_url: str, metadata_fields: List[str] = None):
     """
     Create a single metadata hook function for mongodb-session-manager
@@ -268,14 +230,14 @@ def create_metadata_hook(queue_url: str, metadata_fields: List[str] = None):
             """Wrapper that adapts to mongodb-session-manager hook interface."""
             if action == "update" and "metadata" in kwargs:
                 result = original_func(kwargs["metadata"])
-                _dispatch_async(
+                dispatch_async(
                     sqs_hook.on_metadata_change(session_id, kwargs["metadata"], action),
                     "sending metadata update to SQS",
                 )
             elif action == "delete" and "keys" in kwargs:
                 result = original_func(kwargs["keys"])
                 deleted_metadata = {key: None for key in kwargs["keys"]}
-                _dispatch_async(
+                dispatch_async(
                     sqs_hook.on_metadata_change(session_id, deleted_metadata, action),
                     "sending metadata delete to SQS",
                 )

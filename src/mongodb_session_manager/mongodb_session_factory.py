@@ -61,9 +61,6 @@ class MongoDBSessionManagerFactory:
         else:
             raise ValueError("Either connection_string or client must be provided")
 
-        # Cache for index creation status (per collection)
-        self._indexes_created: Dict[str, bool] = {}
-
     def create_session_manager(
         self,
         session_id: str,
@@ -86,10 +83,13 @@ class MongoDBSessionManagerFactory:
         Returns:
             New MongoDBSessionManager instance using shared connection
         """
-        db_name = database_name or self.database_name
-        coll_name = collection_name or self.collection_name
-        meta_fields = metadata_fields or self.metadata_fields
-        # Use provided application_name or fall back to factory default
+        db_name = database_name if database_name is not None else self.database_name
+        coll_name = (
+            collection_name if collection_name is not None else self.collection_name
+        )
+        meta_fields = (
+            metadata_fields if metadata_fields is not None else self.metadata_fields
+        )
         app_name = (
             application_name if application_name is not None else self.application_name
         )
