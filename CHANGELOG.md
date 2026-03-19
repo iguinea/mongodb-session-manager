@@ -1,5 +1,10 @@
 # Changelog
 
+## [2026-03-19] PR #37 - Refactor: simplify core modules (v0.7.0) (@iguinea)
+
+- Refactor: simplify core modules — fix bugs, eliminate duplication, im…
+- Merge: resolve CHANGELOG.md conflict with origin/main
+
 ## [0.7.0] - 2026-03-19
 
 ### Refactored — Code Simplification & Quality Improvements
