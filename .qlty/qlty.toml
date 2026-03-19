@@ -104,7 +104,7 @@ set.ignored = true
 [[triage]]
 match.plugins = ["bandit"]
 match.rules = ["bandit:B104"]
-match.file_patterns = ["examples/*.py", "session_viewer/backend/config.py"]
+match.file_patterns = ["examples/*.py"]
 set.ignored = true
 
 # Ignore radarlint parameter count in test fixtures - conftest factories need many params
