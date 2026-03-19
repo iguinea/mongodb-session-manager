@@ -119,3 +119,10 @@ set.ignored = true
 match.plugins = ["trufflehog"]
 match.file_patterns = ["README.md", "CLAUDE.md", "docs/**/*.md"]
 set.ignored = true
+
+# Ignore HEALTHCHECK in devcontainer - not a production service
+[[triage]]
+match.plugins = ["trivy"]
+match.rules = ["trivy:DS-0026"]
+match.file_patterns = [".devcontainer/**"]
+set.ignored = true
