@@ -263,3 +263,77 @@ uv run python -m pytest tests/ -v
 - Host: `localhost:8550` (or `host.docker.internal:8550` from Docker)
 - User: `mongodb`
 - Password: `mongodb`
+
+## Workflow Guidelines
+
+Guias de workflow en `.claude/rules/workflow-*.md`. Ver detalle en cada fichero:
+
+| Guia | Fichero |
+|------|---------|
+| Planning First | `workflow-planning.md` |
+| Parallel Work | `workflow-parallel.md` |
+| TDD Discipline | `workflow-tdd.md` |
+| TDD Agent Pipeline | `workflow-tdd-pipeline.md` |
+| Subagent Strategy | `workflow-subagents.md` |
+| Self-Improvement | `workflow-self-improvement.md` |
+| Code Review | `workflow-review.md` |
+| Multi-model Research | `workflow-research.md` |
+| Bug Fixing | `workflow-bugfix.md` |
+| Diagrams | `workflow-diagrams.md` |
+| Skills & Automation | `workflow-skills.md` |
+| Dev Lifecycle | `workflow-dev-lifecycle.md` |
+| Frontend First | `workflow-frontend-first.md` |
+| Release & Ops | `workflow-release-ops.md` |
+| Data Contracts | `workflow-contracts.md` |
+| Project Documentation | `workflow-docs.md` |
+| Persistence Agnostic | `workflow-persistence.md` |
+| Issue-Driven Dev | `workflow-issue-driven.md` |
+
+## Coding Rules
+
+Reglas de programacion en `.claude/rules/coding-*.md`:
+
+| Fichero | Contenido |
+|---------|-----------|
+| `coding-efficiency.md` | Memoria, pools, profiling |
+| `coding-concurrency.md` | Race conditions, async, graceful shutdown |
+| `coding-database.md` | Connection pooling, MongoDB, indices |
+| `coding-errors.md` | Error handling, context, custom exceptions |
+| `coding-testing.md` | pytest, coverage 80%+, regression tests |
+| `coding-api-design.md` | REST, paginacion, middleware order |
+| `coding-caching.md` | TTL, invalidacion, cache-aside |
+| `coding-security.md` | OWASP, secrets, injection, CORS |
+| `coding-observability.md` | Structured logging, tracing, metricas |
+| `coding-architecture.md` | File limits, DI, docs actualizadas |
+| `coding-dependencies.md` | Docs oficiales, version verification |
+| `coding-python.md` | Async, Pydantic, ruff, pytest |
+| `coding-checklist.md` | Checklist transversal de programacion |
+
+## Spec-Driven Development (Spec Kit)
+
+Workflow: Constitution -> Specify -> Plan -> Tasks -> Implement.
+
+| Comando | Descripcion |
+|---------|-------------|
+| `/speckit.constitution` | Revisar principios del proyecto |
+| `/speckit.specify` | Crear especificacion formal |
+| `/speckit.plan` | Generar plan de implementacion |
+| `/speckit.tasks` | Descomponer en tareas ejecutables |
+| `/speckit.implement` | Implementar siguiendo la spec |
+
+Constitucion en `.specify/memory/constitution.md` (9 articulos: SOLID + TDD + DDD + KISS + YAGNI).
+
+## Agent Teams (Experimental)
+
+| Setting | Valor | Ubicacion |
+|---------|-------|-----------|
+| Feature flag | `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` | `.claude/settings.local.json` |
+| Teammate mode | `auto` | `.claude/settings.json` |
+
+## Project Documentation
+
+Documentacion en `docs/`, navegable con MkDocs Material.
+
+```bash
+mkdocs serve            # http://127.0.0.1:8000
+```

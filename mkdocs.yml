@@ -1,0 +1,116 @@
+site_name: MongoDB Session Manager Documentation
+site_url: ""
+repo_url: https://github.com/iguinea/mongodb-session-manager
+
+theme:
+  name: material
+  language: es
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Cambiar a modo oscuro
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Cambiar a modo claro
+  features:
+    - navigation.instant
+    - navigation.instant.progress
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - navigation.footer
+    - search.suggest
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - toc.follow
+
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.betterem
+  - pymdownx.caret
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.tilde
+
+plugins:
+  - search
+  - tags
+
+nav:
+  - Home: README.md
+  - Getting Started:
+      - Installation: getting-started/installation.md
+      - Quick Start: getting-started/quickstart.md
+      - Basic Concepts: getting-started/basic-concepts.md
+  - User Guide:
+      - Session Management: user-guide/session-management.md
+      - Connection Pooling: user-guide/connection-pooling.md
+      - Factory Pattern: user-guide/factory-pattern.md
+      - Metadata Management: user-guide/metadata-management.md
+      - Feedback System: user-guide/feedback-system.md
+      - Guardrail Auditing: user-guide/guardrail-auditing.md
+      - Async Streaming: user-guide/async-streaming.md
+      - AWS Integrations: user-guide/aws-integrations.md
+  - Examples:
+      - Basic Usage: examples/basic-usage.md
+      - FastAPI Integration: examples/fastapi-integration.md
+      - Metadata Patterns: examples/metadata-patterns.md
+      - Feedback Patterns: examples/feedback-patterns.md
+      - AWS Patterns: examples/aws-patterns.md
+  - Architecture:
+      - Overview: architecture/overview.md
+      - Data Model: architecture/data-model.md
+      - Design Decisions: architecture/design-decisions.md
+      - Performance: architecture/performance.md
+  - API Reference:
+      - MongoDBSessionManager: api-reference/mongodb-session-manager.md
+      - MongoDBSessionRepository: api-reference/mongodb-session-repository.md
+      - MongoDBConnectionPool: api-reference/mongodb-connection-pool.md
+      - MongoDBSessionFactory: api-reference/mongodb-session-factory.md
+      - Hooks: api-reference/hooks.md
+  - Development:
+      - Setup: development/setup.md
+      - Testing: development/testing.md
+      - Contributing: development/contributing.md
+      - Releasing: development/releasing.md
+  - FAQ: faq.md

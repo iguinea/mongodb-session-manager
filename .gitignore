@@ -18,7 +18,8 @@ uv.lock
 
 
 .devcontainer
-.claude/
+# Claude Code - ignore local/personal files, keep shared config
+.claude/settings.local.json
 # CLAUDE.md
 CLAUDE.local.md
-CLAUDE.md
+site/
