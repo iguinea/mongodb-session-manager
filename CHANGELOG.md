@@ -1,5 +1,9 @@
 # Changelog
 
+## [2026-03-20] PR #42 - Chore: add workflow guidelines, coding rules, MkDocs, Spec Kit and Agent Teams (@iguinea)
+
+- Chore: add workflow guidelines, coding rules, MkDocs, Spec Kit and Ag…
+
 ## [2026-03-19] PR #41 - Chore: remove session_viewer application (@iguinea)
 
 - Chore: remove session_viewer application
