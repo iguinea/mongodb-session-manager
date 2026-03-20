@@ -1,5 +1,9 @@
 # Changelog
 
+## [2026-03-20] PR #43 - Chore: add Spec Kit slash commands (@iguinea)
+
+- Chore: add Spec Kit slash commands
+
 ## [2026-03-20] PR #42 - Chore: add workflow guidelines, coding rules, MkDocs, Spec Kit and Agent Teams (@iguinea)
 
 - Chore: add workflow guidelines, coding rules, MkDocs, Spec Kit and Ag…
