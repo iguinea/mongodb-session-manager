@@ -51,6 +51,7 @@ except ImportError:
     MetadataWebSocketHook = None
     create_metadata_websocket_hook = None
 
+
 __all__ = [
     # Core classes
     "MongoDBSessionManager",
@@ -117,6 +118,6 @@ __all__.extend(
     ]
 )
 
-__version__ = "0.8.1"
+__version__ = "0.9.0"
 __author__ = "Iñaki Guinea Beristain"
 __author_email__ = "iguinea@gmail.com"

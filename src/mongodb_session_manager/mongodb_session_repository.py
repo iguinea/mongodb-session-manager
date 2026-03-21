@@ -31,7 +31,7 @@ _MESSAGE_EXCLUDED_FIELDS = frozenset(
 )
 
 # Fields stored on agent documents for auditing that SessionAgent.__init__() does not accept.
-_AGENT_CONFIG_FIELDS = frozenset(["model", "system_prompt"])
+_AGENT_CONFIG_FIELDS = frozenset(["model", "system_prompt", "prompt_metadata"])
 
 
 class MongoDBSessionRepository(SessionRepository):

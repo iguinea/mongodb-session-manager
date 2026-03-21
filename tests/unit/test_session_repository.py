@@ -743,6 +743,44 @@ class TestSessionViewerPassword:
         assert mock_repository.get_session_viewer_password("missing") is None
 
 
+class TestAgentConfigFields:
+    def test_includes_prompt_metadata(self):
+        from mongodb_session_manager.mongodb_session_repository import (
+            _AGENT_CONFIG_FIELDS,
+        )
+
+        assert "prompt_metadata" in _AGENT_CONFIG_FIELDS
+
+    def test_read_agent_filters_prompt_metadata(
+        self, mock_repository, mock_mongo_collection
+    ):
+        mock_mongo_collection.find_one.return_value = {
+            "agents": {
+                "a1": {
+                    "agent_data": {
+                        "agent_id": "a1",
+                        "state": {},
+                        "conversation_manager_state": {},
+                        "model": "claude-3",
+                        "system_prompt": "You are helpful",
+                        "prompt_metadata": {
+                            "prompt_id": "p1",
+                            "prompt_name": "Test",
+                            "prompt_version": "1.0.0",
+                            "deployment_id": "d1",
+                            "deployment_name": "prod",
+                        },
+                        "created_at": "2024-01-01T00:00:00+00:00",
+                        "updated_at": "2024-01-01T00:00:00+00:00",
+                    }
+                }
+            }
+        }
+        result = mock_repository.read_agent("s1", "a1")
+        assert result is not None
+        assert result.agent_id == "a1"
+
+
 class TestGetApplicationName:
     def test_returns_application_name(self, mock_repository, mock_mongo_collection):
         mock_mongo_collection.find_one.return_value = {"application_name": "my-app"}

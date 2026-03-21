@@ -163,3 +163,90 @@ class TestManagerIntegration:
 
         agents = manager.list_agents()
         assert len(agents) >= 2
+
+    def test_set_prompt_metadata_roundtrip(self, manager, unique_session_id):
+        # Create agent first via sync
+        mock_agent = MagicMock()
+        mock_agent.agent_id = "meta-agent"
+        mock_agent.messages = []
+        mock_agent.model = None
+        mock_agent.system_prompt = "You are helpful"
+        mock_agent.state.get.return_value = {}
+        mock_agent.state._get_version.return_value = 0
+        mock_agent._interrupt_state._get_version.return_value = 0
+        mock_agent._interrupt_state.to_dict.return_value = {}
+        mock_agent.conversation_manager.get_state.return_value = {}
+        summary = {
+            "total_cycles": 0,
+            "total_duration": 0,
+            "average_cycle_time": 0,
+            "accumulated_usage": {
+                "inputTokens": 0,
+                "outputTokens": 0,
+                "totalTokens": 0,
+                "cacheReadInputTokens": 0,
+                "cacheWriteInputTokens": 0,
+            },
+            "accumulated_metrics": {"latencyMs": 0, "timeToFirstByteMs": 0},
+            "tool_usage": {},
+            "traces": [],
+        }
+        mock_agent.event_loop_metrics.get_summary.return_value = summary
+        manager.sync_agent(mock_agent)
+
+        # Set prompt metadata
+        metadata = {
+            "prompt_id": "prompt-abc",
+            "prompt_name": "Customer Support V2",
+            "prompt_version": "1.2.0",
+            "deployment_id": "deploy-xyz",
+            "deployment_name": "production",
+        }
+        manager.set_prompt_metadata("meta-agent", metadata)
+
+        # Retrieve and verify
+        config = manager.get_agent_config("meta-agent")
+        assert config is not None
+        assert config["prompt_metadata"] == metadata
+
+    def test_list_agents_includes_prompt_metadata(self, manager, unique_session_id):
+        # Create two agents, one with prompt metadata
+        for i, agent_id in enumerate(["pm-agent-a", "pm-agent-b"]):
+            mock_agent = MagicMock()
+            mock_agent.agent_id = agent_id
+            mock_agent.messages = []
+            mock_agent.model = None
+            mock_agent.system_prompt = None
+            mock_agent.state.get.return_value = {}
+            mock_agent.state._get_version.return_value = i
+            mock_agent._interrupt_state._get_version.return_value = 0
+            mock_agent._interrupt_state.to_dict.return_value = {}
+            mock_agent.conversation_manager.get_state.return_value = {}
+            summary = {
+                "total_cycles": 0,
+                "total_duration": 0,
+                "average_cycle_time": 0,
+                "accumulated_usage": {
+                    "inputTokens": 0,
+                    "outputTokens": 0,
+                    "totalTokens": 0,
+                    "cacheReadInputTokens": 0,
+                    "cacheWriteInputTokens": 0,
+                },
+                "accumulated_metrics": {"latencyMs": 0, "timeToFirstByteMs": 0},
+                "tool_usage": {},
+                "traces": [],
+            }
+            mock_agent.event_loop_metrics.get_summary.return_value = summary
+            manager.sync_agent(mock_agent)
+
+        # Set metadata only on agent A
+        manager.set_prompt_metadata(
+            "pm-agent-a", {"prompt_id": "p1", "prompt_version": "1.0"}
+        )
+
+        agents = manager.list_agents()
+        agent_a = next(a for a in agents if a["agent_id"] == "pm-agent-a")
+        agent_b = next(a for a in agents if a["agent_id"] == "pm-agent-b")
+        assert agent_a["prompt_metadata"]["prompt_id"] == "p1"
+        assert agent_b["prompt_metadata"] is None

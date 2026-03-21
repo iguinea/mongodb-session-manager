@@ -1,6 +1,6 @@
 # MongoDB Session Manager
 
-[![Version](https://img.shields.io/badge/version-0.8.1-blue.svg)](https://github.com/iguinea/mongodb-session-manager)
+[![Version](https://img.shields.io/badge/version-0.9.0-blue.svg)](https://github.com/iguinea/mongodb-session-manager)
 [![Python](https://img.shields.io/badge/python-3.12+-green.svg)](https://python.org)
 
 A MongoDB session manager for [Strands Agents](https://github.com/strands-agents/strands-agents-python) that provides persistent storage for agent conversations and state, with connection pooling optimized for stateless environments.
@@ -155,8 +155,9 @@ Main class extending `RepositorySessionManager` from Strands SDK.
 | `add_feedback(feedback)` | Store user feedback with rating and comment |
 | `get_feedbacks()` | Retrieve all feedback for the session |
 | `get_application_name()` | Get session's application name (read-only, immutable) |
-| `get_agent_config(agent_id)` | Get agent configuration (model, system_prompt) |
-| `update_agent_config(agent_id, ...)` | Update agent model or system_prompt |
+| `get_agent_config(agent_id)` | Get agent configuration (model, system_prompt, prompt_metadata) |
+| `update_agent_config(agent_id, ...)` | Update agent model, system_prompt, or prompt_metadata |
+| `set_prompt_metadata(agent_id, metadata)` | Set prompt lineage metadata for an agent |
 | `list_agents()` | List all agents in the session with their configurations |
 | `get_message_count(agent_id)` | Get message count for a specific agent |
 | `get_session_viewer_password()` | Get the auto-generated Session Viewer password |
@@ -234,6 +235,32 @@ session_manager = MongoDBSessionManager(
 )
 ```
 
+## Prompt Metadata
+
+Track prompt lineage by associating metadata with each agent's system prompt:
+
+```python
+# After syncing the agent, stamp prompt lineage metadata
+session_manager.set_prompt_metadata("support-agent", {
+    "prompt_id": "prompt-abc",
+    "prompt_name": "Customer Support V2",
+    "prompt_version": "1.2.0",
+    "deployment_id": "deploy-xyz",
+    "deployment_name": "production",
+})
+
+# Retrieve later via get_agent_config
+config = session_manager.get_agent_config("support-agent")
+print(config["prompt_metadata"])
+# {"prompt_id": "prompt-abc", "prompt_version": "1.2.0", ...}
+
+# Or update via update_agent_config
+session_manager.update_agent_config(
+    "support-agent",
+    prompt_metadata={"prompt_id": "p1", "prompt_version": "2.0.0", ...}
+)
+```
+
 ## AWS Integration (Optional)
 
 ### SNS Feedback Notifications
@@ -308,6 +335,13 @@ Sessions are stored as nested documents:
             "agent_data": {
                 "model": "claude-sonnet-4",
                 "system_prompt": "You are helpful",
+                "prompt_metadata": {
+                    "prompt_id": "prompt-abc",
+                    "prompt_name": "Customer Support V2",
+                    "prompt_version": "1.2.0",
+                    "deployment_id": "deploy-xyz",
+                    "deployment_name": "production"
+                },
                 "state": {"key": "value"}
             },
             "messages": [

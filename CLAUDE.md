@@ -71,7 +71,7 @@ Sessions stored as single documents with embedded data:
 ```
 {
   session_id, application_name, session_viewer_password, created_at, updated_at,
-  agents: { agent_id: { agent_data: {model, system_prompt, state}, messages: [...] } },
+  agents: { agent_id: { agent_data: {model, system_prompt, prompt_metadata?, state}, messages: [...] } },
   metadata: {...},
   feedbacks: [{rating, comment, created_at}],
   guardrail_events: [{message_id, agent_id, action, timestamp, stop_reason?, policies_triggered?}]
@@ -158,6 +158,20 @@ session_manager = MongoDBSessionManager(
 ```
 
 
+### Prompt Metadata
+```python
+# After sync_agent(), stamp prompt lineage on the agent
+manager.set_prompt_metadata("agent-id", {
+    "prompt_id": "prompt-123",
+    "prompt_name": "Customer Support V2",
+    "prompt_version": "1.2.0",
+    "deployment_id": "deploy-abc",
+    "deployment_name": "production",
+})
+# Retrieve: manager.get_agent_config("agent-id")["prompt_metadata"]
+```
+
+
 ## Version Management
 
 When releasing, update version in **three places**:
@@ -165,7 +179,7 @@ When releasing, update version in **three places**:
 2. `pyproject.toml` (`version`)
 3. `CHANGELOG.md` (add release entry)
 
-Current version: **0.8.1**
+Current version: **0.9.0**
 
 ## Workflow Rules
 

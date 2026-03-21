@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0] - 2026-03-21
+
+### Added
+- **Prompt Metadata**: New `set_prompt_metadata(agent_id, metadata)` method to store prompt lineage (prompt_id, prompt_name, prompt_version, deployment_id, deployment_name) per agent
+- **Prompt Metadata in Config**: `get_agent_config()`, `update_agent_config()`, and `list_agents()` now include `prompt_metadata` field
+- `prompt_metadata` added to `_AGENT_CONFIG_FIELDS` for proper filtering during SessionAgent reconstruction
+
 ## [2026-03-20] PR #42 - Chore: add workflow guidelines, coding rules, MkDocs, Spec Kit and Agent Teams (@iguinea)
 
 - Chore: add workflow guidelines, coding rules, MkDocs, Spec Kit and Ag…
