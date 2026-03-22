@@ -604,11 +604,102 @@ class TestAgentConfigOperations:
         result = manager.list_agents()
         assert len(result) == 2
 
+    def test_get_agent_config_includes_prompt_metadata(self, manager, mock_repo):
+        mock_repo.collection.find_one.return_value = {
+            "agents": {
+                "a1": {
+                    "agent_data": {
+                        "model": "claude-3",
+                        "system_prompt": "helpful",
+                        "prompt_metadata": {
+                            "prompt_id": "p1",
+                            "prompt_name": "Support",
+                            "prompt_version": "1.0.0",
+                            "deployment_id": "d1",
+                            "deployment_name": "prod",
+                        },
+                    }
+                }
+            }
+        }
+        result = manager.get_agent_config("a1")
+        assert result["prompt_metadata"]["prompt_id"] == "p1"
+        assert result["prompt_metadata"]["prompt_version"] == "1.0.0"
+
+    def test_get_agent_config_prompt_metadata_none_when_absent(
+        self, manager, mock_repo
+    ):
+        mock_repo.collection.find_one.return_value = {
+            "agents": {
+                "a1": {"agent_data": {"model": "claude-3", "system_prompt": "helpful"}}
+            }
+        }
+        result = manager.get_agent_config("a1")
+        assert result["prompt_metadata"] is None
+
+    def test_update_agent_config_with_prompt_metadata(self, manager, mock_repo):
+        mock_repo.collection.update_one.return_value = MagicMock(matched_count=1)
+        metadata = {
+            "prompt_id": "p1",
+            "prompt_name": "Support",
+            "prompt_version": "1.0.0",
+            "deployment_id": "d1",
+            "deployment_name": "prod",
+        }
+        manager.update_agent_config("a1", prompt_metadata=metadata)
+        call_args = mock_repo.collection.update_one.call_args
+        set_data = call_args[0][1]["$set"]
+        assert set_data["agents.a1.agent_data.prompt_metadata"] == metadata
+
+    def test_list_agents_includes_prompt_metadata(self, manager, mock_repo):
+        mock_repo.collection.find_one.return_value = {
+            "agents": {
+                "a1": {
+                    "agent_data": {
+                        "model": "m1",
+                        "prompt_metadata": {"prompt_id": "p1"},
+                    }
+                },
+                "a2": {"agent_data": {"model": "m2"}},
+            }
+        }
+        result = manager.list_agents()
+        a1 = next(a for a in result if a["agent_id"] == "a1")
+        a2 = next(a for a in result if a["agent_id"] == "a2")
+        assert a1["prompt_metadata"]["prompt_id"] == "p1"
+        assert a2["prompt_metadata"] is None
+
     def test_get_message_count(self, manager, mock_repo):
         mock_repo.collection.find_one.return_value = {
             "agents": {"a1": {"messages": [{"id": 1}, {"id": 2}, {"id": 3}]}}
         }
         assert manager.get_message_count("a1") == 3
+
+
+# ---------------------------------------------------------------------------
+# set_prompt_metadata
+# ---------------------------------------------------------------------------
+
+
+class TestSetPromptMetadata:
+    def test_set_prompt_metadata_happy_path(self, manager, mock_repo):
+        mock_repo.collection.update_one.return_value = MagicMock(matched_count=1)
+        metadata = {
+            "prompt_id": "p1",
+            "prompt_name": "Support",
+            "prompt_version": "1.0.0",
+            "deployment_id": "d1",
+            "deployment_name": "prod",
+        }
+        manager.set_prompt_metadata("a1", metadata)
+        call_args = mock_repo.collection.update_one.call_args
+        set_data = call_args[0][1]["$set"]
+        assert set_data["agents.a1.agent_data.prompt_metadata"] == metadata
+
+    def test_set_prompt_metadata_raises_when_session_missing(self, manager, mock_repo):
+        mock_repo.collection.update_one.return_value = MagicMock(matched_count=0)
+        with pytest.raises(ValueError, match="Session test-session not found"):
+            manager.set_prompt_metadata("a1", {"prompt_id": "p1"})
 
 
 # ---------------------------------------------------------------------------

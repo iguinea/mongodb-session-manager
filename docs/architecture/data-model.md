@@ -93,6 +93,13 @@ Each document represents a complete session with all its agents, messages, and m
                 "agent_id": "support-agent",
                 "model": "claude-3-sonnet-20240229",
                 "system_prompt": "You are a helpful customer support agent.",
+                "prompt_metadata": {
+                    "prompt_id": "prompt-cs-v2",
+                    "prompt_name": "Customer Support V2",
+                    "prompt_version": "1.2.0",
+                    "deployment_id": "deploy-prod-001",
+                    "deployment_name": "production"
+                },
                 "temperature": 0.7,
                 "max_tokens": 1024,
                 "state": {
@@ -256,6 +263,7 @@ Session Document (Root)
 | Root | feedbacks | array | feedback objects | Yes |
 | Root | agents | object | keyed by agent_id | Yes |
 | Agent | agent_data | object | Strands SDK format | Yes |
+| Agent | agent_data.prompt_metadata | object | prompt lineage | No |
 | Agent | created_at | ISODate | UTC timestamp | Yes |
 | Agent | updated_at | ISODate | UTC timestamp | Yes |
 | Agent | messages | array | message objects | Yes |
@@ -397,6 +405,13 @@ Agents are stored in an object (not array) keyed by `agent_id`:
         "agent_id": "support-agent",
         "model": "claude-3-sonnet-20240229",
         "system_prompt": "You are a helpful customer support agent.",
+        "prompt_metadata": {
+            "prompt_id": "prompt-cs-v2",
+            "prompt_name": "Customer Support V2",
+            "prompt_version": "1.2.0",
+            "deployment_id": "deploy-prod-001",
+            "deployment_name": "production"
+        },
         "temperature": 0.7,
         "max_tokens": 1024,
         "tools": [],
@@ -420,6 +435,7 @@ Agents are stored in an object (not array) keyed by `agent_id`:
 - `agent_id`: Unique identifier for this agent
 - `model`: AI model being used
 - `system_prompt`: Agent's instructions
+- `prompt_metadata`: Prompt lineage data (prompt_id, prompt_name, prompt_version, deployment_id, deployment_name). Optional, set via `set_prompt_metadata()` or `update_agent_config()`.
 - `state`: Key-value store for agent state
 - `conversation_manager_state`: Internal SDK state
 - `created_at`, `updated_at`: Timestamps in ISO string format (from SDK)

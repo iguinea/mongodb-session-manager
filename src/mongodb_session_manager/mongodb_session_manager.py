@@ -701,6 +701,7 @@ class MongoDBSessionManager(RepositorySessionManager):
                 "agent_id": agent_id,
                 "model": agent_data.get("model"),
                 "system_prompt": agent_data.get("system_prompt"),
+                "prompt_metadata": agent_data.get("prompt_metadata"),
             }
         except Exception as e:
             logger.error(f"Failed to get agent config for {agent_id}: {e}")
@@ -711,6 +712,7 @@ class MongoDBSessionManager(RepositorySessionManager):
         agent_id: str,
         model: Optional[str] = None,
         system_prompt: Optional[str] = None,
+        prompt_metadata: Optional[Dict[str, str]] = None,
     ) -> None:
         """Update model or system_prompt for a specific agent.
 
@@ -745,6 +747,10 @@ class MongoDBSessionManager(RepositorySessionManager):
             update_fields[f"agents.{agent_id}.agent_data.model"] = model
         if system_prompt is not None:
             update_fields[f"agents.{agent_id}.agent_data.system_prompt"] = system_prompt
+        if prompt_metadata is not None:
+            update_fields[f"agents.{agent_id}.agent_data.prompt_metadata"] = (
+                prompt_metadata
+            )
 
         if not update_fields:
             logger.warning(f"No fields to update for agent {agent_id}")
@@ -765,11 +771,44 @@ class MongoDBSessionManager(RepositorySessionManager):
             logger.error(f"Failed to update agent config for {agent_id}: {e}")
             raise
 
+    def set_prompt_metadata(
+        self,
+        agent_id: str,
+        prompt_metadata: Dict[str, str],
+    ) -> None:
+        """Set prompt lineage metadata for a specific agent.
+
+        Must be called after sync_agent() (agent must exist in session).
+
+        Args:
+            agent_id: ID of the agent to set metadata for
+            prompt_metadata: Dict with prompt_id, prompt_name, prompt_version,
+                deployment_id, deployment_name
+
+        Raises:
+            ValueError: If session not found
+        """
+        result = self.session_repository.collection.update_one(
+            {"_id": self.session_id},
+            {
+                "$set": {
+                    f"agents.{agent_id}.agent_data.prompt_metadata": prompt_metadata
+                }
+            },
+        )
+        if result.matched_count == 0:
+            raise ValueError(f"Session {self.session_id} not found")
+        logger.info(
+            f"Set prompt metadata for agent {agent_id}: "
+            f"prompt_id={prompt_metadata.get('prompt_id')}, "
+            f"version={prompt_metadata.get('prompt_version')}"
+        )
+
     def list_agents(self) -> List[Dict[str, Any]]:
         """List all agents in the session with their configurations.
 
         Returns:
-            List of dicts with agent_id, model, and system_prompt for each agent
+            List of dicts with agent_id, model, system_prompt and prompt_metadata for each agent
 
         Example:
             agents = session_manager.list_agents()
@@ -795,6 +834,7 @@ class MongoDBSessionManager(RepositorySessionManager):
                         "agent_id": agent_id,
                         "model": agent_data.get("model"),
                         "system_prompt": agent_data.get("system_prompt"),
+                        "prompt_metadata": agent_data.get("prompt_metadata"),
                     }
                 )
 

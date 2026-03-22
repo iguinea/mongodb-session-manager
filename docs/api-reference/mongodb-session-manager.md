@@ -653,7 +653,7 @@ for fb in feedbacks:
 
 ## Agent Configuration Methods
 
-These methods enable retrieval and management of agent configuration (model and system_prompt).
+These methods enable retrieval and management of agent configuration (model, system_prompt, and prompt_metadata).
 
 ### `get_agent_config`
 
@@ -661,9 +661,9 @@ These methods enable retrieval and management of agent configuration (model and 
 def get_agent_config(self, agent_id: str) -> Optional[Dict[str, Any]]
 ```
 
-Get configuration (model and system_prompt) for a specific agent.
+Get configuration (model, system_prompt, and prompt_metadata) for a specific agent.
 
-This method retrieves the stored configuration for an agent, including the model identifier and system prompt that were automatically captured during `sync_agent()`.
+This method retrieves the stored configuration for an agent, including the model identifier, system prompt (automatically captured during `sync_agent()`), and prompt metadata (set via `set_prompt_metadata()`).
 
 #### Parameters
 
@@ -675,6 +675,7 @@ This method retrieves the stored configuration for an agent, including the model
 - `agent_id`: The agent's ID
 - `model`: The model identifier (e.g., "claude-3-sonnet")
 - `system_prompt`: The system prompt text
+- `prompt_metadata`: Prompt lineage dict (or `None` if not set). Contains: `prompt_id`, `prompt_name`, `prompt_version`, `deployment_id`, `deployment_name`.
 
 Returns `None` if the agent doesn't exist in the session.
 
@@ -718,7 +719,8 @@ def update_agent_config(
     self,
     agent_id: str,
     model: Optional[str] = None,
-    system_prompt: Optional[str] = None
+    system_prompt: Optional[str] = None,
+    prompt_metadata: Optional[Dict[str, str]] = None
 ) -> None
 ```
 
@@ -731,6 +733,7 @@ This method allows you to modify an agent's stored configuration. You can update
 - **agent_id** (`str`, required): ID of the agent to update.
 - **model** (`Optional[str]`, default: `None`): New model identifier. If `None`, model is not updated.
 - **system_prompt** (`Optional[str]`, default: `None`): New system prompt text. If `None`, prompt is not updated.
+- **prompt_metadata** (`Optional[Dict[str, str]]`, default: `None`): Prompt lineage metadata. If `None`, metadata is not updated.
 
 #### Raises
 
@@ -772,6 +775,61 @@ print(f"New prompt: {config['system_prompt'][:50]}...")
 - **Optimization**: Upgrade to better models as they become available
 - **Cost Management**: Switch to more economical models when appropriate
 
+### `set_prompt_metadata`
+
+```python
+def set_prompt_metadata(
+    self,
+    agent_id: str,
+    prompt_metadata: Dict[str, str]
+) -> None
+```
+
+Set prompt lineage metadata for a specific agent.
+
+Must be called after `sync_agent()` (the agent must already exist in the session). This enables tracing each system prompt back to its source: which prompt template, which version, and which deployment produced it.
+
+#### Parameters
+
+- **agent_id** (`str`, required): ID of the agent to set metadata for.
+- **prompt_metadata** (`Dict[str, str]`, required): Dictionary with prompt lineage fields:
+    - `prompt_id`: Unique identifier of the prompt template
+    - `prompt_name`: Human-readable prompt name
+    - `prompt_version`: Semver version string (e.g., "1.2.0")
+    - `deployment_id`: UID of the deployment
+    - `deployment_name`: Human-readable deployment name
+
+#### Raises
+
+- `ValueError`: If the session doesn't exist.
+
+#### Example
+
+```python
+# Sync the agent first
+manager.sync_agent(agent)
+
+# Stamp prompt lineage metadata
+manager.set_prompt_metadata("support-agent", {
+    "prompt_id": "prompt-abc",
+    "prompt_name": "Customer Support V2",
+    "prompt_version": "1.2.0",
+    "deployment_id": "deploy-xyz",
+    "deployment_name": "production",
+})
+
+# Verify
+config = manager.get_agent_config("support-agent")
+print(config["prompt_metadata"]["prompt_version"])  # "1.2.0"
+```
+
+#### Use Cases
+
+- **Prompt Traceability**: Know exactly which prompt version generated each conversation
+- **A/B Testing**: Compare metrics between sessions using different prompt versions
+- **Debugging**: "This session gave a bad answer — which prompt version was it using?"
+- **Auditing**: Track which deployment served which prompt and when
+
 ### `list_agents`
 
 ```python
@@ -780,7 +838,7 @@ def list_agents(self) -> List[Dict[str, Any]]
 
 List all agents in the session with their configurations.
 
-This method retrieves all agents that have been used in the current session along with their configurations (model and system_prompt if captured).
+This method retrieves all agents that have been used in the current session along with their configurations (model, system_prompt, and prompt_metadata if captured).
 
 #### Returns
 
@@ -788,6 +846,7 @@ This method retrieves all agents that have been used in the current session alon
 - `agent_id`: The agent's ID
 - `model`: The model identifier (or `None` if not captured)
 - `system_prompt`: The system prompt text (or `None` if not captured)
+- `prompt_metadata`: Prompt lineage dict (or `None` if not set)
 
 Returns empty list if no agents exist in the session.
 
