@@ -1,5 +1,10 @@
 # Changelog
 
+## [2026-03-22] PR #44 - Add: prompt metadata for agent config (v0.9.0) (@iguinea)
+
+- Add: prompt metadata for agent config (v0.9.0)
+- Merge: resolve CHANGELOG conflict with main
+
 ## [0.9.0] - 2026-03-22
 
 ### Added
