@@ -411,9 +411,9 @@ Agents are stored in an object (not array) keyed by `agent_id`:
             "prompt_name": "Customer Support V2",
             "prompt_version": "1.2.0",
             "deployment_id": "deploy-prod-001",
-            "deployment_name": "production"
+            "deployment_name": "production",
+            "temperature": 0.7
         },
-        "temperature": 0.7,
         "max_tokens": 1024,
         "tools": [],
         "state": {
