@@ -1,5 +1,11 @@
 # Changelog
 
+## [2026-03-23] PR #45 - Update: add temperature field to prompt_metadata (@iguinea)
+
+- Update: add temperature field to prompt_metadata
+- Fix: use pytest.approx for float comparison in test
+- Fix: add temperature to prompt_metadata in Agent Fields doc example
+
 ## [2026-03-22] PR #44 - Add: prompt metadata for agent config (v0.9.0) (@iguinea)
 
 - Add: prompt metadata for agent config (v0.9.0)
