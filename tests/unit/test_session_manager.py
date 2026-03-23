@@ -617,6 +617,7 @@ class TestAgentConfigOperations:
                             "prompt_version": "1.0.0",
                             "deployment_id": "d1",
                             "deployment_name": "prod",
+                            "temperature": 0.7,
                         },
                     }
                 }
@@ -625,6 +626,7 @@ class TestAgentConfigOperations:
         result = manager.get_agent_config("a1")
         assert result["prompt_metadata"]["prompt_id"] == "p1"
         assert result["prompt_metadata"]["prompt_version"] == "1.0.0"
+        assert result["prompt_metadata"]["temperature"] == 0.7
 
     def test_get_agent_config_prompt_metadata_none_when_absent(
         self, manager, mock_repo
@@ -645,6 +647,7 @@ class TestAgentConfigOperations:
             "prompt_version": "1.0.0",
             "deployment_id": "d1",
             "deployment_name": "prod",
+            "temperature": 0.5,
         }
         manager.update_agent_config("a1", prompt_metadata=metadata)
         call_args = mock_repo.collection.update_one.call_args
@@ -690,6 +693,7 @@ class TestSetPromptMetadata:
             "prompt_version": "1.0.0",
             "deployment_id": "d1",
             "deployment_name": "prod",
+            "temperature": 0.7,
         }
         manager.set_prompt_metadata("a1", metadata)
         call_args = mock_repo.collection.update_one.call_args

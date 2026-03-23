@@ -167,6 +167,7 @@ manager.set_prompt_metadata("agent-id", {
     "prompt_version": "1.2.0",
     "deployment_id": "deploy-abc",
     "deployment_name": "production",
+    "temperature": 0.7,  # optional
 })
 # Retrieve: manager.get_agent_config("agent-id")["prompt_metadata"]
 ```

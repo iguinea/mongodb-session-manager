@@ -798,6 +798,7 @@ Must be called after `sync_agent()` (the agent must already exist in the session
     - `prompt_version`: Semver version string (e.g., "1.2.0")
     - `deployment_id`: UID of the deployment
     - `deployment_name`: Human-readable deployment name
+    - `temperature` (optional, float): LLM temperature used with this prompt
 
 #### Raises
 
@@ -816,6 +817,7 @@ manager.set_prompt_metadata("support-agent", {
     "prompt_version": "1.2.0",
     "deployment_id": "deploy-xyz",
     "deployment_name": "production",
+    "temperature": 0.7,
 })
 
 # Verify
