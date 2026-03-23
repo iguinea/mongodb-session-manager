@@ -712,7 +712,7 @@ class MongoDBSessionManager(RepositorySessionManager):
         agent_id: str,
         model: Optional[str] = None,
         system_prompt: Optional[str] = None,
-        prompt_metadata: Optional[Dict[str, str]] = None,
+        prompt_metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Update model or system_prompt for a specific agent.
 
@@ -774,7 +774,7 @@ class MongoDBSessionManager(RepositorySessionManager):
     def set_prompt_metadata(
         self,
         agent_id: str,
-        prompt_metadata: Dict[str, str],
+        prompt_metadata: Dict[str, Any],
     ) -> None:
         """Set prompt lineage metadata for a specific agent.
 
@@ -783,7 +783,7 @@ class MongoDBSessionManager(RepositorySessionManager):
         Args:
             agent_id: ID of the agent to set metadata for
             prompt_metadata: Dict with prompt_id, prompt_name, prompt_version,
-                deployment_id, deployment_name
+                deployment_id, deployment_name, temperature (optional, float)
 
         Raises:
             ValueError: If session not found

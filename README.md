@@ -247,6 +247,7 @@ session_manager.set_prompt_metadata("support-agent", {
     "prompt_version": "1.2.0",
     "deployment_id": "deploy-xyz",
     "deployment_name": "production",
+    "temperature": 0.7,  # optional
 })
 
 # Retrieve later via get_agent_config
@@ -340,7 +341,8 @@ Sessions are stored as nested documents:
                     "prompt_name": "Customer Support V2",
                     "prompt_version": "1.2.0",
                     "deployment_id": "deploy-xyz",
-                    "deployment_name": "production"
+                    "deployment_name": "production",
+                    "temperature": 0.7
                 },
                 "state": {"key": "value"}
             },
