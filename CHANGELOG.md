@@ -1,5 +1,10 @@
 # Changelog
 
+## [2026-03-23] PR #46 - Chore: release v0.9.1 (@iguinea)
+
+- Chore: release v0.9.1 — temperature in prompt_metadata
+- Merge: resolve CHANGELOG conflict with main
+
 ## [0.9.1] - 2026-03-23
 
 ### Added
