@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.9.1] - 2026-03-23
+
+### Added
+- **Temperature in Prompt Metadata**: Optional `temperature` (float) field in `prompt_metadata` for experimenting with different temperatures on the same prompt version
+- Type hint updated from `Dict[str, str]` to `Dict[str, Any]` for `prompt_metadata` parameter
+
 ## [2026-03-23] PR #45 - Update: add temperature field to prompt_metadata (@iguinea)
 
 - Update: add temperature field to prompt_metadata
