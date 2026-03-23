@@ -626,7 +626,7 @@ class TestAgentConfigOperations:
         result = manager.get_agent_config("a1")
         assert result["prompt_metadata"]["prompt_id"] == "p1"
         assert result["prompt_metadata"]["prompt_version"] == "1.0.0"
-        assert result["prompt_metadata"]["temperature"] == 0.7
+        assert result["prompt_metadata"]["temperature"] == pytest.approx(0.7)
 
     def test_get_agent_config_prompt_metadata_none_when_absent(
         self, manager, mock_repo
