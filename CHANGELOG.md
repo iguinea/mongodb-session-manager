@@ -6,6 +6,12 @@
 - **Temperature in Prompt Metadata**: Optional `temperature` (float) field in `prompt_metadata` for experimenting with different temperatures on the same prompt version
 - Type hint updated from `Dict[str, str]` to `Dict[str, Any]` for `prompt_metadata` parameter
 
+## [2026-03-23] PR #45 - Update: add temperature field to prompt_metadata (@iguinea)
+
+- Update: add temperature field to prompt_metadata
+- Fix: use pytest.approx for float comparison in test
+- Fix: add temperature to prompt_metadata in Agent Fields doc example
+
 ## [2026-03-22] PR #44 - Add: prompt metadata for agent config (v0.9.0) (@iguinea)
 
 - Add: prompt metadata for agent config (v0.9.0)
