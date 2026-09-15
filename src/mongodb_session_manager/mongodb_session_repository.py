@@ -88,9 +88,6 @@ class MongoDBSessionRepository(SessionRepository):
         read_agent(session_id, agent_id, **kwargs):
             Read an agent from a session by agent ID.
 
-        pop_read_agent_config(session_id, agent_id):
-            Hand over, once, the model and system_prompt found by read_agent().
-
         update_agent(session_id, session_agent, **kwargs):
             Update an existing agent, preserving timestamps and the stored config.
 
@@ -218,9 +215,8 @@ class MongoDBSessionRepository(SessionRepository):
         self.database: Database = self.client[database_name]
         self.collection: Collection = self.database[collection_name]
         self.metadata_fields = metadata_fields
-        # model and system_prompt found by read_agent(), keyed by
-        # (session_id, agent_id), until pop_read_agent_config() hands them over.
-        self._read_agent_configs: dict[tuple[str, str], dict[str, Any]] = {}
+        # Config found by the last read_agent(); see _pop_read_agent_config().
+        self._last_read_agent_config: dict[tuple[str, str], dict[str, Any]] = {}
         # Create indexes for timestamp ordering (only once per collection)
         self._ensure_indexes()
 
@@ -392,11 +388,7 @@ class MongoDBSessionRepository(SessionRepository):
     def read_agent(
         self, session_id: str, agent_id: str, **kwargs: Any
     ) -> SessionAgent | None:
-        """Read an Agent from a Session.
-
-        The model and system_prompt stored with the agent do not fit in a
-        SessionAgent; they are kept for pop_read_agent_config() instead.
-        """
+        """Read an Agent from a Session."""
         try:
             # Any narrower projection must keep agent_data.model and
             # agent_data.system_prompt: the session manager relies on them to
@@ -416,9 +408,11 @@ class MongoDBSessionRepository(SessionRepository):
             }
 
             session_agent = SessionAgent(**filtered_agent_data)
-            self._read_agent_configs[(session_id, agent_id)] = {
-                "model": agent_data.get("model"),
-                "system_prompt": agent_data.get("system_prompt"),
+            self._last_read_agent_config = {
+                (session_id, agent_id): {
+                    "model": agent_data.get("model"),
+                    "system_prompt": agent_data.get("system_prompt"),
+                }
             }
             logger.debug(f"Read agent {agent_id} from session {session_id}")
             return session_agent
@@ -427,21 +421,22 @@ class MongoDBSessionRepository(SessionRepository):
             logger.error(f"Failed to read agent {agent_id}: {e}")
             raise
 
-    def pop_read_agent_config(
+    def _pop_read_agent_config(
         self, session_id: str, agent_id: str
     ) -> dict[str, Any] | None:
         """Return, and forget, the agent config found by read_agent().
 
         read_agent() already fetches model and system_prompt but cannot return
-        them inside a SessionAgent. Handing them over here lets the session
-        manager skip rewriting a config that is already persisted, without
-        reading the agent a second time.
+        them inside a SessionAgent. The session manager takes them from here to
+        skip rewriting a config that is already persisted, without reading the
+        agent a second time. Only the last read is kept, so a long-lived
+        repository does not pile up system prompts.
 
         Returns:
-            Dict with model and system_prompt, or None if read_agent() has not
-            found this agent in this session since the last call.
+            Dict with model and system_prompt, or None if it was already taken
+            or another agent has been read since.
         """
-        return self._read_agent_configs.pop((session_id, agent_id), None)
+        return self._last_read_agent_config.pop((session_id, agent_id), None)
 
     def update_agent(
         self, session_id: str, session_agent: SessionAgent, **kwargs: Any

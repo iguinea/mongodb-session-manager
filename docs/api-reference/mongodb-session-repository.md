@@ -318,7 +318,7 @@ def read_agent(
 
 Read an agent from a session by agent ID.
 
-Returns the Strands SDK fields of `agent_data` (`agent_id`, `state`, `conversation_manager_state`, `_internal_state` and timestamps). The `model` and `system_prompt` stored next to them do not fit in a `SessionAgent`, so they are kept for [`pop_read_agent_config`](#pop_read_agent_config). `prompt_metadata` is left out; read it with `MongoDBSessionManager.get_agent_config()`.
+Returns the Strands SDK fields of `agent_data` (`agent_id`, `state`, `conversation_manager_state`, `_internal_state` and timestamps). The `model` and `system_prompt` stored next to them do not fit in a `SessionAgent`: the repository keeps the last ones read for `MongoDBSessionManager.initialize()`, which uses them to avoid rewriting an unchanged config. `prompt_metadata` is left out; read it with `MongoDBSessionManager.get_agent_config()`.
 
 #### Parameters
 
@@ -345,40 +345,6 @@ if agent:
     print(f"State: {agent.state}")
 else:
     print("Agent not found")
-```
-
-### `pop_read_agent_config`
-
-```python
-def pop_read_agent_config(
-    self, session_id: str, agent_id: str
-) -> dict[str, Any] | None
-```
-
-Hand over, once, the agent config found by `read_agent()` for this session and agent.
-
-`MongoDBSessionManager.initialize()` uses it to learn which model and system prompt are already persisted, so the first sync of a restored agent does not rewrite an unchanged config. It costs no extra read: `read_agent()` already fetched both fields.
-
-#### Parameters
-
-- **session_id** (`str`): ID of the session the agent was read from.
-
-- **agent_id** (`str`): ID of the agent.
-
-#### Returns
-
-`dict[str, Any] | None`: `{"model": ..., "system_prompt": ...}` as stored (either value may be `None`), or `None` if `read_agent()` has not found this agent in this session since the last call.
-
-#### Example
-
-```python
-repo.read_agent("user-123", "assistant-1")
-
-config = repo.pop_read_agent_config("user-123", "assistant-1")
-if config:
-    print(f"Persisted model: {config['model']}")
-
-repo.pop_read_agent_config("user-123", "assistant-1")  # None: already handed over
 ```
 
 ### `update_agent`
@@ -838,6 +804,18 @@ This method is called automatically during initialization. It creates indexes on
 - `metadata.<field>` for each field in `metadata_fields`
 
 Errors during index creation are logged but do not raise exceptions.
+
+### `_pop_read_agent_config`
+
+```python
+def _pop_read_agent_config(
+    self, session_id: str, agent_id: str
+) -> dict[str, Any] | None
+```
+
+Return, and forget, the `model` and `system_prompt` found by the last `read_agent()` for this session and agent.
+
+`MongoDBSessionManager.initialize()` calls it right after the Strands SDK restores an agent, to learn which config is already persisted without a second read. Only the last read is kept, so a long-lived repository does not accumulate system prompts. Any narrower projection in `read_agent()` must keep `agent_data.model` and `agent_data.system_prompt`.
 
 ---
 

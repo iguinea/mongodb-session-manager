@@ -310,8 +310,8 @@ If the agent already exists in the session, its state and conversation history a
 #### Example
 
 ```python
-# First request
-agent1 = Agent(model="claude-3-sonnet", session_manager=manager)  # initialize() runs here
+# First request: initialize() runs inside Agent(...)
+agent1 = Agent(model="claude-3-sonnet", session_manager=manager)
 response1 = agent1("My name is Alice")
 
 # A later request (even after a restart) uses a new manager for the same session
@@ -320,7 +320,8 @@ manager2 = create_mongodb_session_manager(
     connection_string="mongodb://localhost:27017/",
     database_name="chat_db",
 )
-agent2 = Agent(model="claude-3-sonnet", session_manager=manager2)  # Restores the history
+# Creating the agent restores the history
+agent2 = Agent(model="claude-3-sonnet", session_manager=manager2)
 response2 = agent2("What's my name?")  # Agent remembers: "Alice"
 ```
 

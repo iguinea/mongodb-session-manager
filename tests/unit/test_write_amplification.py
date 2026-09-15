@@ -404,20 +404,15 @@ class TestRootUpdatedAtInvariant:
 # ---------------------------------------------------------------------------
 
 
-def existing_session_doc(agents):
-    """Sesión ya persistida, tal como la devuelve find_one."""
-    return {"_id": "s1", "session_id": "s1", "session_type": "AGENT", "agents": agents}
-
-
-def persisted_agent(model="m1", system_prompt="p1"):
+def persisted_agent():
     """Agente guardado en un turno anterior, con su configuración y dos mensajes."""
     return {
         "agent_data": {
             "agent_id": "a1",
             "state": {},
             "conversation_manager_state": {},
-            "model": model,
-            "system_prompt": system_prompt,
+            "model": "m1",
+            "system_prompt": "p1",
         },
         "messages": [
             {"message_id": 0, "message": {"role": "user", "content": [{"text": "a"}]}},
@@ -429,13 +424,31 @@ def persisted_agent(model="m1", system_prompt="p1"):
     }
 
 
-def restorable_agent(mock_agent, **kwargs):
-    """Agente falso que la restauración del SDK puede recorrer."""
-    agent = mock_agent(agent_id="a1", **kwargs)
+def restored_manager(mock_agent, stored_agents, system_prompt="p1"):
+    """Manager nuevo sobre una sesión existente, con el agente a1 ya inicializado.
+
+    El agente usa el modelo m1 y aún no tiene métricas. Devuelve
+    (manager, agente, colección), con los contadores de la colección a cero.
+    """
+    client, collection = make_client()
+    collection.find_one.return_value = {
+        "_id": "s1",
+        "session_id": "s1",
+        "session_type": "AGENT",
+        "agents": stored_agents,
+    }
+    mgr = make_manager(client)
+    agent = mock_agent(
+        agent_id="a1", latency_ms=0, model_id="m1", system_prompt=system_prompt
+    )
     agent.conversation_manager.restore_from_session.return_value = None
     agent.conversation_manager.removed_message_count = 0
     agent.conversation_manager.get_state.return_value = {}
-    return agent
+
+    mgr.initialize(agent)
+    collection.update_one.reset_mock()
+    collection.find_one.reset_mock()
+    return mgr, agent, collection
 
 
 def written_fields(collection):
@@ -453,17 +466,8 @@ class TestAgentConfigHydratedOnRestore:
         read_agent() ya trae model y system_prompt. Sin aprovecharlos, el
         primer sync de cada request reescribía el system prompt entero.
         """
-        client, collection = make_client()
-        collection.find_one.return_value = existing_session_doc(
-            {"a1": persisted_agent(model="m1", system_prompt="p1")}
-        )
-        mgr = make_manager(client)
-        agent = restorable_agent(
-            mock_agent, latency_ms=0, model_id="m1", system_prompt="p1"
-        )
+        mgr, agent, collection = restored_manager(mock_agent, {"a1": persisted_agent()})
 
-        mgr.initialize(agent)
-        collection.update_one.reset_mock()
         mgr.sync_agent(agent)
 
         written = written_fields(collection)
@@ -476,17 +480,10 @@ class TestAgentConfigHydratedOnRestore:
         Guardarraíl: pasa también sin hidratar. Está para que la caché
         hidratada no se trague un cambio real de configuración.
         """
-        client, collection = make_client()
-        collection.find_one.return_value = existing_session_doc(
-            {"a1": persisted_agent(model="m1", system_prompt="p1")}
-        )
-        mgr = make_manager(client)
-        agent = restorable_agent(
-            mock_agent, latency_ms=0, model_id="m1", system_prompt="p2"
+        mgr, agent, collection = restored_manager(
+            mock_agent, {"a1": persisted_agent()}, system_prompt="p2"
         )
 
-        mgr.initialize(agent)
-        collection.update_one.reset_mock()
         mgr.sync_agent(agent)
 
         written = written_fields(collection)
@@ -498,15 +495,8 @@ class TestAgentConfigHydratedOnRestore:
         Guardarraíl: read_agent() no encuentra nada que hidratar. Es el caso
         del sub-agente invocado por primera vez en una conversación empezada.
         """
-        client, collection = make_client()
-        collection.find_one.return_value = existing_session_doc({})
-        mgr = make_manager(client)
-        agent = restorable_agent(
-            mock_agent, latency_ms=0, model_id="m1", system_prompt="p1"
-        )
+        mgr, agent, collection = restored_manager(mock_agent, {})
 
-        mgr.initialize(agent)
-        collection.update_one.reset_mock()
         mgr.sync_agent(agent)
 
         written = written_fields(collection)
@@ -533,18 +523,7 @@ class TestTurnWriteBudget:
         ya estaba persistida (issue #65). Antes costaba una escritura más, y
         era la mayor del turno.
         """
-        client, collection = make_client()
-        collection.find_one.return_value = existing_session_doc(
-            {"a1": persisted_agent(model="m1", system_prompt="p1")}
-        )
-        mgr = make_manager(client)
-        agent = restorable_agent(
-            mock_agent, latency_ms=0, model_id="m1", system_prompt="p1"
-        )
-        mgr.initialize(agent)
-
-        collection.update_one.reset_mock()
-        collection.find_one.reset_mock()
+        mgr, agent, collection = restored_manager(mock_agent, {"a1": persisted_agent()})
 
         summary = agent.event_loop_metrics.get_summary.return_value
         # user, assistant(toolUse), user(toolResult), assistant(final)

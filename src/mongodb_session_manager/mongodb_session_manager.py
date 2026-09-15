@@ -368,7 +368,7 @@ class MongoDBSessionManager(RepositorySessionManager):
         """
         super().initialize(agent, **kwargs)
 
-        persisted = self.session_repository.pop_read_agent_config(
+        persisted = self.session_repository._pop_read_agent_config(
             self.session_id, agent.agent_id
         )
         if persisted is not None:

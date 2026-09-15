@@ -136,6 +136,25 @@ def counting_client(mongodb_connection):
     _reset_index_registry()
 
 
+@pytest.fixture
+def turn_factory(counting_client, unique_session_id, cleanup_session):
+    """Factoría sobre el cliente contador; la sesión del test se limpia al final.
+
+    Devuelve (factoría, colección, contador). La colección sale de la propia
+    factoría, para que el test lea y limpie justo donde ella escribe.
+    """
+    client, counter = counting_client
+    factory = MongoDBSessionManagerFactory(
+        client=client,
+        database_name="test_write_amplification",
+        collection_name="sessions",
+        application_name="test",
+    )
+    collection = client[factory.database_name][factory.collection_name]
+    cleanup_session(collection, unique_session_id)
+    return factory, collection, counter
+
+
 def run_turn(factory, session_id: str, prompt: str) -> None:
     """Un turno completo: supervisor + sub-agente, con una llamada a tool."""
     supervisor_manager = factory.create_session_manager(session_id)
@@ -177,9 +196,7 @@ def run_turn(factory, session_id: str, prompt: str) -> None:
 
 
 class TestTurnOperationBudget:
-    def test_turn_stays_within_write_budget(
-        self, counting_client, unique_session_id, cleanup_session
-    ):
+    def test_turn_stays_within_write_budget(self, turn_factory, unique_session_id):
         """Un turno con supervisor y sub-agente cabe en el presupuesto.
 
         Contra v0.9.1 el mismo escenario producía 42 operaciones: 21 updates,
@@ -198,15 +215,7 @@ class TestTurnOperationBudget:
         (#65). Antes eran 2 escrituras más, de ~14 KB cada una. El presupuesto
         de cada hito se sigue en la issue maestra #56.
         """
-        client, counter = counting_client
-        factory = MongoDBSessionManagerFactory(
-            client=client,
-            database_name="test_write_amplification",
-            collection_name="sessions",
-            application_name="test",
-        )
-        collection = client["test_write_amplification"]["sessions"]
-        cleanup_session(collection, unique_session_id)
+        factory, _, counter = turn_factory
 
         # Turno 0: crea la sesión y calienta el registro de índices.
         run_turn(factory, unique_session_id, "hola")
@@ -230,7 +239,7 @@ class TestTurnOperationBudget:
         )
 
     def test_root_updated_at_advances_with_the_turn(
-        self, counting_client, unique_session_id, cleanup_session
+        self, turn_factory, unique_session_id
     ):
         """Guardarraíl del contrato externo.
 
@@ -238,15 +247,7 @@ class TestTurnOperationBudget:
         con el updated_at raíz. Si dejara de avanzar, las sesiones mostrarían
         una duración corta de menos, en silencio.
         """
-        client, _ = counting_client
-        factory = MongoDBSessionManagerFactory(
-            client=client,
-            database_name="test_write_amplification",
-            collection_name="sessions",
-            application_name="test",
-        )
-        collection = client["test_write_amplification"]["sessions"]
-        cleanup_session(collection, unique_session_id)
+        factory, collection, _ = turn_factory
 
         run_turn(factory, unique_session_id, "hola")
         after_first = collection.find_one({"_id": unique_session_id})["updated_at"]
@@ -256,19 +257,9 @@ class TestTurnOperationBudget:
 
         assert after_second > after_first
 
-    def test_agent_created_at_survives_updates(
-        self, counting_client, unique_session_id, cleanup_session
-    ):
+    def test_agent_created_at_survives_updates(self, turn_factory, unique_session_id):
         """El created_at del agente no se falsea al sincronizar."""
-        client, _ = counting_client
-        factory = MongoDBSessionManagerFactory(
-            client=client,
-            database_name="test_write_amplification",
-            collection_name="sessions",
-            application_name="test",
-        )
-        collection = client["test_write_amplification"]["sessions"]
-        cleanup_session(collection, unique_session_id)
+        factory, collection, _ = turn_factory
 
         run_turn(factory, unique_session_id, "hola")
         doc = collection.find_one({"_id": unique_session_id})
@@ -279,9 +270,7 @@ class TestTurnOperationBudget:
 
         assert doc["agents"]["supervisor"]["created_at"] == original
 
-    def test_agent_config_survives_the_turn(
-        self, counting_client, unique_session_id, cleanup_session
-    ):
+    def test_agent_config_survives_the_turn(self, turn_factory, unique_session_id):
         """Cada agente conserva model y system_prompt al terminar el turno.
 
         Strands vuelve a sincronizar el agente que ejecuta tools (sube la
@@ -289,15 +278,7 @@ class TestTurnOperationBudget:
         entero. Con la caché de configuración ya llena nadie lo reescribía: el
         supervisor terminaba cada turno sin model ni system_prompt.
         """
-        client, _ = counting_client
-        factory = MongoDBSessionManagerFactory(
-            client=client,
-            database_name="test_write_amplification",
-            collection_name="sessions",
-            application_name="test",
-        )
-        collection = client["test_write_amplification"]["sessions"]
-        cleanup_session(collection, unique_session_id)
+        factory, collection, _ = turn_factory
 
         for prompt in ("hola", "y el mes pasado?"):
             run_turn(factory, unique_session_id, prompt)
@@ -315,24 +296,14 @@ class TestTurnOperationBudget:
                     f"{agent_id} sin system_prompt tras el turno '{prompt}'"
                 )
 
-    def test_metrics_land_on_the_last_message(
-        self, counting_client, unique_session_id, cleanup_session
-    ):
+    def test_metrics_land_on_the_last_message(self, turn_factory, unique_session_id):
         """Las métricas se escriben en el último mensaje, no en el anterior.
 
         Es la garantía que el read-after-write ponía en riesgo: si el
         message_id venía de una réplica atrasada, las métricas acababan en el
         mensaje N-1 y los agregados del visor leían 0.
         """
-        client, _ = counting_client
-        factory = MongoDBSessionManagerFactory(
-            client=client,
-            database_name="test_write_amplification",
-            collection_name="sessions",
-            application_name="test",
-        )
-        collection = client["test_write_amplification"]["sessions"]
-        cleanup_session(collection, unique_session_id)
+        factory, collection, _ = turn_factory
 
         run_turn(factory, unique_session_id, "hola")
 

@@ -57,10 +57,12 @@ subdocumento entero. Los campos del agente (`state`, `conversation_manager_state
 
 ### 3.2 Hidratación
 
-- `read_agent()` ya recibe `model` / `system_prompt` y los descarta (`SessionAgent` no los admite).
-  Pasa a guardarlos por `(session_id, agent_id)`.
-- `pop_read_agent_config(session_id, agent_id)` los entrega una sola vez. La clave incluye la
-  sesión, igual que el resto de la API del repositorio.
+- `read_agent()` ya recibe `model` / `system_prompt` y los descartaba (`SessionAgent` no los
+  admite). Ahora guarda los de la **última lectura**, con clave `(session_id, agent_id)`: un
+  repositorio de larga vida no acumula system prompts.
+- `_pop_read_agent_config(session_id, agent_id)` los entrega una sola vez. Es privado: es el canal
+  interno entre repositorio y manager que impone el SDK, no un contrato público (mismo patrón que
+  `_agent_exists`).
 - `MongoDBSessionManager.initialize()` llama a `super().initialize(agent)` y siembra
   `_agent_config_cache[agent_id]` con lo leído. Si la sesión es nueva o el agente no existía,
   `read_agent()` no encuentra nada y la caché queda vacía: el primer sync escribe, como hasta ahora.
@@ -71,6 +73,8 @@ Alternativas descartadas:
 - Leer la configuración aparte en `initialize()`: añade una lectura que no hace falta, porque
   `read_agent()` ya trae los campos.
 - Reimplementar `initialize()` sin llamar al padre: duplicaría la restauración del SDK.
+- Callback inyectado en el repositorio: elimina el estado, pero añade un parámetro público y un
+  observer para lo mismo.
 
 ## 4. Tests (TDD: RED antes de cada cambio)
 
@@ -116,8 +120,8 @@ traza; corregido en `docs/architecture/performance.md` y en el docstring del tes
 
 - `docs/architecture/performance.md`: tabla y desglose de escrituras por turno.
 - `docs/architecture/data-model.md`: dueños y semántica de actualización de `agent_data`.
-- `docs/api-reference/mongodb-session-repository.md`: `read_agent`, `update_agent`,
-  `pop_read_agent_config`.
+- `docs/api-reference/mongodb-session-repository.md`: `read_agent`, `update_agent` y el método
+  interno `_pop_read_agent_config`.
 - `docs/api-reference/mongodb-session-manager.md`: `sync_agent` e `initialize` (el ejemplo llamaba a
   `initialize()` a mano, lo que lanza `SessionException`: Strands ya lo llama al crear el `Agent`).
 - `CLAUDE.md`: componentes.
@@ -132,8 +136,20 @@ Mismo banco que §2 (MongoDB 8.2.7 local, `CommandListener`), turno caliente de 
 | `main` (`0413ada`) | 15 | 6 | ~33,7 | supervisor sin `model` ni `system_prompt` |
 | esta rama | **13** | 6 | **~5,9** | ambos agentes con `model` y `system_prompt` |
 
-Suite: 315 tests en verde, 276 unitarios y 39 de integración (8 nuevos). `ruff format` y
+Suite: 314 tests en verde, 275 unitarios y 39 de integración (7 nuevos). `ruff format` y
 `ruff check` limpios.
 
 Validación pendiente, como en #54: traza en dev sobre DocumentDB, el único sitio donde se mide el
 eje que importa (latencia por escritura).
+
+## 9. Seguimiento
+
+Propuestas de la revisión `/simplify` que quedan fuera de este PR:
+
+- **`SessionAgent.from_dict()` en `read_agent()`** en lugar de filtrar con `_AGENT_CONFIG_FIELDS`:
+  cada lado leería solo sus claves y una clave desconocida dejaría de lanzar `TypeError`. Es código
+  anterior al diff y cambia ese comportamiento; encaja con #57, que rehace esa lectura.
+- **Saltar el `update_agent` del primer sync de cada manager** sembrando
+  `_last_synced_internal_state` tras `initialize()`: −2 escrituras en el turno de referencia. Acopla
+  el manager a atributos privados del SDK y deja de avanzar `agent_data.updated_at` en turnos sin
+  cambios de estado; candidata a sub-issue de #56.
