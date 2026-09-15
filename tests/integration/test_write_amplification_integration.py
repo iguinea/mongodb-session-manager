@@ -267,6 +267,42 @@ class TestTurnOperationBudget:
 
         assert doc["agents"]["supervisor"]["created_at"] == original
 
+    def test_agent_config_survives_the_turn(
+        self, counting_client, unique_session_id, cleanup_session
+    ):
+        """Cada agente conserva model y system_prompt al terminar el turno.
+
+        Strands vuelve a sincronizar el agente que ejecuta tools (sube la
+        versión de interrupt_state) y update_agent reemplazaba agent_data
+        entero. Con la caché de configuración ya llena nadie lo reescribía: el
+        supervisor terminaba cada turno sin model ni system_prompt.
+        """
+        client, _ = counting_client
+        factory = MongoDBSessionManagerFactory(
+            client=client,
+            database_name="test_write_amplification",
+            collection_name="sessions",
+            application_name="test",
+        )
+        collection = client["test_write_amplification"]["sessions"]
+        cleanup_session(collection, unique_session_id)
+
+        for prompt in ("hola", "y el mes pasado?"):
+            run_turn(factory, unique_session_id, prompt)
+
+            agents = collection.find_one({"_id": unique_session_id})["agents"]
+            for agent_id, model_id in (
+                ("supervisor", "supervisor"),
+                ("info_suministro_agent", "sub"),
+            ):
+                agent_data = agents[agent_id]["agent_data"]
+                assert agent_data.get("model") == model_id, (
+                    f"{agent_id} sin model tras el turno '{prompt}'"
+                )
+                assert agent_data.get("system_prompt") == SYSTEM_PROMPT, (
+                    f"{agent_id} sin system_prompt tras el turno '{prompt}'"
+                )
+
     def test_metrics_land_on_the_last_message(
         self, counting_client, unique_session_id, cleanup_session
     ):
