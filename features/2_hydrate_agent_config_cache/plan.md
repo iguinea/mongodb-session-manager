@@ -1,10 +1,10 @@
 # Plan: hidratar la caché de configuración del agente desde `read_agent()`
 
-**Estado:** aceptado, en implementación (issue #65).
+**Estado:** implementado (issue #65). Ver §8 para el resultado medido.
 **Origen:** informe `artifacts/analisis-rendimiento.md`, §"P0 — Reducir el presupuesto de escrituras
 por turno", recomendación 1. Sub-issue de #56.
-**Alcance acordado:** un único PR que cierra #65 e incluye, como primer commit, el arreglo de
-`update_agent()` (§2). Sin issue aparte: el hallazgo se documenta en #65 y en el PR.
+**Alcance acordado:** un único PR que cierra #65 e incluye el arreglo de `update_agent()` (§2) en
+su propio commit. Sin issue aparte: el hallazgo se documenta en #65 y en el PR.
 
 ---
 
@@ -28,10 +28,11 @@ borra los campos que el manager escribe aparte: `model`, `system_prompt` y `prom
 | `set_prompt_metadata()` tras el turno 1, turno 2 con manager nuevo | `prompt_metadata` borrado |
 | Turno de referencia | el supervisor termina **sin `model` ni `system_prompt`** |
 
-**Por qué ya ocurre en `main`:** Strands incrementa la versión de `interrupt_state` al ejecutar
-tools, así que el agente que las ejecuta hace un segundo `update_agent` dentro del turno. Desde #54
-la caché ya está llena en ese punto y nadie reescribe la configuración. En v0.9.1 se reescribía en
-cada sync y el borrado quedaba tapado.
+**Por qué ya ocurre en `main`:** tras cada ejecución de tools, Strands llama a
+`agent._interrupt_state.deactivate()` (`strands/event_loop/event_loop.py:547`), que sube la versión
+del estado interno. El sync del `toolResult` detecta el cambio y vuelve a llamar a `update_agent`.
+Desde #54 la caché ya está llena en ese punto y nadie reescribe la configuración. En v0.9.1 se
+reescribía en cada sync y el borrado quedaba tapado.
 
 **Por qué bloquea #65:** hoy el primer sync de cada request borra la configuración y la reescribe
 acto seguido, porque la caché está vacía. Con la caché hidratada esa reescritura desaparecería y la
@@ -58,9 +59,8 @@ subdocumento entero. Los campos del agente (`state`, `conversation_manager_state
 
 - `read_agent()` ya recibe `model` / `system_prompt` y los descarta (`SessionAgent` no los admite).
   Pasa a guardarlos por `(session_id, agent_id)`.
-- `pop_read_agent_config(session_id, agent_id)` los entrega una sola vez. La clave incluye la sesión
-  para que un repositorio usado con varias sesiones no siembre la caché con la configuración de
-  otra.
+- `pop_read_agent_config(session_id, agent_id)` los entrega una sola vez. La clave incluye la
+  sesión, igual que el resto de la API del repositorio.
 - `MongoDBSessionManager.initialize()` llama a `super().initialize(agent)` y siembra
   `_agent_config_cache[agent_id]` con lo leído. Si la sesión es nueva o el agente no existía,
   `read_agent()` no encuentra nada y la caché queda vacía: el primer sync escribe, como hasta ahora.
@@ -74,7 +74,7 @@ Alternativas descartadas:
 
 ## 4. Tests (TDD: RED antes de cada cambio)
 
-| Test | Nivel | Falla hoy |
+| Test | Nivel | Falló antes del cambio |
 |---|---|---|
 | El `$set` de `update_agent` no reemplaza `agent_data` | unit | sí |
 | `model`, `system_prompt` y `prompt_metadata` sobreviven a `update_agent` | integración (repositorio) | sí |
@@ -83,21 +83,21 @@ Alternativas descartadas:
 | Segundo manager, misma configuración → el `$set` de `sync_agent` no incluye `agent_data.model` / `system_prompt` | unit | sí |
 | Configuración distinta entre despliegues → sí escribe | unit | no (guardarraíl) |
 | Agente nuevo en sesión existente → sí escribe | unit | no (guardarraíl) |
-| Turno caliente ≤9 `update` (`TestTurnWriteBudget`; el de sesión nueva sigue en ≤10) | unit | sí |
-| Turno de referencia ≤13 `update`, y ninguno reenvía `system_prompt` | integración | sí |
+| Turno caliente ≤9 `update` (`TestTurnWriteBudget`; el de sesión nueva sigue en ≤10) | unit | sí (10) |
+| Turno de referencia ≤13 `update`, y ninguno reenvía `system_prompt` | integración | sí (15) |
 | `updated_at` raíz avanza en cada turno | unit + integración | no (invariante existente) |
 
 ## 5. Presupuesto
 
-Traza real del turno caliente de referencia en `main`:
+Traza real del turno caliente de referencia:
 
 | | `$push` | `update_agent` | config | métricas | total |
 |---|---:|---:|---:|---:|---:|
 | `main` (v0.10.0 sin etiquetar) | 6 | 3 | 2 | 4 | 15 |
 | con #65 | 6 | 3 | 0 | 4 | **13** |
 
-El desglose documentado en #54 (6 `create_message` + 8 syncs + 1 `update_agent`) no cuadra con la
-traza; se corrige en `docs/architecture/performance.md` y en el docstring del test de integración.
+El desglose documentado en #54 (6 `create_message` + 8 syncs + 1 `update_agent`) no cuadraba con la
+traza; corregido en `docs/architecture/performance.md` y en el docstring del test de integración.
 
 ## 6. Riesgos
 
@@ -110,12 +110,30 @@ traza; se corrige en `docs/architecture/performance.md` y en el docstring del te
   los consumidores que lo vuelven a sellar en cada turno siguen funcionando igual.
 - **Coordinación con #57.** Cualquier proyección mínima de `read_agent()` debe seguir incluyendo
   `agent_data.model` y `agent_data.system_prompt`. Lo protege el assert de integración que prohíbe
-  reenviar `system_prompt` en el turno caliente.
+  reenviar `system_prompt` en el turno caliente, y un comentario junto a la proyección.
 
 ## 7. Documentación
 
 - `docs/architecture/performance.md`: tabla y desglose de escrituras por turno.
+- `docs/architecture/data-model.md`: dueños y semántica de actualización de `agent_data`.
 - `docs/api-reference/mongodb-session-repository.md`: `read_agent`, `update_agent`,
   `pop_read_agent_config`.
-- `docs/api-reference/mongodb-session-manager.md`: `initialize`.
+- `docs/api-reference/mongodb-session-manager.md`: `sync_agent` e `initialize` (el ejemplo llamaba a
+  `initialize()` a mano, lo que lanza `SessionException`: Strands ya lo llama al crear el `Agent`).
+- `CLAUDE.md`: componentes.
 - CHANGELOG: al final, con confirmación.
+
+## 8. Resultado medido
+
+Mismo banco que §2 (MongoDB 8.2.7 local, `CommandListener`), turno caliente de referencia:
+
+| | `update` | `find` | KB enviados en `update` | Configuración en reposo |
+|---|---:|---:|---:|---|
+| `main` (`0413ada`) | 15 | 6 | ~33,7 | supervisor sin `model` ni `system_prompt` |
+| esta rama | **13** | 6 | **~5,9** | ambos agentes con `model` y `system_prompt` |
+
+Suite: 315 tests en verde, 276 unitarios y 39 de integración (8 nuevos). `ruff format` y
+`ruff check` limpios.
+
+Validación pendiente, como en #54: traza en dev sobre DocumentDB, el único sitio donde se mide el
+eje que importa (latencia por escritura).
