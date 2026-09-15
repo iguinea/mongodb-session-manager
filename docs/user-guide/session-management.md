@@ -100,7 +100,7 @@ session_manager = create_mongodb_session_manager(
     session_id="user-123",
     connection_string="mongodb://localhost:27017/",
     database_name="chat_db",
-    collection_name="sessions"
+    collection_name="sessions",
 )
 ```
 
@@ -117,9 +117,7 @@ from strands import Agent
 
 # Create agent with session
 agent = Agent(
-    model="claude-3-sonnet",
-    agent_id="assistant",
-    session_manager=session_manager
+    model="claude-3-sonnet", agent_id="assistant", session_manager=session_manager
 )
 
 # Use the agent - everything is persisted automatically
@@ -185,7 +183,7 @@ session_manager = create_mongodb_session_manager(
     session_id="customer-12345",
     connection_string="mongodb://localhost:27017/",
     database_name="my_database",
-    collection_name="sessions"
+    collection_name="sessions",
 )
 ```
 
@@ -202,7 +200,7 @@ session_manager = create_mongodb_session_manager(
     minPoolSize=10,
     serverSelectionTimeoutMS=5000,
     w="majority",
-    journal=True
+    journal=True,
 )
 ```
 
@@ -216,7 +214,7 @@ session_manager = MongoDBSessionManager(
     connection_string="mongodb://localhost:27017/",
     database_name="my_database",
     collection_name="sessions",
-    metadata_fields=["priority", "category", "status"]
+    metadata_fields=["priority", "category", "status"],
 )
 ```
 
@@ -242,7 +240,7 @@ from mongodb_session_manager import create_mongodb_session_manager
 session_manager = create_mongodb_session_manager(
     session_id="user-alice-chat",
     connection_string="mongodb://localhost:27017/",
-    database_name="chat_db"
+    database_name="chat_db",
 )
 
 # Create agent
@@ -250,7 +248,7 @@ agent = Agent(
     model="claude-3-sonnet",
     agent_id="assistant",
     session_manager=session_manager,
-    system_prompt="You are a helpful assistant."
+    system_prompt="You are a helpful assistant.",
 )
 
 # First message
@@ -262,11 +260,9 @@ response2 = agent("What's the weather like today?")
 session_manager.sync_agent(agent)
 
 # Add metadata
-session_manager.update_metadata({
-    "user_name": "Alice",
-    "topic": "general",
-    "priority": "normal"
-})
+session_manager.update_metadata(
+    {"user_name": "Alice", "topic": "general", "priority": "normal"}
+)
 
 # Clean up
 session_manager.close()
@@ -303,13 +299,11 @@ One of the most powerful features is the ability to resume conversations across 
 session_manager = create_mongodb_session_manager(
     session_id="user-alice-2024-01-15",
     connection_string="mongodb://localhost:27017/",
-    database_name="chat_db"
+    database_name="chat_db",
 )
 
 agent = Agent(
-    agent_id="assistant",
-    model="claude-3-sonnet",
-    session_manager=session_manager
+    agent_id="assistant", model="claude-3-sonnet", session_manager=session_manager
 )
 
 response = agent("My name is Alice and I love programming.")
@@ -320,13 +314,13 @@ session_manager.close()
 session_manager = create_mongodb_session_manager(
     session_id="user-alice-2024-01-15",  # Same session ID!
     connection_string="mongodb://localhost:27017/",
-    database_name="chat_db"
+    database_name="chat_db",
 )
 
 agent = Agent(
     agent_id="assistant",  # Same agent ID!
     model="claude-3-sonnet",
-    session_manager=session_manager
+    session_manager=session_manager,
 )
 
 # Agent has full conversation history
@@ -341,13 +335,13 @@ response = agent("What did I say I love?")
 session_manager = create_mongodb_session_manager(
     session_id="user-alice-project-x",
     connection_string="mongodb://localhost:27017/",
-    database_name="chat_db"
+    database_name="chat_db",
 )
 
 agent = Agent(
     agent_id="project-assistant",
     model="claude-3-sonnet",
-    session_manager=session_manager
+    session_manager=session_manager,
 )
 
 response = agent("I'm working on a Python web app using FastAPI.")
@@ -358,13 +352,13 @@ session_manager.close()
 session_manager = create_mongodb_session_manager(
     session_id="user-alice-project-x",  # Same session ID
     connection_string="mongodb://localhost:27017/",
-    database_name="chat_db"
+    database_name="chat_db",
 )
 
 agent = Agent(
     agent_id="project-assistant",  # Same agent ID
     model="claude-3-sonnet",
-    session_manager=session_manager
+    session_manager=session_manager,
 )
 
 # Full context available
@@ -400,7 +394,7 @@ from strands import Agent
 session_manager = create_mongodb_session_manager(
     session_id=f"customer-{customer_id}-support",
     connection_string="mongodb://localhost:27017/",
-    database_name="support_db"
+    database_name="support_db",
 )
 
 # Translation agent
@@ -408,7 +402,7 @@ translator = Agent(
     model="claude-3-sonnet",
     agent_id="translator",
     session_manager=session_manager,
-    system_prompt="You are a translation specialist for Basque-Spanish."
+    system_prompt="You are a translation specialist for Basque-Spanish.",
 )
 
 # Technical support agent
@@ -416,7 +410,7 @@ tech_support = Agent(
     model="claude-3-haiku",
     agent_id="tech-support",
     session_manager=session_manager,
-    system_prompt="You provide technical support for API configuration."
+    system_prompt="You provide technical support for API configuration.",
 )
 
 # Customer service agent
@@ -424,7 +418,7 @@ customer_service = Agent(
     model="claude-3-sonnet",
     agent_id="customer-service",
     session_manager=session_manager,
-    system_prompt="You are a friendly customer service representative."
+    system_prompt="You are a friendly customer service representative.",
 )
 
 # Use different agents for different tasks
@@ -450,16 +444,20 @@ Each agent maintains its own message history:
 session_manager = create_mongodb_session_manager(
     session_id="demo-session",
     connection_string="mongodb://localhost:27017/",
-    database_name="demo_db"
+    database_name="demo_db",
 )
 
 # Agent 1
-agent1 = Agent(agent_id="agent-1", model="claude-3-sonnet", session_manager=session_manager)
+agent1 = Agent(
+    agent_id="agent-1", model="claude-3-sonnet", session_manager=session_manager
+)
 agent1("Hello from agent 1")
 session_manager.sync_agent(agent1)
 
 # Agent 2
-agent2 = Agent(agent_id="agent-2", model="claude-3-haiku", session_manager=session_manager)
+agent2 = Agent(
+    agent_id="agent-2", model="claude-3-haiku", session_manager=session_manager
+)
 agent2("Hello from agent 2")
 session_manager.sync_agent(agent2)
 
@@ -564,21 +562,15 @@ Each message contains:
 
 ```python
 {
-    "message_id": 1,               # Auto-incrementing ID
-    "role": "user",                # "user" or "assistant"
-    "content": "Hello",            # Message content
-    "created_at": "2024-01-15...", # Timestamp
-    "updated_at": "2024-01-15...", # Timestamp
-    "event_loop_metrics": {        # Only for assistant messages
-        "accumulated_metrics": {
-            "latencyMs": 250
-        },
-        "accumulated_usage": {
-            "inputTokens": 10,
-            "outputTokens": 20,
-            "totalTokens": 30
-        }
-    }
+    "message_id": 1,  # Auto-incrementing ID
+    "role": "user",  # "user" or "assistant"
+    "content": "Hello",  # Message content
+    "created_at": "2024-01-15...",  # Timestamp
+    "updated_at": "2024-01-15...",  # Timestamp
+    "event_loop_metrics": {  # Only for assistant messages
+        "accumulated_metrics": {"latencyMs": 250},
+        "accumulated_usage": {"inputTokens": 10, "outputTokens": 20, "totalTokens": 30},
+    },
 }
 ```
 
@@ -590,10 +582,7 @@ Sometimes you need to redact or modify messages. When Bedrock Guardrails blocks 
 from strands.types.content import Message
 
 # Create redacted message
-redacted_message = Message(
-    role="user",
-    content="[REDACTED FOR PRIVACY]"
-)
+redacted_message = Message(role="user", content="[REDACTED FOR PRIVACY]")
 
 # Redact the latest message (records guardrail event with action="BLOCKED")
 session_manager.redact_latest_message(redacted_message, agent)
@@ -614,10 +603,7 @@ Agents can store stateful information that persists across sessions.
 # In your agent or tools
 agent.state.set("user_language", "euskera")
 agent.state.set("translation_count", 42)
-agent.state.set("preferences", {
-    "tone": "formal",
-    "dialect": "bizkaiera"
-})
+agent.state.set("preferences", {"tone": "formal", "dialect": "bizkaiera"})
 
 # State is automatically saved to MongoDB during sync
 session_manager.sync_agent(agent)
@@ -696,7 +682,7 @@ from mongodb_session_manager import MongoDBSessionRepository
 repo = MongoDBSessionRepository(
     connection_string="mongodb://localhost:27017/",
     database_name="chat_db",
-    collection_name="sessions"
+    collection_name="sessions",
 )
 
 session = repo.read_session("user-123")
@@ -744,21 +730,21 @@ with SessionContext(session_id="user-123", connection_string="...") as session_m
 from mongodb_session_manager import create_mongodb_session_manager
 from strands import Agent
 
+
 def chat_session(user_id: str):
     """Create a persistent chat session for a user."""
     session_manager = create_mongodb_session_manager(
         session_id=f"user-{user_id}-chat",
         connection_string="mongodb://localhost:27017/",
-        database_name="chat_app"
+        database_name="chat_app",
     )
 
     agent = Agent(
-        agent_id="chatbot",
-        model="claude-3-sonnet",
-        session_manager=session_manager
+        agent_id="chatbot", model="claude-3-sonnet", session_manager=session_manager
     )
 
     return session_manager, agent
+
 
 # Use it
 session_manager, agent = chat_session("alice")
@@ -777,22 +763,24 @@ def create_support_session(customer_id: str, issue_type: str):
     session_manager = create_mongodb_session_manager(
         session_id=session_id,
         connection_string="mongodb://localhost:27017/",
-        database_name="support_db"
+        database_name="support_db",
     )
 
     # Add metadata
-    session_manager.update_metadata({
-        "customer_id": customer_id,
-        "issue_type": issue_type,
-        "priority": "normal",
-        "created_at": datetime.now().isoformat()
-    })
+    session_manager.update_metadata(
+        {
+            "customer_id": customer_id,
+            "issue_type": issue_type,
+            "priority": "normal",
+            "created_at": datetime.now().isoformat(),
+        }
+    )
 
     agent = Agent(
         agent_id="support-agent",
         model="claude-3-sonnet",
         session_manager=session_manager,
-        system_prompt=f"You are a support agent helping with {issue_type} issues."
+        system_prompt=f"You are a support agent helping with {issue_type} issues.",
     )
 
     return session_manager, agent
@@ -809,22 +797,21 @@ class WorkflowSession:
         self.session_manager = create_mongodb_session_manager(
             session_id=f"workflow-{workflow_id}",
             connection_string="mongodb://localhost:27017/",
-            database_name="workflows"
+            database_name="workflows",
         )
 
         self.orchestrator = Agent(
             agent_id="orchestrator",
             model="claude-3-sonnet",
-            session_manager=self.session_manager
+            session_manager=self.session_manager,
         )
 
     def execute_step(self, step_name: str, input_data: str):
         """Execute a workflow step."""
         # Update metadata with current step
-        self.session_manager.update_metadata({
-            "current_step": step_name,
-            "last_update": datetime.now().isoformat()
-        })
+        self.session_manager.update_metadata(
+            {"current_step": step_name, "last_update": datetime.now().isoformat()}
+        )
 
         # Execute with agent
         response = self.orchestrator(
@@ -837,6 +824,7 @@ class WorkflowSession:
     def close(self):
         """Clean up resources."""
         self.session_manager.close()
+
 
 # Usage
 workflow = WorkflowSession("order-processing-123")

@@ -37,13 +37,14 @@ import asyncio
 from mongodb_session_manager import create_mongodb_session_manager
 from strands import Agent
 
+
 async def main():
     # Create session manager
     session_manager = create_mongodb_session_manager(
         session_id="hello-world-session",
         connection_string="mongodb://localhost:27017/",
         database_name="my_app",
-        collection_name="sessions"
+        collection_name="sessions",
     )
 
     # Create agent
@@ -51,7 +52,7 @@ async def main():
         model="claude-3-sonnet-20240229",
         agent_id="assistant",
         session_manager=session_manager,
-        system_prompt="You are a helpful assistant."
+        system_prompt="You are a helpful assistant.",
     )
 
     # Simple interaction
@@ -60,6 +61,7 @@ async def main():
 
     # Clean up
     session_manager.close()
+
 
 if __name__ == "__main__":
     asyncio.run(main())
@@ -87,12 +89,13 @@ import asyncio
 from mongodb_session_manager import create_mongodb_session_manager
 from strands import Agent
 
+
 async def main():
     # Create session manager
     session_manager = create_mongodb_session_manager(
         session_id="conversation-session",
         connection_string="mongodb://localhost:27017/",
-        database_name="my_app"
+        database_name="my_app",
     )
 
     # Create agent
@@ -100,7 +103,7 @@ async def main():
         model="claude-3-sonnet-20240229",
         agent_id="assistant",
         session_manager=session_manager,
-        system_prompt="You are a helpful math tutor."
+        system_prompt="You are a helpful math tutor.",
     )
 
     # First message
@@ -120,6 +123,7 @@ async def main():
 
     # Clean up
     session_manager.close()
+
 
 if __name__ == "__main__":
     asyncio.run(main())
@@ -153,6 +157,7 @@ import asyncio
 from mongodb_session_manager import create_mongodb_session_manager
 from strands import Agent
 
+
 async def first_conversation():
     """First part of the conversation."""
     print("=== First Session ===\n")
@@ -160,14 +165,14 @@ async def first_conversation():
     session_manager = create_mongodb_session_manager(
         session_id="resume-demo-session",
         connection_string="mongodb://localhost:27017/",
-        database_name="my_app"
+        database_name="my_app",
     )
 
     agent = Agent(
         model="claude-3-sonnet-20240229",
         agent_id="assistant",
         session_manager=session_manager,
-        system_prompt="You are a helpful assistant with excellent memory."
+        system_prompt="You are a helpful assistant with excellent memory.",
     )
 
     response = agent("My favorite color is blue. Remember that!")
@@ -180,6 +185,7 @@ async def first_conversation():
 
     session_manager.close()
 
+
 async def resumed_conversation():
     """Resume the conversation - agent should remember previous context."""
     print("=== Resumed Session (after restart) ===\n")
@@ -188,14 +194,14 @@ async def resumed_conversation():
     session_manager = create_mongodb_session_manager(
         session_id="resume-demo-session",  # Same ID!
         connection_string="mongodb://localhost:27017/",
-        database_name="my_app"
+        database_name="my_app",
     )
 
     agent = Agent(
         model="claude-3-sonnet-20240229",
         agent_id="assistant",
         session_manager=session_manager,
-        system_prompt="You are a helpful assistant with excellent memory."
+        system_prompt="You are a helpful assistant with excellent memory.",
     )
 
     # Agent should remember previous conversation
@@ -209,6 +215,7 @@ async def resumed_conversation():
 
     session_manager.close()
 
+
 async def main():
     # First conversation
     await first_conversation()
@@ -218,6 +225,7 @@ async def main():
 
     # Resume conversation
     await resumed_conversation()
+
 
 if __name__ == "__main__":
     asyncio.run(main())
@@ -260,12 +268,13 @@ import asyncio
 from mongodb_session_manager import create_mongodb_session_manager
 from strands import Agent
 
+
 async def main():
     # Create session manager
     session_manager = create_mongodb_session_manager(
         session_id="multi-agent-session",
         connection_string="mongodb://localhost:27017/",
-        database_name="my_app"
+        database_name="my_app",
     )
 
     # Create a technical agent
@@ -273,7 +282,7 @@ async def main():
         model="claude-3-sonnet-20240229",
         agent_id="tech-support",
         session_manager=session_manager,
-        system_prompt="You are a technical support agent."
+        system_prompt="You are a technical support agent.",
     )
 
     # Create a sales agent
@@ -281,7 +290,7 @@ async def main():
         model="claude-3-sonnet-20240229",
         agent_id="sales-rep",
         session_manager=session_manager,
-        system_prompt="You are a friendly sales representative."
+        system_prompt="You are a friendly sales representative.",
     )
 
     # Conversation with tech agent
@@ -305,6 +314,7 @@ async def main():
     # Clean up
     session_manager.close()
 
+
 if __name__ == "__main__":
     asyncio.run(main())
 ```
@@ -325,12 +335,13 @@ import asyncio
 from mongodb_session_manager import create_mongodb_session_manager
 from strands import Agent
 
+
 async def main():
     # Create session manager
     session_manager = create_mongodb_session_manager(
         session_id="redaction-demo",
         connection_string="mongodb://localhost:27017/",
-        database_name="my_app"
+        database_name="my_app",
     )
 
     # Create agent
@@ -338,7 +349,7 @@ async def main():
         model="claude-3-sonnet-20240229",
         agent_id="assistant",
         session_manager=session_manager,
-        system_prompt="You are a customer service assistant."
+        system_prompt="You are a customer service assistant.",
     )
 
     # User shares sensitive information
@@ -359,7 +370,7 @@ async def main():
             session_manager.redact_message(
                 agent_id=agent.agent_id,
                 message_id=msg.message_id,
-                redacted_reason="Contains sensitive payment information"
+                redacted_reason="Contains sensitive payment information",
             )
             print("Message redacted!\n")
 
@@ -376,6 +387,7 @@ async def main():
 
     # Clean up
     session_manager.close()
+
 
 if __name__ == "__main__":
     asyncio.run(main())
@@ -410,12 +422,13 @@ import asyncio
 from mongodb_session_manager import create_mongodb_session_manager
 from strands import Agent
 
+
 async def main():
     # Create session manager
     session_manager = create_mongodb_session_manager(
         session_id="state-demo",
         connection_string="mongodb://localhost:27017/",
-        database_name="my_app"
+        database_name="my_app",
     )
 
     # Create agent
@@ -423,7 +436,7 @@ async def main():
         model="claude-3-sonnet-20240229",
         agent_id="assistant",
         session_manager=session_manager,
-        system_prompt="You are a shopping assistant."
+        system_prompt="You are a shopping assistant.",
     )
 
     # Initial state
@@ -448,14 +461,14 @@ async def main():
     session_manager = create_mongodb_session_manager(
         session_id="state-demo",
         connection_string="mongodb://localhost:27017/",
-        database_name="my_app"
+        database_name="my_app",
     )
 
     agent = Agent(
         model="claude-3-sonnet-20240229",
         agent_id="assistant",
         session_manager=session_manager,
-        system_prompt="You are a shopping assistant."
+        system_prompt="You are a shopping assistant.",
     )
 
     # State is automatically restored
@@ -465,6 +478,7 @@ async def main():
 
     # Clean up
     session_manager.close()
+
 
 if __name__ == "__main__":
     asyncio.run(main())
@@ -500,6 +514,7 @@ import asyncio
 from mongodb_session_manager import create_mongodb_session_manager
 from strands import Agent
 
+
 async def main():
     session_manager = None
 
@@ -508,14 +523,14 @@ async def main():
         session_manager = create_mongodb_session_manager(
             session_id="cleanup-demo",
             connection_string="mongodb://localhost:27017/",
-            database_name="my_app"
+            database_name="my_app",
         )
 
         # Create agent
         agent = Agent(
             model="claude-3-sonnet-20240229",
             agent_id="assistant",
-            session_manager=session_manager
+            session_manager=session_manager,
         )
 
         # Do some work
@@ -534,6 +549,7 @@ async def main():
         if session_manager:
             session_manager.close()
             print("Session manager closed")
+
 
 if __name__ == "__main__":
     asyncio.run(main())
@@ -579,7 +595,7 @@ def get_user_info(field: str) -> str:
     user_data = {
         "name": "Alice",
         "email": "alice@example.com",
-        "preferences": {"theme": "dark", "language": "en"}
+        "preferences": {"theme": "dark", "language": "en"},
     }
     return str(user_data.get(field, "Not found"))
 
@@ -593,7 +609,7 @@ async def main():
         session_id="calculator-demo-session",
         connection_string="mongodb://localhost:27017/",
         database_name="examples",
-        collection_name="calculator_sessions"
+        collection_name="calculator_sessions",
     )
     print(f"Session created: {session_manager.session_id}")
 
@@ -610,7 +626,7 @@ Use the get_user_info tool to retrieve user information when needed.
 
 Be friendly and explain your calculations.""",
         tools=[calculator, get_user_info],
-        session_manager=session_manager
+        session_manager=session_manager,
     )
 
     # Track some state
@@ -736,6 +752,7 @@ Example completed!
 
 # Test connection
 from pymongo import MongoClient
+
 client = MongoClient("mongodb://localhost:27017/")
 client.server_info()  # Will raise exception if can't connect
 ```

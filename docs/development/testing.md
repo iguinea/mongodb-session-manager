@@ -119,6 +119,7 @@ from datetime import datetime
 
 from mongodb_session_manager import MongoDBSessionManager
 
+
 class TestMongoDBSessionManager:
     """Test suite for MongoDBSessionManager."""
 
@@ -134,9 +135,7 @@ class TestMongoDBSessionManager:
     def test_create_session_manager(self):
         """Test creating a session manager."""
         manager = MongoDBSessionManager(
-            session_id=self.session_id,
-            client=self.mock_client,
-            database_name="test_db"
+            session_id=self.session_id, client=self.mock_client, database_name="test_db"
         )
         assert manager.session_id == self.session_id
 
@@ -155,6 +154,7 @@ import pytest
 from unittest.mock import Mock, patch
 from mongodb_session_manager import MongoDBSessionManager
 
+
 def test_update_metadata_with_mock():
     """Test metadata update with mocked MongoDB."""
     # Create mock MongoDB client
@@ -167,9 +167,7 @@ def test_update_metadata_with_mock():
 
     # Create session manager with mock client
     manager = MongoDBSessionManager(
-        session_id="test-123",
-        client=mock_client,
-        database_name="test_db"
+        session_id="test-123", client=mock_client, database_name="test_db"
     )
 
     # Test update_metadata
@@ -189,9 +187,7 @@ def test_update_metadata_with_mock():
 def test_update_metadata_invalid_input():
     """Test that invalid metadata raises ValueError."""
     manager = MongoDBSessionManager(
-        session_id="test-123",
-        client=Mock(),
-        database_name="test_db"
+        session_id="test-123", client=Mock(), database_name="test_db"
     )
 
     # Should raise ValueError for non-dict metadata
@@ -214,14 +210,14 @@ def mock_mongodb_client():
 
     return mock_client
 
+
 @pytest.fixture
 def session_manager(mock_mongodb_client):
     """Fixture providing a session manager with mocked client."""
     return MongoDBSessionManager(
-        session_id="test-session",
-        client=mock_mongodb_client,
-        database_name="test_db"
+        session_id="test-session", client=mock_mongodb_client, database_name="test_db"
     )
+
 
 def test_with_fixtures(session_manager):
     """Test using fixtures."""
@@ -267,13 +263,12 @@ import pytest
 from pymongo import MongoClient
 import os
 
+
 @pytest.fixture(scope="session")
 def mongodb_uri():
     """Get MongoDB URI from environment or use default."""
-    return os.getenv(
-        "TEST_MONGODB_URI",
-        "mongodb://test:test@localhost:27018/"
-    )
+    return os.getenv("TEST_MONGODB_URI", "mongodb://test:test@localhost:27018/")
+
 
 @pytest.fixture(scope="session")
 def mongodb_client(mongodb_uri):
@@ -281,6 +276,7 @@ def mongodb_client(mongodb_uri):
     client = MongoClient(mongodb_uri)
     yield client
     client.close()
+
 
 @pytest.fixture
 def clean_database(mongodb_client):
@@ -299,6 +295,7 @@ import pytest
 from mongodb_session_manager import MongoDBSessionManager
 from strands import Agent
 
+
 @pytest.mark.integration
 def test_session_persistence(mongodb_uri, clean_database):
     """Test that sessions persist across manager instances."""
@@ -308,7 +305,7 @@ def test_session_persistence(mongodb_uri, clean_database):
     manager1 = MongoDBSessionManager(
         session_id=session_id,
         connection_string=mongodb_uri,
-        database_name="test_database"
+        database_name="test_database",
     )
     manager1.update_metadata({"user": "test_user", "count": 1})
     manager1.close()
@@ -317,12 +314,13 @@ def test_session_persistence(mongodb_uri, clean_database):
     manager2 = MongoDBSessionManager(
         session_id=session_id,
         connection_string=mongodb_uri,
-        database_name="test_database"
+        database_name="test_database",
     )
     metadata = manager2.get_metadata()
     assert metadata["user"] == "test_user"
     assert metadata["count"] == 1
     manager2.close()
+
 
 @pytest.mark.integration
 def test_full_agent_workflow(mongodb_uri, clean_database):
@@ -333,7 +331,7 @@ def test_full_agent_workflow(mongodb_uri, clean_database):
     manager = MongoDBSessionManager(
         session_id=session_id,
         connection_string=mongodb_uri,
-        database_name="test_database"
+        database_name="test_database",
     )
 
     # Create agent (would need API key for real test)
@@ -341,12 +339,10 @@ def test_full_agent_workflow(mongodb_uri, clean_database):
 
     # Simulate agent interaction
     manager.append_message(
-        {"role": "user", "content": "Hello"},
-        Mock(agent_id="test-agent")
+        {"role": "user", "content": "Hello"}, Mock(agent_id="test-agent")
     )
     manager.append_message(
-        {"role": "assistant", "content": "Hi there!"},
-        Mock(agent_id="test-agent")
+        {"role": "assistant", "content": "Hi there!"}, Mock(agent_id="test-agent")
     )
 
     # Verify messages were stored
@@ -357,26 +353,22 @@ def test_full_agent_workflow(mongodb_uri, clean_database):
 
     manager.close()
 
+
 @pytest.mark.integration
 def test_connection_pool_reuse(mongodb_uri):
     """Test that connection pool properly reuses connections."""
     from mongodb_session_manager import (
         MongoDBSessionManagerFactory,
-        MongoDBConnectionPool
+        MongoDBConnectionPool,
     )
 
     # Create factory
     factory = MongoDBSessionManagerFactory(
-        connection_string=mongodb_uri,
-        database_name="test_database",
-        maxPoolSize=10
+        connection_string=mongodb_uri, database_name="test_database", maxPoolSize=10
     )
 
     # Create multiple session managers
-    managers = [
-        factory.create_session_manager(f"session-{i}")
-        for i in range(5)
-    ]
+    managers = [factory.create_session_manager(f"session-{i}") for i in range(5)]
 
     # All should share the same connection pool
     stats = factory.get_connection_stats()
@@ -439,11 +431,13 @@ def cleanup_test_data(mongodb_client):
     db = mongodb_client["test_database"]
     db["test_collection"].delete_many({})
 
+
 # Or use separate test database per test
 @pytest.fixture
 def unique_test_db(mongodb_client):
     """Create unique test database for each test."""
     import uuid
+
     db_name = f"test_db_{uuid.uuid4().hex[:8]}"
     db = mongodb_client[db_name]
     yield db
@@ -459,7 +453,7 @@ def test_indexes_created(mongodb_client):
         session_id="test",
         client=mongodb_client,
         database_name="test_database",
-        collection_name="sessions"
+        collection_name="sessions",
     )
 
     # Get collection indexes
@@ -480,6 +474,7 @@ def test_indexes_created(mongodb_client):
 import pytest
 from concurrent.futures import ThreadPoolExecutor
 
+
 @pytest.mark.integration
 def test_concurrent_metadata_updates(mongodb_uri):
     """Test thread-safe metadata updates."""
@@ -489,7 +484,7 @@ def test_concurrent_metadata_updates(mongodb_uri):
         manager = MongoDBSessionManager(
             session_id=session_id,
             connection_string=mongodb_uri,
-            database_name="test_database"
+            database_name="test_database",
         )
         manager.update_metadata({f"field_{value}": value})
         manager.close()
@@ -502,7 +497,7 @@ def test_concurrent_metadata_updates(mongodb_uri):
     manager = MongoDBSessionManager(
         session_id=session_id,
         connection_string=mongodb_uri,
-        database_name="test_database"
+        database_name="test_database",
     )
     metadata = manager.get_metadata()
     assert len(metadata) == 10
@@ -526,9 +521,7 @@ def test_with_pytest_mock(mocker):
 
     # Test code
     manager = MongoDBSessionManager(
-        session_id="test",
-        client=mock_client,
-        database_name="test_db"
+        session_id="test", client=mock_client, database_name="test_db"
     )
 
     metadata = manager.get_metadata()
@@ -538,7 +531,7 @@ def test_with_pytest_mock(mocker):
 ### Mocking Connection Pool
 
 ```python
-@patch('mongodb_session_manager.mongodb_connection_pool.MongoDBConnectionPool')
+@patch("mongodb_session_manager.mongodb_connection_pool.MongoDBConnectionPool")
 def test_factory_with_mocked_pool(mock_pool_class):
     """Test factory with mocked connection pool."""
     from mongodb_session_manager import MongoDBSessionManagerFactory
@@ -551,8 +544,7 @@ def test_factory_with_mocked_pool(mock_pool_class):
 
     # Test factory
     factory = MongoDBSessionManagerFactory(
-        connection_string="mongodb://test",
-        database_name="test_db"
+        connection_string="mongodb://test", database_name="test_db"
     )
 
     manager = factory.create_session_manager("test-session")
@@ -581,15 +573,17 @@ def test_metadata_hook():
         session_id="test",
         client=Mock(),
         database_name="test_db",
-        metadata_hook=test_hook
+        metadata_hook=test_hook,
     )
 
     # Test hook is called
     manager.update_metadata({"test": "value"})
     assert ("update", "test") in hook_called
 
+
 def test_metadata_hook_validation():
     """Test metadata hook can validate input."""
+
     def validation_hook(original_func, action, session_id, **kwargs):
         if action == "update":
             metadata = kwargs["metadata"]
@@ -601,7 +595,7 @@ def test_metadata_hook_validation():
         session_id="test",
         client=Mock(),
         database_name="test_db",
-        metadata_hook=validation_hook
+        metadata_hook=validation_hook,
     )
 
     # Should raise error
@@ -624,7 +618,7 @@ def test_feedback_hook():
         session_id="test",
         client=Mock(),
         database_name="test_db",
-        feedback_hook=feedback_hook
+        feedback_hook=feedback_hook,
     )
 
     # Add feedback
@@ -640,8 +634,7 @@ def test_feedback_hook():
 
 ```python
 @pytest.mark.skipif(
-    not is_feedback_sns_hook_available(),
-    reason="SNS hook not available"
+    not is_feedback_sns_hook_available(), reason="SNS hook not available"
 )
 def test_sns_feedback_hook(mocker):
     """Test SNS feedback hook."""
@@ -649,20 +642,16 @@ def test_sns_feedback_hook(mocker):
 
     # Mock SNS client
     mock_sns = mocker.Mock()
-    mocker.patch('custom_aws.sns.SNSClient', return_value=mock_sns)
+    mocker.patch("custom_aws.sns.SNSClient", return_value=mock_sns)
 
     # Create hook
     hook = create_feedback_sns_hook(
-        topic_arn_good="arn:aws:sns:test:good",
-        topic_arn_bad="arn:aws:sns:test:bad"
+        topic_arn_good="arn:aws:sns:test:good", topic_arn_bad="arn:aws:sns:test:bad"
     )
 
     # Test with feedback
     manager = MongoDBSessionManager(
-        session_id="test",
-        client=Mock(),
-        database_name="test_db",
-        feedback_hook=hook
+        session_id="test", client=Mock(), database_name="test_db", feedback_hook=hook
     )
 
     feedback = {"rating": "down", "comment": "Bad response"}
@@ -670,6 +659,7 @@ def test_sns_feedback_hook(mocker):
 
     # Verify SNS was called (async, so may need to wait)
     import time
+
     time.sleep(0.1)  # Allow async operation to complete
 
     # Check that publish was attempted
@@ -680,8 +670,7 @@ def test_sns_feedback_hook(mocker):
 
 ```python
 @pytest.mark.skipif(
-    not is_metadata_sqs_hook_available(),
-    reason="SQS hook not available"
+    not is_metadata_sqs_hook_available(), reason="SQS hook not available"
 )
 def test_sqs_metadata_hook(mocker):
     """Test SQS metadata hook."""
@@ -689,20 +678,17 @@ def test_sqs_metadata_hook(mocker):
 
     # Mock SQS client
     mock_sqs = mocker.Mock()
-    mocker.patch('custom_aws.sqs.SQSClient', return_value=mock_sqs)
+    mocker.patch("custom_aws.sqs.SQSClient", return_value=mock_sqs)
 
     # Create hook
     hook = create_metadata_sqs_hook(
         queue_url="https://sqs.test.amazonaws.com/queue",
-        metadata_fields=["status", "priority"]
+        metadata_fields=["status", "priority"],
     )
 
     # Test with metadata update
     manager = MongoDBSessionManager(
-        session_id="test",
-        client=Mock(),
-        database_name="test_db",
-        metadata_hook=hook
+        session_id="test", client=Mock(), database_name="test_db", metadata_hook=hook
     )
 
     metadata = {"status": "active", "priority": "high", "internal": "not synced"}
@@ -710,6 +696,7 @@ def test_sqs_metadata_hook(mocker):
 
     # Verify SQS was called
     import time
+
     time.sleep(0.1)
 
     # Check that send was attempted

@@ -177,6 +177,7 @@ Create a simple test script to verify your setup:
 # test_installation.py
 from pymongo import MongoClient
 
+
 def test_mongodb_connection():
     """Test MongoDB connection."""
     try:
@@ -184,7 +185,7 @@ def test_mongodb_connection():
         client = MongoClient("mongodb://localhost:27017/")
 
         # Test connection
-        client.admin.command('ping')
+        client.admin.command("ping")
         print("✓ MongoDB connection successful!")
 
         # List databases
@@ -197,6 +198,7 @@ def test_mongodb_connection():
     except Exception as e:
         print(f"✗ MongoDB connection failed: {e}")
         return False
+
 
 if __name__ == "__main__":
     test_mongodb_connection()
@@ -219,6 +221,7 @@ python test_installation.py
 from mongodb_session_manager import create_mongodb_session_manager
 from strands import Agent
 
+
 def test_session_manager():
     """Test MongoDB Session Manager setup."""
     try:
@@ -227,7 +230,7 @@ def test_session_manager():
             session_id="test-session",
             connection_string="mongodb://localhost:27017/",
             database_name="test_db",
-            collection_name="test_sessions"
+            collection_name="test_sessions",
         )
 
         print("✓ Session manager created successfully!")
@@ -237,7 +240,7 @@ def test_session_manager():
             model="claude-3-sonnet",
             agent_id="test-agent",
             session_manager=session_manager,
-            system_prompt="You are a test assistant."
+            system_prompt="You are a test assistant.",
         )
 
         print("✓ Agent created with session manager!")
@@ -255,6 +258,7 @@ def test_session_manager():
     except Exception as e:
         print(f"✗ Test failed: {e}")
         return False
+
 
 if __name__ == "__main__":
     test_session_manager()
@@ -313,7 +317,7 @@ You'll need to provide:
 ```python
 from mongodb_session_manager import (
     is_feedback_sns_hook_available,
-    is_metadata_sqs_hook_available
+    is_metadata_sqs_hook_available,
 )
 
 print(f"SNS Hook Available: {is_feedback_sns_hook_available()}")

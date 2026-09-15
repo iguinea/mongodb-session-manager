@@ -17,18 +17,15 @@ This example demonstrates the performance difference between:
 """
 
 import asyncio
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import List
-
-import sys
 from pathlib import Path
 
 # Add parent directory to path to access src module
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src import MongoDBSessionManagerFactory, create_mongodb_session_manager
-
 
 # Configuration
 MONGODB_URL = "mongodb://mongodb:mongodb@mongodb_session_manager-mongodb:27017/"
@@ -38,7 +35,7 @@ NUM_SESSIONS = 100
 NUM_OPERATIONS_PER_SESSION = 10
 
 
-async def benchmark_without_pooling(session_ids: List[str]):
+async def benchmark_without_pooling(session_ids: list[str]):
     """Benchmark creating new connections for each session."""
     print("\n=== Benchmark WITHOUT Connection Pooling ===")
     start_time = time.time()
@@ -68,7 +65,7 @@ async def benchmark_without_pooling(session_ids: List[str]):
     return elapsed
 
 
-async def benchmark_with_pooling(session_ids: List[str]):
+async def benchmark_with_pooling(session_ids: list[str]):
     """Benchmark using connection pooling."""
     print("\n=== Benchmark WITH Connection Pooling ===")
 
@@ -106,7 +103,7 @@ async def benchmark_with_pooling(session_ids: List[str]):
     return elapsed
 
 
-def simulate_concurrent_requests(session_ids: List[str], use_pooling: bool = True):
+def simulate_concurrent_requests(session_ids: list[str], use_pooling: bool = True):
     """Simulate concurrent requests like in a real FastAPI application."""
     print(
         f"\n=== Simulating Concurrent Requests ({'WITH' if use_pooling else 'WITHOUT'} pooling) ==="

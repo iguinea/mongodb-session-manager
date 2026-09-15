@@ -72,17 +72,19 @@ from mongodb_session_manager import create_mongodb_session_manager
 
 app = FastAPI()
 
+
 class ChatRequest(BaseModel):
     prompt: str
+
 
 class ChatResponse(BaseModel):
     response: str
     session_id: str
 
+
 @app.post("/chat", response_model=ChatResponse)
 async def chat(
-    chat_request: ChatRequest,
-    session_id: str = Header(...)
+    chat_request: ChatRequest, session_id: str = Header(...)
 ) -> ChatResponse:
     """
     Process a chat message.
@@ -92,7 +94,7 @@ async def chat(
     session_manager = create_mongodb_session_manager(
         session_id=session_id,
         connection_string="mongodb://localhost:27017/",
-        database_name="my_app"
+        database_name="my_app",
     )
 
     try:
@@ -100,22 +102,21 @@ async def chat(
         agent = Agent(
             model="claude-3-sonnet-20240229",
             session_manager=session_manager,
-            system_prompt="You are a helpful assistant."
+            system_prompt="You are a helpful assistant.",
         )
 
         # Process message
         response = agent(chat_request.prompt)
 
-        return ChatResponse(
-            response=str(response),
-            session_id=session_id
-        )
+        return ChatResponse(response=str(response), session_id=session_id)
 
     finally:
         session_manager.close()
 
+
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8000)
 ```
 
@@ -151,15 +152,18 @@ from mongodb_session_manager import (
     MongoDBConnectionPool,
 )
 
+
 # Request/Response models
 class ChatRequest(BaseModel):
     prompt: str
     agent_config: dict = {}
 
+
 class ChatResponse(BaseModel):
     response: str
     session_id: str
     metrics: dict = {}
+
 
 # Lifespan context manager
 @asynccontextmanager
@@ -171,8 +175,8 @@ async def lifespan(app: FastAPI):
         database_name="my_app",
         collection_name="sessions",
         # Optimized connection pool settings
-        maxPoolSize=100,      # Maximum connections
-        minPoolSize=10,       # Minimum connections
+        maxPoolSize=100,  # Maximum connections
+        minPoolSize=10,  # Minimum connections
         maxIdleTimeMS=30000,  # Close idle connections after 30s
     )
 
@@ -184,17 +188,14 @@ async def lifespan(app: FastAPI):
     # Shutdown: Clean up resources
     close_global_factory()
 
+
 # Create app with lifespan
-app = FastAPI(
-    title="Virtual Agent API",
-    lifespan=lifespan
-)
+app = FastAPI(title="Virtual Agent API", lifespan=lifespan)
+
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(
-    request: Request,
-    chat_request: ChatRequest,
-    session_id: str = Header(...)
+    request: Request, chat_request: ChatRequest, session_id: str = Header(...)
 ) -> ChatResponse:
     """
     Process a chat message with optimized session management.
@@ -217,7 +218,7 @@ async def chat(
             model="claude-3-sonnet-20240229",
             session_manager=session_manager,
             system_prompt="You are a helpful assistant.",
-            **chat_request.agent_config
+            **chat_request.agent_config,
         )
 
         # Process message
@@ -235,23 +236,23 @@ async def chat(
             metrics = {}
 
         return ChatResponse(
-            response=str(response),
-            session_id=session_id,
-            metrics=metrics
+            response=str(response), session_id=session_id, metrics=metrics
         )
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(
         app,
         host="0.0.0.0",
         port=8000,
-        workers=1,        # Single worker for shared pool
-        loop="uvloop",    # Faster event loop
-        log_level="info"
+        workers=1,  # Single worker for shared pool
+        loop="uvloop",  # Faster event loop
+        log_level="info",
     )
 ```
 
@@ -282,6 +283,7 @@ from mongodb_session_manager import (
 )
 
 logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -347,7 +349,9 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Error during shutdown: {e}")
 
+
 app = FastAPI(lifespan=lifespan)
+
 
 @app.get("/")
 async def root(request: Request):
@@ -355,7 +359,7 @@ async def root(request: Request):
     return {
         "status": "running",
         "startup_time": request.app.state.startup_time,
-        "pool_stats": MongoDBConnectionPool.get_pool_stats()
+        "pool_stats": MongoDBConnectionPool.get_pool_stats(),
     }
 ```
 
@@ -388,14 +392,13 @@ from mongodb_session_manager import get_global_factory
 
 app = FastAPI()
 
+
 class ChatRequest(BaseModel):
     prompt: str
 
+
 @app.post("/chat/stream")
-async def chat_stream(
-    chat_request: ChatRequest,
-    session_id: str = Header(...)
-):
+async def chat_stream(chat_request: ChatRequest, session_id: str = Header(...)):
     """
     Stream chat responses in real-time while persisting to MongoDB.
 
@@ -415,7 +418,7 @@ async def chat_stream(
             agent_id="virtual-agent",
             model="claude-3-sonnet-20240229",
             session_manager=session_manager,
-            system_prompt="You are a helpful assistant."
+            system_prompt="You are a helpful assistant.",
         )
 
         # Track response chunks for later storage
@@ -437,11 +440,7 @@ async def chat_stream(
                 # The agent already appended user message
                 # Now append the complete assistant response
                 session_manager.append_message(
-                    {
-                        "role": "assistant",
-                        "content": full_response
-                    },
-                    agent
+                    {"role": "assistant", "content": full_response}, agent
                 )
 
                 # Sync agent state and metrics
@@ -452,10 +451,7 @@ async def chat_stream(
                 yield f"\n\nError: {str(e)}"
 
         # Return streaming response
-        return StreamingResponse(
-            generate(),
-            media_type="text/plain"
-        )
+        return StreamingResponse(generate(), media_type="text/plain")
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -501,12 +497,10 @@ Health check and metrics endpoints.
 """
 
 from fastapi import FastAPI, Request
-from mongodb_session_manager import (
-    get_global_factory,
-    MongoDBConnectionPool
-)
+from mongodb_session_manager import get_global_factory, MongoDBConnectionPool
 
 app = FastAPI()
+
 
 @app.get("/health")
 async def health_check():
@@ -523,28 +517,26 @@ async def health_check():
 
         # Check if pool is healthy
         is_healthy = (
-            pool_stats.get("active_connections", 0) >= 0 and
-            pool_stats.get("total_connections", 0) > 0
+            pool_stats.get("active_connections", 0) >= 0
+            and pool_stats.get("total_connections", 0) > 0
         )
 
         if is_healthy:
             return {
                 "status": "healthy",
                 "connection_pool": pool_stats,
-                "timestamp": "2024-01-26T10:00:00"
+                "timestamp": "2024-01-26T10:00:00",
             }
         else:
             return {
                 "status": "unhealthy",
                 "reason": "Connection pool not available",
-                "connection_pool": pool_stats
+                "connection_pool": pool_stats,
             }
 
     except Exception as e:
-        return {
-            "status": "unhealthy",
-            "error": str(e)
-        }
+        return {"status": "unhealthy", "error": str(e)}
+
 
 @app.get("/metrics")
 async def get_metrics(request: Request):
@@ -569,13 +561,14 @@ async def get_metrics(request: Request):
                 "database": factory.database_name,
                 "collection": factory.collection_name,
             },
-            "timestamp": "2024-01-26T10:00:00"
+            "timestamp": "2024-01-26T10:00:00",
         }
 
         return metrics
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/metrics/session/{session_id}")
 async def get_session_metrics(session_id: str, request: Request):
@@ -593,17 +586,13 @@ async def get_session_metrics(session_id: str, request: Request):
             raise HTTPException(status_code=404, detail="Session not found")
 
         # Compile metrics
-        metrics = {
-            "session_id": session_id,
-            "agents": {},
-            "total_messages": 0
-        }
+        metrics = {"session_id": session_id, "agents": {}, "total_messages": 0}
 
         for agent_id, agent_data in session_data.agents.items():
             agent_metrics = {
                 "name": agent_data.name,
                 "message_count": len(agent_data.messages),
-                "state": agent_data.state
+                "state": agent_data.state,
             }
             metrics["agents"][agent_id] = agent_metrics
             metrics["total_messages"] += len(agent_data.messages)
@@ -655,14 +644,19 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
+
 # Custom exception classes
 class SessionNotFoundError(Exception):
     """Raised when session is not found."""
+
     pass
+
 
 class AgentError(Exception):
     """Raised when agent encounters an error."""
+
     pass
+
 
 # Exception handlers
 @app.exception_handler(SessionNotFoundError)
@@ -674,9 +668,10 @@ async def session_not_found_handler(request: Request, exc: SessionNotFoundError)
         content={
             "error": "session_not_found",
             "message": str(exc),
-            "session_id": getattr(exc, 'session_id', None)
-        }
+            "session_id": getattr(exc, "session_id", None),
+        },
     )
+
 
 @app.exception_handler(AgentError)
 async def agent_error_handler(request: Request, exc: AgentError):
@@ -687,9 +682,10 @@ async def agent_error_handler(request: Request, exc: AgentError):
         content={
             "error": "agent_error",
             "message": "An error occurred processing your request",
-            "details": str(exc)
-        }
+            "details": str(exc),
+        },
     )
+
 
 @app.exception_handler(RequestValidationError)
 async def validation_error_handler(request: Request, exc: RequestValidationError):
@@ -700,9 +696,10 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
         content={
             "error": "validation_error",
             "message": "Invalid request data",
-            "details": exc.errors()
-        }
+            "details": exc.errors(),
+        },
     )
+
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
@@ -712,9 +709,10 @@ async def general_exception_handler(request: Request, exc: Exception):
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
             "error": "internal_server_error",
-            "message": "An unexpected error occurred"
-        }
+            "message": "An unexpected error occurred",
+        },
     )
+
 
 # Using exceptions in endpoints
 @app.post("/chat")
@@ -770,7 +768,7 @@ app.add_middleware(
     allow_origins=[
         "https://myapp.com",
         "https://www.myapp.com",
-        "https://admin.myapp.com"
+        "https://admin.myapp.com",
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE"],
@@ -834,15 +832,18 @@ MONGO_CONNECTION = os.getenv("MONGODB_URI", "mongodb://localhost:27017/")
 DATABASE_NAME = os.getenv("DATABASE_NAME", "production_app")
 ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
 
+
 # Models
 class ChatRequest(BaseModel):
     prompt: str
     agent_config: Dict[str, Any] = {}
 
+
 class ChatResponse(BaseModel):
     response: str
     session_id: str
     metrics: Dict[str, Any] = {}
+
 
 # Lifespan
 @asynccontextmanager
@@ -869,12 +870,13 @@ async def lifespan(app: FastAPI):
     close_global_factory()
     logger.info("Cleanup complete")
 
+
 # Create app
 app = FastAPI(
     title="Virtual Agent API",
     description="Production MongoDB Session Manager API",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 # CORS
@@ -891,12 +893,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 # Endpoints
 @app.post("/chat", response_model=ChatResponse)
 async def chat(
-    request: Request,
-    chat_request: ChatRequest,
-    session_id: str = Header(...)
+    request: Request, chat_request: ChatRequest, session_id: str = Header(...)
 ) -> ChatResponse:
     """Process a chat message."""
     try:
@@ -907,7 +908,7 @@ async def chat(
             model="claude-3-sonnet-20240229",
             session_manager=session_manager,
             system_prompt="You are a helpful assistant.",
-            **chat_request.agent_config
+            **chat_request.agent_config,
         )
 
         response = agent(chat_request.prompt)
@@ -919,14 +920,13 @@ async def chat(
             metrics = {}
 
         return ChatResponse(
-            response=str(response),
-            session_id=session_id,
-            metrics=metrics
+            response=str(response), session_id=session_id, metrics=metrics
         )
 
     except Exception as e:
         logger.error(f"Error processing chat: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/health")
 async def health_check():
@@ -940,6 +940,7 @@ async def health_check():
     except Exception as e:
         return {"status": "unhealthy", "error": str(e)}
 
+
 @app.get("/metrics")
 async def get_metrics(request: Request):
     """Get system metrics."""
@@ -949,6 +950,7 @@ async def get_metrics(request: Request):
         return {"connection_pool": pool_stats}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 if __name__ == "__main__":
     import uvicorn
@@ -1095,7 +1097,7 @@ volumes:
 factory = initialize_global_factory(
     connection_string=MONGO_CONNECTION,
     maxPoolSize=200,  # Increased from 100
-    minPoolSize=20
+    minPoolSize=20,
 )
 ```
 
@@ -1120,6 +1122,7 @@ session_manager = factory.create_session_manager(...)  # Reuses connection
 async def debug_pool():
     stats = MongoDBConnectionPool.get_pool_stats()
     return stats
+
 
 # If active_connections ≈ maxPoolSize, increase pool size
 ```

@@ -4,13 +4,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+import mongodb_session_manager.mongodb_session_factory as factory_module
 from mongodb_session_manager.mongodb_session_factory import (
     MongoDBSessionManagerFactory,
-    initialize_global_factory,
-    get_global_factory,
     close_global_factory,
+    get_global_factory,
+    initialize_global_factory,
 )
-import mongodb_session_manager.mongodb_session_factory as factory_module
 
 
 @pytest.fixture(autouse=True)

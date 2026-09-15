@@ -7,15 +7,15 @@ permitiendo enviar mensajes a colas SQS.
 
 import json
 import os
-from typing import Optional, Dict, Any, Union
+from typing import Any
+
 import boto3
-from botocore.exceptions import ClientError, NoCredentialsError
+from botocore.exceptions import ClientError
+
+_sqs_clients: dict[str, Any] = {}
 
 
-_sqs_clients: Dict[str, Any] = {}
-
-
-def _get_sqs_client(region_name: Optional[str] = None):
+def _get_sqs_client(region_name: str | None = None):
     """
     Get or create a cached SQS client for the given region.
 
@@ -34,23 +34,22 @@ def _get_sqs_client(region_name: Optional[str] = None):
     if region_name in _sqs_clients:
         return _sqs_clients[region_name]
 
-    try:
-        client = boto3.Session().client(service_name="sqs", region_name=region_name)
-        _sqs_clients[region_name] = client
-        return client
-    except NoCredentialsError:
-        raise NoCredentialsError()
+    # NoCredentialsError se propaga sola: no hay nada que hacer aquí con ella,
+    # y capturarla solo para relanzarla oscurecía el flujo.
+    client = boto3.Session().client(service_name="sqs", region_name=region_name)
+    _sqs_clients[region_name] = client
+    return client
 
 
 def send_message(
     queue_url: str,
-    message_body: Union[str, Dict[str, Any]],
-    message_attributes: Optional[Dict[str, Dict[str, Any]]] = None,
+    message_body: str | dict[str, Any],
+    message_attributes: dict[str, dict[str, Any]] | None = None,
     delay_seconds: int = 0,
-    message_group_id: Optional[str] = None,
-    message_deduplication_id: Optional[str] = None,
-    region_name: Optional[str] = None,
-) -> Dict[str, Any]:
+    message_group_id: str | None = None,
+    message_deduplication_id: str | None = None,
+    region_name: str | None = None,
+) -> dict[str, Any]:
     """
     Enviar un mensaje a una cola SQS.
 
@@ -118,12 +117,12 @@ def send_message(
     except ClientError as e:
         error_code = e.response["Error"]["Code"]
         if error_code == "QueueDoesNotExist":
-            raise ValueError(f"La cola no existe: {queue_url}")
+            raise ValueError(f"La cola no existe: {queue_url}") from e
         elif error_code == "InvalidMessageContents":
-            raise ValueError("El contenido del mensaje es inválido")
+            raise ValueError("El contenido del mensaje es inválido") from e
         elif error_code == "AccessDenied":
             raise PermissionError(
                 f"Acceso denegado a la cola {queue_url}. Verifica los permisos IAM para sqs:SendMessage"
-            )
+            ) from e
         else:
             raise

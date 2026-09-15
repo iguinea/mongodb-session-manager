@@ -4,13 +4,13 @@ Migrates tests from test_application_name.py (TestApplicationNameIntegration)
 and test_session_viewer_password.py.
 """
 
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
 
 from mongodb_session_manager import (
     create_mongodb_session_manager,
 )
-
 
 pytestmark = pytest.mark.integration
 

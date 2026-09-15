@@ -182,7 +182,7 @@ class TestSyncAgent:
         # Verify no metrics update (which uses $ positional operator)
         for c in calls:
             set_data = c[0][1].get("$set", {})
-            assert not any("event_loop_metrics" in k for k in set_data.keys())
+            assert not any("event_loop_metrics" in k for k in set_data)
 
     def test_captures_cycle_metrics(self, manager, mock_agent):
         agent = mock_agent(cycle_count=3, total_duration=4.5, average_cycle_time=1.5)
@@ -227,7 +227,7 @@ class TestSyncAgent:
         config_call = None
         for c in calls:
             set_data = c[0][1].get("$set", {})
-            if any("agent_data.model" in k for k in set_data.keys()):
+            if any("agent_data.model" in k for k in set_data):
                 config_call = c
                 break
         assert config_call is not None
@@ -239,7 +239,7 @@ class TestSyncAgent:
         config_call = None
         for c in calls:
             set_data = c[0][1].get("$set", {})
-            if any("agent_data.system_prompt" in k for k in set_data.keys()):
+            if any("agent_data.system_prompt" in k for k in set_data):
                 config_call = c
                 break
         assert config_call is not None
@@ -837,7 +837,7 @@ class TestRedactLatestMessage:
         guardrail_msg_call = None
         for c in calls:
             set_data = c[0][1].get("$set", {})
-            if any("guardrail_event" in k for k in set_data.keys()):
+            if any("guardrail_event" in k for k in set_data):
                 guardrail_msg_call = c
                 break
         assert guardrail_msg_call is not None

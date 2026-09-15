@@ -140,6 +140,7 @@ The `MongoDBSessionManagerFactory` class manages session manager creation with c
 ```python
 from mongodb_session_manager import MongoDBSessionManagerFactory
 
+
 class MongoDBSessionManagerFactory:
     """Factory for creating session managers with shared connection pool."""
 
@@ -150,7 +151,7 @@ class MongoDBSessionManagerFactory:
         collection_name: str = "collection_name",
         client: MongoClient = None,
         metadata_fields: List[str] = None,
-        **client_kwargs
+        **client_kwargs,
     ):
         """Initialize factory with connection pool."""
         pass
@@ -161,7 +162,7 @@ class MongoDBSessionManagerFactory:
         database_name: str = None,
         collection_name: str = None,
         metadata_fields: List[str] = None,
-        **kwargs
+        **kwargs,
     ) -> MongoDBSessionManager:
         """Create session manager using shared connection."""
         pass
@@ -187,7 +188,7 @@ factory = MongoDBSessionManagerFactory(
     collection_name="sessions",
     # Connection pool settings
     maxPoolSize=100,
-    minPoolSize=10
+    minPoolSize=10,
 )
 
 # Create session managers
@@ -204,17 +205,13 @@ from pymongo import MongoClient
 from mongodb_session_manager import MongoDBSessionManagerFactory
 
 # Create your own MongoDB client
-client = MongoClient(
-    "mongodb://localhost:27017/",
-    maxPoolSize=200,
-    minPoolSize=50
-)
+client = MongoClient("mongodb://localhost:27017/", maxPoolSize=200, minPoolSize=50)
 
 # Pass it to the factory
 factory = MongoDBSessionManagerFactory(
     client=client,  # Use external client
     database_name="my_database",
-    collection_name="sessions"
+    collection_name="sessions",
 )
 
 # Create session managers that use your client
@@ -231,7 +228,7 @@ For convenience, the library provides global factory functions for application-w
 from mongodb_session_manager import (
     initialize_global_factory,
     get_global_factory,
-    close_global_factory
+    close_global_factory,
 )
 
 # Initialize once at startup
@@ -239,7 +236,7 @@ factory = initialize_global_factory(
     connection_string="mongodb://localhost:27017/",
     database_name="chat_db",
     collection_name="sessions",
-    maxPoolSize=100
+    maxPoolSize=100,
 )
 
 # Access anywhere in your application
@@ -291,9 +288,10 @@ from contextlib import asynccontextmanager
 from mongodb_session_manager import (
     initialize_global_factory,
     get_global_factory,
-    close_global_factory
+    close_global_factory,
 )
 from strands import Agent
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -306,7 +304,7 @@ async def lifespan(app: FastAPI):
         # Optimized for production
         maxPoolSize=100,
         minPoolSize=10,
-        maxIdleTimeMS=30000
+        maxIdleTimeMS=30000,
     )
 
     # Store in app state (optional but recommended)
@@ -320,8 +318,10 @@ async def lifespan(app: FastAPI):
     close_global_factory()
     print("Application stopped - factory closed")
 
+
 # Create FastAPI app
 app = FastAPI(lifespan=lifespan)
+
 
 @app.post("/chat")
 async def chat(request: Request, data: dict):
@@ -340,9 +340,7 @@ async def chat(request: Request, data: dict):
 
     # Create agent
     agent = Agent(
-        agent_id="chatbot",
-        model="claude-3-sonnet",
-        session_manager=session_manager
+        agent_id="chatbot", model="claude-3-sonnet", session_manager=session_manager
     )
 
     # Process message
@@ -354,6 +352,7 @@ async def chat(request: Request, data: dict):
     # Return response (connection returned to pool automatically)
     return JSONResponse({"response": response})
 
+
 @app.get("/health")
 async def health():
     """Health check endpoint."""
@@ -363,6 +362,7 @@ async def health():
         return {"status": "healthy", "mongodb": stats}
     except Exception as e:
         return {"status": "unhealthy", "error": str(e)}
+
 
 @app.get("/metrics")
 async def metrics():
@@ -376,12 +376,10 @@ async def metrics():
 
 ```python
 from fastapi import FastAPI
-from mongodb_session_manager import (
-    initialize_global_factory,
-    close_global_factory
-)
+from mongodb_session_manager import initialize_global_factory, close_global_factory
 
 app = FastAPI()
+
 
 @app.on_event("startup")
 async def startup():
@@ -389,9 +387,10 @@ async def startup():
     initialize_global_factory(
         connection_string="mongodb://localhost:27017/",
         database_name="chat_db",
-        maxPoolSize=100
+        maxPoolSize=100,
     )
     print("Factory initialized")
+
 
 @app.on_event("shutdown")
 async def shutdown():
@@ -430,7 +429,7 @@ session_manager.sync_agent(agent)
 session_manager = factory.create_session_manager(
     session_id="admin-session",
     database_name="admin_db",  # Override default
-    collection_name="admin_sessions"  # Override default
+    collection_name="admin_sessions",  # Override default
 )
 ```
 
@@ -440,7 +439,7 @@ session_manager = factory.create_session_manager(
 # Use different metadata fields
 session_manager = factory.create_session_manager(
     session_id="special-session",
-    metadata_fields=["priority", "category", "tags"]  # Override default
+    metadata_fields=["priority", "category", "tags"],  # Override default
 )
 ```
 
@@ -448,6 +447,7 @@ session_manager = factory.create_session_manager(
 
 ```python
 from mongodb_session_manager import get_global_factory
+
 
 def audit_metadata(original_func, action, session_id, **kwargs):
     """Audit all metadata operations."""
@@ -459,11 +459,12 @@ def audit_metadata(original_func, action, session_id, **kwargs):
     else:
         return original_func()
 
+
 # Create session manager with hook
 factory = get_global_factory()
 session_manager = factory.create_session_manager(
     session_id="user-123",
-    metadata_hook=audit_metadata  # Add hook
+    metadata_hook=audit_metadata,  # Add hook
 )
 ```
 
@@ -504,7 +505,7 @@ from mongodb_session_manager import MongoDBSessionManagerFactory
 factory = MongoDBSessionManagerFactory(
     connection_string="mongodb://localhost:27017/",
     database_name="chat_db",
-    maxPoolSize=100
+    maxPoolSize=100,
 )
 
 # 2. Use factory (per request)
@@ -554,7 +555,7 @@ factory = initialize_global_factory(
     compressors=["snappy", "zlib"],
     # Retry for reliability
     retryWrites=True,
-    retryReads=True
+    retryReads=True,
 )
 ```
 
@@ -612,8 +613,9 @@ from mongodb_session_manager import initialize_global_factory
 initialize_global_factory(
     connection_string="mongodb://localhost:27017/",
     database_name="benchmark_db",
-    maxPoolSize=100
+    maxPoolSize=100,
 )
+
 
 async def benchmark_request(session_id: str):
     """Simulate a request."""
@@ -622,6 +624,7 @@ async def benchmark_request(session_id: str):
     # Simulate work...
     await asyncio.sleep(0.1)
     return "done"
+
 
 async def run_benchmark(num_requests: int):
     """Run benchmark with concurrent requests."""
@@ -632,6 +635,7 @@ async def run_benchmark(num_requests: int):
 
     print(f"Processed {num_requests} requests in {end - start:.2f}s")
     print(f"Throughput: {num_requests / (end - start):.2f} req/s")
+
 
 # Run benchmark
 asyncio.run(run_benchmark(1000))
@@ -655,8 +659,9 @@ for tenant_id in ["tenant-1", "tenant-2", "tenant-3"]:
         connection_string="mongodb://localhost:27017/",
         database_name=f"tenant_{tenant_id}",  # Separate DB per tenant
         collection_name="sessions",
-        maxPoolSize=50  # Smaller pool per tenant
+        maxPoolSize=50,  # Smaller pool per tenant
     )
+
 
 # Per request
 def handle_request(tenant_id: str, session_id: str):
@@ -681,21 +686,21 @@ if env == "production":
         maxPoolSize=200,
         minPoolSize=50,
         w="majority",
-        journal=True
+        journal=True,
     )
 elif env == "staging":
     factory = initialize_global_factory(
         connection_string=os.getenv("MONGO_URI"),
         database_name="staging_db",
         maxPoolSize=50,
-        minPoolSize=10
+        minPoolSize=10,
     )
 else:  # development
     factory = initialize_global_factory(
         connection_string="mongodb://localhost:27017/",
         database_name="dev_db",
         maxPoolSize=10,
-        minPoolSize=2
+        minPoolSize=2,
     )
 ```
 
@@ -704,6 +709,7 @@ else:  # development
 ```python
 from mongodb_session_manager import MongoDBSessionManagerFactory
 from typing import Optional
+
 
 class SessionManagerService:
     """Service with lazy factory initialization."""
@@ -717,7 +723,7 @@ class SessionManagerService:
             cls._factory = MongoDBSessionManagerFactory(
                 connection_string="mongodb://localhost:27017/",
                 database_name="chat_db",
-                maxPoolSize=100
+                maxPoolSize=100,
             )
         return cls._factory
 
@@ -734,6 +740,7 @@ class SessionManagerService:
             cls._factory.close()
             cls._factory = None
 
+
 # Usage
 manager = SessionManagerService.create_session_manager("user-123")
 # ... use manager
@@ -748,16 +755,18 @@ from mongodb_session_manager import MongoDBSessionManagerFactory
 
 app = FastAPI()
 
+
 # Factory dependency
 def get_factory() -> MongoDBSessionManagerFactory:
     """Get the session manager factory."""
     return app.state.session_factory
 
+
 @app.post("/chat")
 async def chat(
     session_id: str,
     message: str,
-    factory: MongoDBSessionManagerFactory = Depends(get_factory)
+    factory: MongoDBSessionManagerFactory = Depends(get_factory),
 ):
     """Handle chat with dependency injection."""
     session_manager = factory.create_session_manager(session_id)
@@ -814,6 +823,7 @@ session_manager.close()  # Don't do this!
 async def shutdown():
     close_global_factory()
 
+
 # DON'T: Leave factory running
 # Missing shutdown handler - connections leak!
 ```
@@ -827,6 +837,7 @@ async def health():
     factory = get_global_factory()
     stats = factory.get_connection_stats()
     return {"mongodb": stats}
+
 
 # DON'T: Ignore pool health
 # No monitoring - can't detect issues!

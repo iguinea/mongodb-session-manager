@@ -116,20 +116,20 @@ Performance Considerations:
     - Daemon threads are used in sync contexts to prevent hanging on exit
 """
 
-import logging
 import asyncio
-from typing import Dict, Any, Optional
-from datetime import datetime, timezone
+import logging
+from datetime import UTC, datetime
+from typing import Any
 
 from .utils_async import dispatch_async
+
+logger = logging.getLogger(__name__)
 
 try:
     from .utils_sns import publish_message
 except ImportError:
-    logging.warning("utils_sns not available. Please ensure boto3 is installed.")
+    logger.warning("utils_sns not available. Please ensure boto3 is installed.")
     publish_message = None
-
-logger = logging.getLogger(__name__)
 
 
 class FeedbackSNSHook:
@@ -140,12 +140,12 @@ class FeedbackSNSHook:
         topic_arn_good: str,
         topic_arn_bad: str,
         topic_arn_neutral: str,
-        subject_prefix_good: Optional[str] = None,
-        subject_prefix_bad: Optional[str] = None,
-        subject_prefix_neutral: Optional[str] = None,
-        body_prefix_good: Optional[str] = None,
-        body_prefix_bad: Optional[str] = None,
-        body_prefix_neutral: Optional[str] = None,
+        subject_prefix_good: str | None = None,
+        subject_prefix_bad: str | None = None,
+        subject_prefix_neutral: str | None = None,
+        body_prefix_good: str | None = None,
+        body_prefix_bad: str | None = None,
+        body_prefix_neutral: str | None = None,
     ):
         """
         Initialize the feedback SNS hook with optional message templates
@@ -201,9 +201,7 @@ class FeedbackSNSHook:
             f"good: {topic_arn_good}, bad: {topic_arn_bad}, neutral: {topic_arn_neutral}"
         )
 
-    def _apply_template(
-        self, template: Optional[str], variables: Dict[str, str]
-    ) -> str:
+    def _apply_template(self, template: str | None, variables: dict[str, str]) -> str:
         """
         Apply variable substitution to a template string
 
@@ -227,7 +225,7 @@ class FeedbackSNSHook:
             return template
 
     async def on_feedback_add(
-        self, session_id: str, feedback: Dict[str, Any], **kwargs
+        self, session_id: str, feedback: dict[str, Any], **kwargs
     ) -> None:
         """
         Hook called when feedback is added
@@ -260,7 +258,7 @@ class FeedbackSNSHook:
                 body_prefix = self.body_prefix_neutral
 
             # Prepare template variables
-            timestamp = datetime.now(timezone.utc).isoformat()
+            timestamp = datetime.now(UTC).isoformat()
             template_vars = {
                 "session_id": session_id,
                 "rating": rating_text,
@@ -320,9 +318,8 @@ class FeedbackSNSHook:
         except Exception as e:
             # Log error but don't raise to avoid breaking the main operation
             # The feedback should be stored even if the notification fails
-            logger.error(
-                f"Error sending feedback to SNS for session {session_id}: {e}",
-                exc_info=True,
+            logger.exception(
+                f"Error sending feedback to SNS for session {session_id}: {e}"
             )
 
 
@@ -330,12 +327,12 @@ def create_feedback_hook(
     topic_arn_good: str,
     topic_arn_bad: str,
     topic_arn_neutral: str,
-    subject_prefix_good: Optional[str] = None,
-    subject_prefix_bad: Optional[str] = None,
-    subject_prefix_neutral: Optional[str] = None,
-    body_prefix_good: Optional[str] = None,
-    body_prefix_bad: Optional[str] = None,
-    body_prefix_neutral: Optional[str] = None,
+    subject_prefix_good: str | None = None,
+    subject_prefix_bad: str | None = None,
+    subject_prefix_neutral: str | None = None,
+    body_prefix_good: str | None = None,
+    body_prefix_bad: str | None = None,
+    body_prefix_neutral: str | None = None,
 ):
     """
     Create a feedback hook function for mongodb-session-manager with optional message templates

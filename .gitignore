@@ -2,8 +2,15 @@
 package-lock.json
 __pycache__
 .pytest_cache
+.ruff_cache
 .venv
 *.egg-info
+
+# Artefactos de build y cobertura (los genera `uv build` y `pytest --cov`)
+dist/
+.coverage
+coverage.xml
+htmlcov/
 
 # Environment variables
 .env

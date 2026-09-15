@@ -1,8 +1,6 @@
-from typing import Optional
 from contextvars import ContextVar
-from builtins import str
 
-_session_context: ContextVar[Optional[str]] = ContextVar("session_id", default=None)
+_session_context: ContextVar[str | None] = ContextVar("session_id", default=None)
 
 
 def get_session_context_id():

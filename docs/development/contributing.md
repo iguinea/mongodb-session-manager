@@ -222,7 +222,7 @@ uv run ruff format --check .
    def create_session_manager(
        session_id: str,
        connection_string: Optional[str] = None,
-       database_name: str = "database_name"
+       database_name: str = "database_name",
    ) -> MongoDBSessionManager:
        """Create a session manager."""
        pass

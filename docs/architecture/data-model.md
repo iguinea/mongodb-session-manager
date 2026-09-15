@@ -456,7 +456,7 @@ agent.state.set("preferences", {"tone": "formal"})
         "state": {
             "user_language": "euskera",
             "translation_count": 42,
-            "preferences": {"tone": "formal"}
+            "preferences": {"tone": "formal"},
         }
     }
 }
@@ -667,9 +667,7 @@ def create_agent(self, session_id, session_agent, **kwargs):
 ```python
 # In repository read methods
 metrics_fields = ["event_loop_metrics"]
-filtered_msg_data = {
-    k: v for k, v in msg_data.items() if k not in metrics_fields
-}
+filtered_msg_data = {k: v for k, v in msg_data.items() if k not in metrics_fields}
 return SessionMessage(**filtered_msg_data)
 ```
 
@@ -731,8 +729,7 @@ def update_message(self, session_id, agent_id, session_message, **kwargs):
 ```python
 def list_messages(self, session_id, agent_id, limit=None, offset=0, **kwargs):
     doc = self.collection.find_one(
-        {"_id": session_id},
-        {f"agents.{agent_id}.messages": 1}
+        {"_id": session_id}, {f"agents.{agent_id}.messages": 1}
     )
 
     messages = doc["agents"][agent_id].get("messages", [])
@@ -742,15 +739,16 @@ def list_messages(self, session_id, agent_id, limit=None, offset=0, **kwargs):
 
     # Pagination
     if limit:
-        messages = messages[offset:offset + limit]
+        messages = messages[offset : offset + limit]
     else:
         messages = messages[offset:]
 
     # Convert to SessionMessage (filter metrics)
     result = []
     for msg_data in messages:
-        filtered = {k: v for k, v in msg_data.items()
-                   if k not in ["event_loop_metrics"]}
+        filtered = {
+            k: v for k, v in msg_data.items() if k not in ["event_loop_metrics"]
+        }
         result.append(SessionMessage(**filtered))
 
     return result
@@ -870,14 +868,8 @@ db.sessions.updateOne(
 **Implementation**:
 ```python
 def update_metadata(self, session_id, metadata):
-    set_operations = {
-        f"metadata.{key}": value
-        for key, value in metadata.items()
-    }
-    self.collection.update_one(
-        {"_id": session_id},
-        {"$set": set_operations}
-    )
+    set_operations = {f"metadata.{key}": value for key, value in metadata.items()}
+    self.collection.update_one({"_id": session_id}, {"$set": set_operations})
 ```
 
 #### Field Deletion
@@ -902,14 +894,8 @@ db.sessions.updateOne(
 **Implementation**:
 ```python
 def delete_metadata(self, session_id, metadata_keys):
-    unset_operations = {
-        f"metadata.{key}": ""
-        for key in metadata_keys
-    }
-    self.collection.update_one(
-        {"_id": session_id},
-        {"$unset": unset_operations}
-    )
+    unset_operations = {f"metadata.{key}": "" for key in metadata_keys}
+    self.collection.update_one({"_id": session_id}, {"$unset": unset_operations})
 ```
 
 ### Indexed Fields
@@ -919,7 +905,7 @@ Optionally, specific metadata fields can be indexed:
 ```python
 repository = MongoDBSessionRepository(
     connection_string="mongodb://...",
-    metadata_fields=["priority", "department", "status"]
+    metadata_fields=["priority", "department", "status"],
 )
 ```
 
@@ -1006,17 +992,14 @@ repository = MongoDBSessionRepository(
 #### Add Feedback
 ```python
 def add_feedback(self, session_id, feedback):
-    feedback_doc = {
-        **feedback,
-        "created_at": datetime.now(UTC)
-    }
+    feedback_doc = {**feedback, "created_at": datetime.now(UTC)}
 
     self.collection.update_one(
         {"_id": session_id},
         {
             "$push": {"feedbacks": feedback_doc},
-            "$set": {"updated_at": datetime.now(UTC)}
-        }
+            "$set": {"updated_at": datetime.now(UTC)},
+        },
     )
 ```
 
@@ -1027,10 +1010,7 @@ def add_feedback(self, session_id, feedback):
 #### Get Feedbacks
 ```python
 def get_feedbacks(self, session_id):
-    doc = self.collection.find_one(
-        {"_id": session_id},
-        {"feedbacks": 1}
-    )
+    doc = self.collection.find_one({"_id": session_id}, {"feedbacks": 1})
     return doc.get("feedbacks", [])
 ```
 

@@ -9,7 +9,6 @@ from strands.types.session import Session, SessionMessage
 
 from mongodb_session_manager.mongodb_session_repository import MongoDBSessionRepository
 
-
 # ---------------------------------------------------------------------------
 # Init
 # ---------------------------------------------------------------------------
@@ -37,9 +36,11 @@ class TestSessionRepositoryInit:
         assert repo._owns_client is False
 
     def test_init_raises_without_connection_or_client(self):
-        with patch.object(MongoDBSessionRepository, "_ensure_indexes"):
-            with pytest.raises(ValueError, match="Connection string is required"):
-                MongoDBSessionRepository(database_name="db", collection_name="coll")
+        with (
+            patch.object(MongoDBSessionRepository, "_ensure_indexes"),
+            pytest.raises(ValueError, match="Connection string is required"),
+        ):
+            MongoDBSessionRepository(database_name="db", collection_name="coll")
 
     def test_init_stores_application_name(self, mock_mongo_client):
         with patch.object(MongoDBSessionRepository, "_ensure_indexes"):

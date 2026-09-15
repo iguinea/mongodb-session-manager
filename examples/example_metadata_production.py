@@ -18,12 +18,14 @@ scenario where metadata is gradually built up during the conversation.
 """
 
 import asyncio
-from mongodb_session_manager import create_mongodb_session_manager
-from strands import Agent
-import os
-from datetime import datetime, timedelta
-from typing import Dict, Any, Optional
 import json
+import os
+from datetime import UTC, datetime, timedelta
+from typing import Any
+
+from strands import Agent
+
+from mongodb_session_manager import create_mongodb_session_manager
 
 # Configuration
 MONGO_CONNECTION = os.getenv(
@@ -38,10 +40,10 @@ class CustomerSupportSession:
     def __init__(self, customer_id: str, issue_type: str):
         self.customer_id = customer_id
         self.session_id = (
-            f"support-{customer_id}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+            f"support-{customer_id}-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}"
         )
         self.issue_type = issue_type
-        self.start_time = datetime.now()
+        self.start_time = datetime.now(UTC)
 
         # Create session manager
         self.session_manager = create_mongodb_session_manager(
@@ -66,7 +68,7 @@ class CustomerSupportSession:
             model="eu.anthropic.claude-sonnet-4-20250514-v1:0",
             agent_id="support-agent",
             session_manager=self.session_manager,
-            system_prompt="""You are a helpful customer support agent. 
+            system_prompt="""You are a helpful customer support agent.
             Be professional, empathetic, and solution-oriented.""",
         )
 
@@ -88,7 +90,7 @@ class CustomerSupportSession:
         self.session_manager.update_metadata(initial_metadata)
         print(f"Session initialized: {self.session_id}")
 
-    async def update_customer_info(self, customer_data: Dict[str, Any]):
+    async def update_customer_info(self, customer_data: dict[str, Any]):
         """Update session with customer information."""
         customer_metadata = {
             "customer_name": customer_data.get("name"),
@@ -106,8 +108,8 @@ class CustomerSupportSession:
             "issue_category": category,
             "issue_subcategory": subcategory,
             "severity": severity,
-            "categorized_at": datetime.now().isoformat(),
-            "sla_deadline": (datetime.now() + timedelta(hours=24)).isoformat(),
+            "categorized_at": datetime.now(UTC).isoformat(),
+            "sla_deadline": (datetime.now(UTC) + timedelta(hours=24)).isoformat(),
         }
         self.session_manager.update_metadata(categorization)
         print(f"Issue categorized: {category}/{subcategory} - Severity: {severity}")
@@ -117,7 +119,7 @@ class CustomerSupportSession:
         metrics = {
             "customer_sentiment": sentiment,
             "sentiment_confidence": confidence,
-            "last_interaction": datetime.now().isoformat(),
+            "last_interaction": datetime.now(UTC).isoformat(),
             "interaction_count": await self._get_interaction_count() + 1,
         }
         self.session_manager.update_metadata(metrics)
@@ -134,7 +136,7 @@ class CustomerSupportSession:
         escalation_data = {
             "escalated": True,
             "escalation_reason": reason,
-            "escalation_time": datetime.now().isoformat(),
+            "escalation_time": datetime.now(UTC).isoformat(),
             "escalation_level": 1,
             "status": "escalated",
         }
@@ -142,14 +144,15 @@ class CustomerSupportSession:
         print(f"Session escalated to human agent: {reason}")
 
     async def resolve_issue(
-        self, resolution: str, satisfaction_score: Optional[int] = None
+        self, resolution: str, satisfaction_score: int | None = None
     ):
         """Mark the issue as resolved."""
         resolution_data = {
             "status": "resolved",
             "resolution": resolution,
-            "resolved_at": datetime.now().isoformat(),
-            "resolution_time_minutes": (datetime.now() - self.start_time).seconds // 60,
+            "resolved_at": datetime.now(UTC).isoformat(),
+            "resolution_time_minutes": (datetime.now(UTC) - self.start_time).seconds
+            // 60,
         }
 
         if satisfaction_score is not None:
@@ -164,7 +167,7 @@ class CustomerSupportSession:
         self.session_manager.sync_agent(self.agent)
         return response
 
-    def get_session_summary(self) -> Dict[str, Any]:
+    def get_session_summary(self) -> dict[str, Any]:
         """Get a summary of the session metadata."""
         metadata = self.session_manager.get_metadata(self.session_id)
         if metadata and "metadata" in metadata:
@@ -179,7 +182,7 @@ class CustomerSupportSession:
         # Add archival marker
         archive_metadata = {
             "archived": True,
-            "archived_at": datetime.now().isoformat(),
+            "archived_at": datetime.now(UTC).isoformat(),
             "data_cleaned": True,
         }
         self.session_manager.update_metadata(archive_metadata)

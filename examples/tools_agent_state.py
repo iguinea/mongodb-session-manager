@@ -1,13 +1,14 @@
-from strands import tool, Agent
-import logging
 import json
-from typing import Optional, Union, Dict, List, Any
+import logging
+from typing import Any
+
+from strands import Agent, tool
 
 
 @tool
 async def set_state(
-    state_data: Union[Dict[str, Any], str],
-    value: Optional[Any] = None,
+    state_data: dict[str, Any] | str,
+    value: Any | None = None,
     agent: Agent = None,
 ) -> str:
     """
@@ -51,7 +52,7 @@ async def set_state(
         try:
             json.dumps(updates)
         except (TypeError, ValueError) as e:
-            raise ValueError(f"State values must be JSON serializable: {str(e)}")
+            raise ValueError(f"State values must be JSON serializable: {e!s}") from e
 
         # Set each value in agent state
         for key, val in updates.items():
@@ -60,7 +61,7 @@ async def set_state(
 
         # Create confirmation message
         if len(updates) == 1:
-            key, val = list(updates.items())[0]
+            key, val = next(iter(updates.items()))
             return f"Estado actualizado: {key} = {val}"
         else:
             update_msgs = [f"{k} = {v}" for k, v in updates.items()]
@@ -70,7 +71,7 @@ async def set_state(
 
     except Exception as e:
         logging.error(f"Error setting agent state: {e}")
-        raise RuntimeError(f"Error actualizando estado: {str(e)}") from e
+        raise RuntimeError(f"Error actualizando estado: {e!s}") from e
 
 
 def _get_all_state(agent: Agent) -> str:
@@ -89,7 +90,7 @@ def _get_single_key(agent: Agent, key: str) -> str:
     return f"La clave '{key}' no existe en el estado"
 
 
-def _get_multiple_keys(agent: Agent, keys: List[str]) -> str:
+def _get_multiple_keys(agent: Agent, keys: list[str]) -> str:
     """Get multiple keys from agent state."""
     result = {}
     missing_keys = []
@@ -111,9 +112,7 @@ def _get_multiple_keys(agent: Agent, keys: List[str]) -> str:
 
 
 @tool
-async def get_state(
-    keys: Optional[Union[str, List[str]]] = None, agent: Agent = None
-) -> str:
+async def get_state(keys: str | list[str] | None = None, agent: Agent = None) -> str:
     """
     Gets values from the agent state.
 
@@ -150,4 +149,4 @@ async def get_state(
         raise
     except Exception as e:
         logging.error(f"Error getting agent state: {e}")
-        raise RuntimeError(f"Error obteniendo estado: {str(e)}") from e
+        raise RuntimeError(f"Error obteniendo estado: {e!s}") from e

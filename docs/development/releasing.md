@@ -219,7 +219,7 @@ manager.update_metadata({"key": "value"})
 ```python
 manager = create_session_manager(
     session_id="test",  # Now first parameter
-    connection_string="mongodb://..."
+    connection_string="mongodb://...",
 )
 manager.set_metadata({"key": "value"})  # Renamed method
 ```

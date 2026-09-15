@@ -25,6 +25,8 @@ except ImportError:
 try:
     from .metadata_sqs_hook import (
         MetadataSQSHook,
+    )
+    from .metadata_sqs_hook import (
         create_metadata_hook as create_metadata_sqs_hook,
     )
 
@@ -37,6 +39,8 @@ except ImportError:
 try:
     from .metadata_websocket_hook import (
         MetadataWebSocketHook,
+    )
+    from .metadata_websocket_hook import (
         create_metadata_hook as create_metadata_websocket_hook,
     )
 

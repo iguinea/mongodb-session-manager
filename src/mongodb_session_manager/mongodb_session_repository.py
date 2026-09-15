@@ -7,7 +7,7 @@ import secrets
 import threading
 import weakref
 from datetime import UTC, datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pymongo import MongoClient
 from pymongo.collection import Collection
@@ -180,12 +180,12 @@ class MongoDBSessionRepository(SessionRepository):
 
     def __init__(
         self,
-        connection_string: Optional[str] = None,
+        connection_string: str | None = None,
         database_name: str = "database_name",
         collection_name: str = "collection_name",
-        client: Optional[MongoClient] = None,
-        metadata_fields: Optional[List[str]] = None,
-        application_name: Optional[str] = None,
+        client: MongoClient | None = None,
+        metadata_fields: list[str] | None = None,
+        application_name: str | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialize MongoDB Session Repository.
@@ -275,12 +275,12 @@ class MongoDBSessionRepository(SessionRepository):
         return datetime.fromisoformat(dt_str.replace("Z", TIMEZONE_UTC_SUFFIX))
 
     @staticmethod
-    def _agent_exists(doc: Optional[Dict], agent_id: str) -> bool:
+    def _agent_exists(doc: dict | None, agent_id: str) -> bool:
         """Check if an agent exists in a session document."""
         return bool(doc and "agents" in doc and agent_id in doc["agents"])
 
     @staticmethod
-    def _filter_message_data(msg_data: Dict) -> Dict:
+    def _filter_message_data(msg_data: dict) -> dict:
         """Filter out fields that SessionMessage.__init__() does not accept."""
         return {k: v for k, v in msg_data.items() if k not in _MESSAGE_EXCLUDED_FIELDS}
 
@@ -322,7 +322,7 @@ class MongoDBSessionRepository(SessionRepository):
 
         return session
 
-    def read_session(self, session_id: str, **kwargs: Any) -> Optional[Session]:
+    def read_session(self, session_id: str, **kwargs: Any) -> Session | None:
         """Read a Session from MongoDB."""
         try:
             doc = self.collection.find_one({"_id": session_id})
@@ -385,7 +385,7 @@ class MongoDBSessionRepository(SessionRepository):
 
     def read_agent(
         self, session_id: str, agent_id: str, **kwargs: Any
-    ) -> Optional[SessionAgent]:
+    ) -> SessionAgent | None:
         """Read an Agent from a Session."""
         try:
             doc = self.collection.find_one(
@@ -485,7 +485,7 @@ class MongoDBSessionRepository(SessionRepository):
 
     def read_message(
         self, session_id: str, agent_id: str, message_id: int, **kwargs: Any
-    ) -> Optional[SessionMessage]:
+    ) -> SessionMessage | None:
         """Read a Message from an Agent."""
         try:
             doc = self.collection.find_one(
@@ -573,7 +573,7 @@ class MongoDBSessionRepository(SessionRepository):
         self,
         session_id: str,
         agent_id: str,
-        limit: Optional[int] = None,
+        limit: int | None = None,
         offset: int = 0,
         **kwargs: Any,
     ) -> list[SessionMessage]:
@@ -624,7 +624,7 @@ class MongoDBSessionRepository(SessionRepository):
             logger.info("Skipping close - using shared MongoDB client")
 
     # CUSTOM METHODS
-    def update_metadata(self, session_id: str, metadata: Dict[str, Any]) -> None:
+    def update_metadata(self, session_id: str, metadata: dict[str, Any]) -> None:
         """Update the metadata for the session."""
         try:
             # Build $set operation with dot notation to preserve existing values
@@ -640,11 +640,11 @@ class MongoDBSessionRepository(SessionRepository):
             logger.error(f"Failed to update metadata for session {session_id}: {e}")
             raise
 
-    def get_metadata(self, session_id: str) -> Dict[str, Any]:
+    def get_metadata(self, session_id: str) -> dict[str, Any]:
         """Get the metadata for the session."""
         return self.collection.find_one({"_id": session_id}, {"metadata": 1})
 
-    def delete_metadata(self, session_id: str, metadata_keys: List[str]) -> None:
+    def delete_metadata(self, session_id: str, metadata_keys: list[str]) -> None:
         """Delete metadata keys for the session."""
         try:
             # Build $unset operation with dot notation
@@ -662,7 +662,7 @@ class MongoDBSessionRepository(SessionRepository):
             )
             raise
 
-    def add_feedback(self, session_id: str, feedback: Dict[str, Any]) -> None:
+    def add_feedback(self, session_id: str, feedback: dict[str, Any]) -> None:
         """Add feedback to the session."""
         try:
             now = datetime.now(UTC)
@@ -680,7 +680,7 @@ class MongoDBSessionRepository(SessionRepository):
             logger.error(f"Failed to add feedback to session {session_id}: {e}")
             raise
 
-    def get_feedbacks(self, session_id: str) -> List[Dict[str, Any]]:
+    def get_feedbacks(self, session_id: str) -> list[dict[str, Any]]:
         """Get all feedbacks for the session."""
         try:
             doc = self.collection.find_one({"_id": session_id}, {"feedbacks": 1})
@@ -694,7 +694,7 @@ class MongoDBSessionRepository(SessionRepository):
             logger.error(f"Failed to get feedbacks for session {session_id}: {e}")
             raise
 
-    def get_session_viewer_password(self, session_id: str) -> Optional[str]:
+    def get_session_viewer_password(self, session_id: str) -> str | None:
         """Get the session viewer password for the session.
 
         Args:
@@ -728,7 +728,7 @@ class MongoDBSessionRepository(SessionRepository):
             logger.error(f"Failed to get viewer password for session {session_id}: {e}")
             raise
 
-    def get_application_name(self, session_id: str) -> Optional[str]:
+    def get_application_name(self, session_id: str) -> str | None:
         """Get the application_name for the session (read-only).
 
         The application_name is immutable and set at session creation time.

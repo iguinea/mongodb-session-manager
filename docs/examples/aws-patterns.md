@@ -76,7 +76,7 @@ Check if AWS integrations are available.
 
 from mongodb_session_manager import (
     is_feedback_sns_hook_available,
-    is_metadata_sqs_hook_available
+    is_metadata_sqs_hook_available,
 )
 
 # Check SNS hook availability
@@ -147,7 +147,7 @@ Based on /workspace/src/mongodb_session_manager/hooks/feedback_sns_hook.py
 from mongodb_session_manager import (
     MongoDBSessionManager,
     create_feedback_sns_hook,
-    is_feedback_sns_hook_available
+    is_feedback_sns_hook_available,
 )
 
 # Check availability
@@ -159,7 +159,7 @@ if not is_feedback_sns_hook_available():
 feedback_hook = create_feedback_sns_hook(
     topic_arn_good="arn:aws:sns:eu-west-1:123456789:feedback-good",
     topic_arn_bad="arn:aws:sns:eu-west-1:123456789:feedback-bad",
-    topic_arn_neutral="arn:aws:sns:eu-west-1:123456789:feedback-neutral"
+    topic_arn_neutral="arn:aws:sns:eu-west-1:123456789:feedback-neutral",
 )
 
 # Create session manager with SNS hook
@@ -167,29 +167,26 @@ session_manager = MongoDBSessionManager(
     session_id="sns-demo-session",
     connection_string="mongodb://localhost:27017/",
     database_name="aws_examples",
-    feedback_hook=feedback_hook
+    feedback_hook=feedback_hook,
 )
 
 # Add feedback - automatically sends to appropriate SNS topic
 print("=== Sending Positive Feedback ===")
-session_manager.add_feedback({
-    "rating": "up",
-    "comment": "Great response! Very helpful."
-})
+session_manager.add_feedback(
+    {"rating": "up", "comment": "Great response! Very helpful."}
+)
 print("✓ Feedback stored and SNS notification sent to topic_arn_good\n")
 
 print("=== Sending Negative Feedback ===")
-session_manager.add_feedback({
-    "rating": "down",
-    "comment": "The response was incomplete and unclear."
-})
+session_manager.add_feedback(
+    {"rating": "down", "comment": "The response was incomplete and unclear."}
+)
 print("✓ Feedback stored and SNS notification sent to topic_arn_bad\n")
 
 print("=== Sending Neutral Feedback ===")
-session_manager.add_feedback({
-    "rating": None,
-    "comment": "Just saving this for reference."
-})
+session_manager.add_feedback(
+    {"rating": None, "comment": "Just saving this for reference."}
+)
 print("✓ Feedback stored and SNS notification sent to topic_arn_neutral\n")
 
 session_manager.close()
@@ -228,30 +225,27 @@ Rating-based topic routing.
 Demonstrates selective topic usage.
 """
 
-from mongodb_session_manager import (
-    MongoDBSessionManager,
-    create_feedback_sns_hook
-)
+from mongodb_session_manager import MongoDBSessionManager, create_feedback_sns_hook
 
 # Configuration 1: All feedback types
 hook_all = create_feedback_sns_hook(
     topic_arn_good="arn:aws:sns:eu-west-1:123456789:feedback-good",
     topic_arn_bad="arn:aws:sns:eu-west-1:123456789:feedback-bad",
-    topic_arn_neutral="arn:aws:sns:eu-west-1:123456789:feedback-neutral"
+    topic_arn_neutral="arn:aws:sns:eu-west-1:123456789:feedback-neutral",
 )
 
 # Configuration 2: Only negative feedback (alerts)
 hook_alerts_only = create_feedback_sns_hook(
     topic_arn_good="none",  # Disable positive notifications
     topic_arn_bad="arn:aws:sns:eu-west-1:123456789:feedback-alerts",
-    topic_arn_neutral="none"  # Disable neutral notifications
+    topic_arn_neutral="none",  # Disable neutral notifications
 )
 
 # Configuration 3: Only positive feedback (celebration)
 hook_positive_only = create_feedback_sns_hook(
     topic_arn_good="arn:aws:sns:eu-west-1:123456789:feedback-celebration",
     topic_arn_bad="none",
-    topic_arn_neutral="none"
+    topic_arn_neutral="none",
 )
 
 # Use case: Alert support team only on negative feedback
@@ -259,21 +253,17 @@ session_manager = MongoDBSessionManager(
     session_id="alerts-session",
     connection_string="mongodb://localhost:27017/",
     database_name="aws_examples",
-    feedback_hook=hook_alerts_only
+    feedback_hook=hook_alerts_only,
 )
 
 # Positive feedback - no SNS notification
-session_manager.add_feedback({
-    "rating": "up",
-    "comment": "Perfect!"
-})
+session_manager.add_feedback({"rating": "up", "comment": "Perfect!"})
 print("✓ Positive feedback stored (no SNS notification)")
 
 # Negative feedback - SNS alert sent
-session_manager.add_feedback({
-    "rating": "down",
-    "comment": "Critical issue with the response"
-})
+session_manager.add_feedback(
+    {"rating": "down", "comment": "Critical issue with the response"}
+)
 print("🚨 Negative feedback stored and alert sent to support team")
 
 session_manager.close()
@@ -288,16 +278,16 @@ Advanced routing patterns.
 
 # Pattern 1: Different teams for different ratings
 create_feedback_sns_hook(
-    topic_arn_good="arn:aws:sns:eu-west-1:123:team-success",      # To success metrics team
-    topic_arn_bad="arn:aws:sns:eu-west-1:123:team-support",       # To support team
-    topic_arn_neutral="arn:aws:sns:eu-west-1:123:team-analytics"  # To analytics team
+    topic_arn_good="arn:aws:sns:eu-west-1:123:team-success",  # To success metrics team
+    topic_arn_bad="arn:aws:sns:eu-west-1:123:team-support",  # To support team
+    topic_arn_neutral="arn:aws:sns:eu-west-1:123:team-analytics",  # To analytics team
 )
 
 # Pattern 2: Escalation for negative feedback
 create_feedback_sns_hook(
     topic_arn_good="none",
     topic_arn_bad="arn:aws:sns:eu-west-1:123:critical-alerts",  # PagerDuty integration
-    topic_arn_neutral="none"
+    topic_arn_neutral="none",
 )
 
 # Pattern 3: All feedback to analytics, alerts to support
@@ -323,7 +313,7 @@ Based on /workspace/src/mongodb_session_manager/hooks/metadata_sqs_hook.py
 from mongodb_session_manager import (
     MongoDBSessionManager,
     create_metadata_sqs_hook,
-    is_metadata_sqs_hook_available
+    is_metadata_sqs_hook_available,
 )
 
 # Check availability
@@ -334,7 +324,7 @@ if not is_metadata_sqs_hook_available():
 # Create SQS hook with selective field propagation
 metadata_hook = create_metadata_sqs_hook(
     queue_url="https://sqs.eu-west-1.amazonaws.com/123456789/metadata-updates",
-    metadata_fields=["status", "agent_state", "priority"]  # Only these fields
+    metadata_fields=["status", "agent_state", "priority"],  # Only these fields
 )
 
 # Create session manager with SQS hook
@@ -342,18 +332,20 @@ session_manager = MongoDBSessionManager(
     session_id="sqs-demo-session",
     connection_string="mongodb://localhost:27017/",
     database_name="aws_examples",
-    metadata_hook=metadata_hook
+    metadata_hook=metadata_hook,
 )
 
 # Update metadata - propagated fields sent to SQS
 print("=== Updating Metadata ===")
-session_manager.update_metadata({
-    "status": "processing",           # Sent to SQS
-    "agent_state": "thinking",        # Sent to SQS
-    "priority": "high",               # Sent to SQS
-    "internal_field": "not_sent",     # NOT sent to SQS (not in metadata_fields)
-    "user_id": "user-123"             # NOT sent to SQS (not in metadata_fields)
-})
+session_manager.update_metadata(
+    {
+        "status": "processing",  # Sent to SQS
+        "agent_state": "thinking",  # Sent to SQS
+        "priority": "high",  # Sent to SQS
+        "internal_field": "not_sent",  # NOT sent to SQS (not in metadata_fields)
+        "user_id": "user-123",  # NOT sent to SQS (not in metadata_fields)
+    }
+)
 print("✓ Metadata updated - selective fields sent to SQS\n")
 
 # Delete metadata - deletion sent to SQS
@@ -411,19 +403,19 @@ Demonstrates using both hooks simultaneously.
 from mongodb_session_manager import (
     MongoDBSessionManager,
     create_feedback_sns_hook,
-    create_metadata_sqs_hook
+    create_metadata_sqs_hook,
 )
 
 # Create both hooks
 feedback_hook = create_feedback_sns_hook(
     topic_arn_good="arn:aws:sns:eu-west-1:123:feedback-good",
     topic_arn_bad="arn:aws:sns:eu-west-1:123:feedback-bad",
-    topic_arn_neutral="arn:aws:sns:eu-west-1:123:feedback-neutral"
+    topic_arn_neutral="arn:aws:sns:eu-west-1:123:feedback-neutral",
 )
 
 metadata_hook = create_metadata_sqs_hook(
     queue_url="https://sqs.eu-west-1.amazonaws.com/123/metadata-updates",
-    metadata_fields=["status", "agent_state", "user_satisfaction"]
+    metadata_fields=["status", "agent_state", "user_satisfaction"],
 )
 
 # Create session manager with both hooks
@@ -432,7 +424,7 @@ session_manager = MongoDBSessionManager(
     connection_string="mongodb://localhost:27017/",
     database_name="aws_examples",
     feedback_hook=feedback_hook,
-    metadata_hook=metadata_hook
+    metadata_hook=metadata_hook,
 )
 
 # Scenario: User interaction with full tracking
@@ -440,42 +432,29 @@ print("=== User Interaction Flow ===\n")
 
 # 1. Update session status
 print("1. Setting session status...")
-session_manager.update_metadata({
-    "status": "active",
-    "agent_state": "ready"
-})
+session_manager.update_metadata({"status": "active", "agent_state": "ready"})
 print("   ✓ Metadata update sent to SQS\n")
 
 # 2. User provides feedback
 print("2. User provides positive feedback...")
-session_manager.add_feedback({
-    "rating": "up",
-    "comment": "Great assistance!"
-})
+session_manager.add_feedback({"rating": "up", "comment": "Great assistance!"})
 print("   ✓ Feedback notification sent to SNS (good topic)\n")
 
 # 3. Update satisfaction score in metadata
 print("3. Updating satisfaction score...")
-session_manager.update_metadata({
-    "user_satisfaction": "high",
-    "agent_state": "completed"
-})
+session_manager.update_metadata(
+    {"user_satisfaction": "high", "agent_state": "completed"}
+)
 print("   ✓ Satisfaction update sent to SQS\n")
 
 # 4. Another feedback (negative)
 print("4. User provides negative feedback...")
-session_manager.add_feedback({
-    "rating": "down",
-    "comment": "Follow-up was unclear"
-})
+session_manager.add_feedback({"rating": "down", "comment": "Follow-up was unclear"})
 print("   ✓ Feedback alert sent to SNS (bad topic)\n")
 
 # 5. Update status based on negative feedback
 print("5. Updating status based on feedback...")
-session_manager.update_metadata({
-    "status": "needs_review",
-    "user_satisfaction": "low"
-})
+session_manager.update_metadata({"status": "needs_review", "user_satisfaction": "low"})
 print("   ✓ Status update sent to SQS\n")
 
 print("=== Complete Flow ===")
@@ -501,8 +480,9 @@ Real-time dashboard with AWS integration.
 import boto3
 import json
 
-sqs = boto3.client('sqs', region_name='eu-west-1')
+sqs = boto3.client("sqs", region_name="eu-west-1")
 queue_url = "https://sqs.eu-west-1.amazonaws.com/123/metadata-updates"
+
 
 def process_metadata_updates():
     """
@@ -513,19 +493,19 @@ def process_metadata_updates():
         response = sqs.receive_message(
             QueueUrl=queue_url,
             MaxNumberOfMessages=10,
-            WaitTimeSeconds=20  # Long polling
+            WaitTimeSeconds=20,  # Long polling
         )
 
-        if 'Messages' not in response:
+        if "Messages" not in response:
             continue
 
-        for message in response['Messages']:
+        for message in response["Messages"]:
             # Parse message
-            body = json.loads(message['Body'])
+            body = json.loads(message["Body"])
 
-            session_id = body['session_id']
-            operation = body['operation']
-            metadata = body['metadata']
+            session_id = body["session_id"]
+            operation = body["operation"]
+            metadata = body["metadata"]
 
             # Update dashboard via SSE
             if operation == "update":
@@ -535,14 +515,15 @@ def process_metadata_updates():
 
             # Delete message from queue
             sqs.delete_message(
-                QueueUrl=queue_url,
-                ReceiptHandle=message['ReceiptHandle']
+                QueueUrl=queue_url, ReceiptHandle=message["ReceiptHandle"]
             )
+
 
 def send_sse_update(session_id: str, metadata: dict):
     """Send SSE update to connected clients."""
     # Implementation depends on your SSE server
     print(f"SSE Update: {session_id} -> {metadata}")
+
 
 def send_sse_delete(session_id: str, deleted_fields: dict):
     """Send SSE delete event to connected clients."""
@@ -564,7 +545,7 @@ import os
 from mongodb_session_manager import (
     MongoDBSessionManager,
     create_feedback_sns_hook,
-    create_metadata_sqs_hook
+    create_metadata_sqs_hook,
 )
 
 # Environment-specific configuration
@@ -575,26 +556,27 @@ SNS_TOPICS = {
     "development": {
         "good": "arn:aws:sns:eu-west-1:123:dev-feedback-good",
         "bad": "arn:aws:sns:eu-west-1:123:dev-feedback-bad",
-        "neutral": "arn:aws:sns:eu-west-1:123:dev-feedback-neutral"
+        "neutral": "arn:aws:sns:eu-west-1:123:dev-feedback-neutral",
     },
     "staging": {
         "good": "arn:aws:sns:eu-west-1:123:staging-feedback-good",
         "bad": "arn:aws:sns:eu-west-1:123:staging-feedback-bad",
-        "neutral": "arn:aws:sns:eu-west-1:123:staging-feedback-neutral"
+        "neutral": "arn:aws:sns:eu-west-1:123:staging-feedback-neutral",
     },
     "production": {
         "good": "arn:aws:sns:eu-west-1:123:prod-feedback-good",
         "bad": "arn:aws:sns:eu-west-1:123:prod-feedback-bad",
-        "neutral": "arn:aws:sns:eu-west-1:123:prod-feedback-neutral"
-    }
+        "neutral": "arn:aws:sns:eu-west-1:123:prod-feedback-neutral",
+    },
 }
 
 # SQS Queues
 SQS_QUEUES = {
     "development": "https://sqs.eu-west-1.amazonaws.com/123/dev-metadata",
     "staging": "https://sqs.eu-west-1.amazonaws.com/123/staging-metadata",
-    "production": "https://sqs.eu-west-1.amazonaws.com/123/prod-metadata"
+    "production": "https://sqs.eu-west-1.amazonaws.com/123/prod-metadata",
 }
+
 
 def create_session_manager_with_aws(session_id: str):
     """Create session manager with environment-appropriate AWS hooks."""
@@ -607,12 +589,11 @@ def create_session_manager_with_aws(session_id: str):
     feedback_hook = create_feedback_sns_hook(
         topic_arn_good=sns_config["good"],
         topic_arn_bad=sns_config["bad"],
-        topic_arn_neutral=sns_config["neutral"]
+        topic_arn_neutral=sns_config["neutral"],
     )
 
     metadata_hook = create_metadata_sqs_hook(
-        queue_url=sqs_queue,
-        metadata_fields=["status", "priority", "agent_state"]
+        queue_url=sqs_queue, metadata_fields=["status", "priority", "agent_state"]
     )
 
     # Create session manager
@@ -621,8 +602,9 @@ def create_session_manager_with_aws(session_id: str):
         connection_string=os.getenv("MONGODB_URI"),
         database_name=f"{ENVIRONMENT}_db",
         feedback_hook=feedback_hook,
-        metadata_hook=metadata_hook
+        metadata_hook=metadata_hook,
     )
+
 
 # Usage
 session_manager = create_session_manager_with_aws("user-session-123")
@@ -645,9 +627,11 @@ Configuration file pattern for AWS resources.
 from dataclasses import dataclass
 from typing import Optional
 
+
 @dataclass
 class AWSConfig:
     """AWS configuration for MongoDB Session Manager."""
+
     sns_topic_good: str
     sns_topic_bad: str
     sns_topic_neutral: str
@@ -655,30 +639,31 @@ class AWSConfig:
     region: str = "eu-west-1"
 
     @classmethod
-    def from_env(cls, environment: str) -> Optional['AWSConfig']:
+    def from_env(cls, environment: str) -> Optional["AWSConfig"]:
         """Load configuration from environment."""
         configs = {
             "development": cls(
                 sns_topic_good="arn:aws:sns:eu-west-1:123:dev-feedback-good",
                 sns_topic_bad="arn:aws:sns:eu-west-1:123:dev-feedback-bad",
                 sns_topic_neutral="arn:aws:sns:eu-west-1:123:dev-feedback-neutral",
-                sqs_queue_url="https://sqs.eu-west-1.amazonaws.com/123/dev-metadata"
+                sqs_queue_url="https://sqs.eu-west-1.amazonaws.com/123/dev-metadata",
             ),
             "production": cls(
                 sns_topic_good="arn:aws:sns:eu-west-1:123:prod-feedback-good",
                 sns_topic_bad="arn:aws:sns:eu-west-1:123:prod-feedback-bad",
                 sns_topic_neutral="arn:aws:sns:eu-west-1:123:prod-feedback-neutral",
-                sqs_queue_url="https://sqs.eu-west-1.amazonaws.com/123/prod-metadata"
-            )
+                sqs_queue_url="https://sqs.eu-west-1.amazonaws.com/123/prod-metadata",
+            ),
         }
         return configs.get(environment)
+
 
 # Usage
 config = AWSConfig.from_env("production")
 feedback_hook = create_feedback_sns_hook(
     topic_arn_good=config.sns_topic_good,
     topic_arn_bad=config.sns_topic_bad,
-    topic_arn_neutral=config.sns_topic_neutral
+    topic_arn_neutral=config.sns_topic_neutral,
 )
 ```
 
@@ -697,11 +682,12 @@ import logging
 from mongodb_session_manager import (
     MongoDBSessionManager,
     create_feedback_sns_hook,
-    is_feedback_sns_hook_available
+    is_feedback_sns_hook_available,
 )
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
 
 def create_session_manager_safe(session_id: str):
     """
@@ -716,7 +702,7 @@ def create_session_manager_safe(session_id: str):
             feedback_hook = create_feedback_sns_hook(
                 topic_arn_good="arn:aws:sns:eu-west-1:123:feedback-good",
                 topic_arn_bad="arn:aws:sns:eu-west-1:123:feedback-bad",
-                topic_arn_neutral="arn:aws:sns:eu-west-1:123:feedback-neutral"
+                topic_arn_neutral="arn:aws:sns:eu-west-1:123:feedback-neutral",
             )
             logger.info("✓ AWS SNS integration enabled")
         except Exception as e:
@@ -731,18 +717,16 @@ def create_session_manager_safe(session_id: str):
         session_id=session_id,
         connection_string="mongodb://localhost:27017/",
         database_name="examples",
-        feedback_hook=feedback_hook
+        feedback_hook=feedback_hook,
     )
+
 
 # Usage - works regardless of AWS availability
 session_manager = create_session_manager_safe("resilient-session")
 
 # Feedback is always stored in MongoDB
 # SNS notification is sent if available
-session_manager.add_feedback({
-    "rating": "up",
-    "comment": "Works great!"
-})
+session_manager.add_feedback({"rating": "up", "comment": "Works great!"})
 
 print("✓ Feedback stored successfully")
 print("  - MongoDB: Stored")
@@ -763,7 +747,7 @@ try:
     hook = create_feedback_sns_hook(
         topic_arn_good="invalid-arn",
         topic_arn_bad="arn:aws:sns:eu-west-1:123:feedback-bad",
-        topic_arn_neutral="none"
+        topic_arn_neutral="none",
     )
 except Exception as e:
     logger.error(f"Invalid SNS configuration: {e}")
@@ -798,32 +782,27 @@ Local testing with LocalStack.
 
 import os
 import boto3
-from mongodb_session_manager import (
-    MongoDBSessionManager,
-    create_feedback_sns_hook
-)
+from mongodb_session_manager import MongoDBSessionManager, create_feedback_sns_hook
 
 # Configure LocalStack endpoints
-os.environ['AWS_ACCESS_KEY_ID'] = 'test'
-os.environ['AWS_SECRET_ACCESS_KEY'] = 'test'
-os.environ['AWS_DEFAULT_REGION'] = 'eu-west-1'
+os.environ["AWS_ACCESS_KEY_ID"] = "test"
+os.environ["AWS_SECRET_ACCESS_KEY"] = "test"
+os.environ["AWS_DEFAULT_REGION"] = "eu-west-1"
 
 # Create LocalStack client
 sns = boto3.client(
-    'sns',
-    endpoint_url='http://localhost:4566',  # LocalStack
-    region_name='eu-west-1'
+    "sns",
+    endpoint_url="http://localhost:4566",  # LocalStack
+    region_name="eu-west-1",
 )
 
 # Create local topics
-response = sns.create_topic(Name='test-feedback-good')
-topic_arn = response['TopicArn']
+response = sns.create_topic(Name="test-feedback-good")
+topic_arn = response["TopicArn"]
 
 # Create hook with local topic
 feedback_hook = create_feedback_sns_hook(
-    topic_arn_good=topic_arn,
-    topic_arn_bad=topic_arn,
-    topic_arn_neutral=topic_arn
+    topic_arn_good=topic_arn, topic_arn_bad=topic_arn, topic_arn_neutral=topic_arn
 )
 
 # Test
@@ -831,7 +810,7 @@ session_manager = MongoDBSessionManager(
     session_id="test-session",
     connection_string="mongodb://localhost:27017/",
     database_name="test",
-    feedback_hook=feedback_hook
+    feedback_hook=feedback_hook,
 )
 
 session_manager.add_feedback({"rating": "up", "comment": "Test"})
@@ -850,6 +829,7 @@ Unit testing with mocks.
 from unittest.mock import Mock, patch
 from mongodb_session_manager import MongoDBSessionManager
 
+
 def test_feedback_with_sns():
     """Test feedback with mocked SNS."""
 
@@ -860,14 +840,11 @@ def test_feedback_with_sns():
         session_id="test-session",
         connection_string="mongodb://localhost:27017/",
         database_name="test",
-        feedback_hook=mock_hook
+        feedback_hook=mock_hook,
     )
 
     # Add feedback
-    session_manager.add_feedback({
-        "rating": "up",
-        "comment": "Test feedback"
-    })
+    session_manager.add_feedback({"rating": "up", "comment": "Test feedback"})
 
     # Verify hook was called
     assert mock_hook.called
@@ -897,15 +874,13 @@ from mongodb_session_manager import create_feedback_sns_hook
 feedback_hook = create_feedback_sns_hook(
     # Good feedback -> Celebration channel
     topic_arn_good="arn:aws:sns:eu-west-1:123:team-celebrations",
-
     # Bad feedback -> Multiple subscriptions:
     # - Email to support team
     # - Slack notification
     # - PagerDuty alert (for critical)
     topic_arn_bad="arn:aws:sns:eu-west-1:123:critical-alerts",
-
     # Neutral -> Analytics only
-    topic_arn_neutral="arn:aws:sns:eu-west-1:123:analytics-feed"
+    topic_arn_neutral="arn:aws:sns:eu-west-1:123:analytics-feed",
 )
 ```
 
@@ -920,30 +895,28 @@ Trigger workflows based on metadata changes.
 import boto3
 import json
 
-sqs = boto3.client('sqs')
-stepfunctions = boto3.client('stepfunctions')
+sqs = boto3.client("sqs")
+stepfunctions = boto3.client("stepfunctions")
+
 
 def process_metadata_event(event):
     """Process metadata event and trigger workflow."""
-    session_id = event['session_id']
-    metadata = event['metadata']
+    session_id = event["session_id"]
+    metadata = event["metadata"]
 
     # Check for workflow triggers
-    if metadata.get('status') == 'needs_review':
+    if metadata.get("status") == "needs_review":
         # Start review workflow
         stepfunctions.start_execution(
-            stateMachineArn='arn:aws:states:eu-west-1:123:stateMachine:ReviewWorkflow',
-            input=json.dumps({
-                'session_id': session_id,
-                'metadata': metadata
-            })
+            stateMachineArn="arn:aws:states:eu-west-1:123:stateMachine:ReviewWorkflow",
+            input=json.dumps({"session_id": session_id, "metadata": metadata}),
         )
 
-    elif metadata.get('priority') == 'high':
+    elif metadata.get("priority") == "high":
         # Escalate to senior support
         sns.publish(
-            TopicArn='arn:aws:sns:eu-west-1:123:senior-support',
-            Message=f'High priority session: {session_id}'
+            TopicArn="arn:aws:sns:eu-west-1:123:senior-support",
+            Message=f"High priority session: {session_id}",
         )
 ```
 
@@ -957,26 +930,25 @@ Build analytics pipeline with SQS and Kinesis.
 # SQS -> Lambda -> Kinesis -> Analytics
 import boto3
 
-kinesis = boto3.client('kinesis')
+kinesis = boto3.client("kinesis")
+
 
 def metadata_to_analytics(event):
     """Forward metadata events to analytics stream."""
-    session_id = event['session_id']
-    metadata = event['metadata']
+    session_id = event["session_id"]
+    metadata = event["metadata"]
 
     # Enrich with additional data
     record = {
-        'session_id': session_id,
-        'metadata': metadata,
-        'timestamp': event['timestamp'],
-        'event': event['event']
+        "session_id": session_id,
+        "metadata": metadata,
+        "timestamp": event["timestamp"],
+        "event": event["event"],
     }
 
     # Send to Kinesis for real-time analytics
     kinesis.put_record(
-        StreamName='session-analytics',
-        Data=json.dumps(record),
-        PartitionKey=session_id
+        StreamName="session-analytics", Data=json.dumps(record), PartitionKey=session_id
     )
 ```
 
@@ -990,41 +962,40 @@ Implement disaster recovery with SQS DLQ.
 # Configure SQS with Dead Letter Queue
 import boto3
 
-sqs = boto3.client('sqs')
+sqs = boto3.client("sqs")
 
 # Create DLQ
 dlq_response = sqs.create_queue(
-    QueueName='metadata-updates-dlq',
+    QueueName="metadata-updates-dlq",
     Attributes={
-        'MessageRetentionPeriod': '1209600'  # 14 days
-    }
+        "MessageRetentionPeriod": "1209600"  # 14 days
+    },
 )
 
 # Create main queue with DLQ
 queue_response = sqs.create_queue(
-    QueueName='metadata-updates',
+    QueueName="metadata-updates",
     Attributes={
-        'RedrivePolicy': json.dumps({
-            'deadLetterTargetArn': dlq_response['QueueUrl'],
-            'maxReceiveCount': '3'
-        })
-    }
+        "RedrivePolicy": json.dumps(
+            {"deadLetterTargetArn": dlq_response["QueueUrl"], "maxReceiveCount": "3"}
+        )
+    },
 )
+
 
 # Monitor DLQ for failed processing
 def monitor_dlq():
     """Monitor DLQ and alert on failures."""
     response = sqs.receive_message(
-        QueueUrl=dlq_response['QueueUrl'],
-        MaxNumberOfMessages=1
+        QueueUrl=dlq_response["QueueUrl"], MaxNumberOfMessages=1
     )
 
-    if 'Messages' in response:
+    if "Messages" in response:
         # Alert on failed messages
         sns.publish(
-            TopicArn='arn:aws:sns:eu-west-1:123:ops-alerts',
-            Subject='SQS DLQ Alert',
-            Message=f'Messages in DLQ: investigate failed processing'
+            TopicArn="arn:aws:sns:eu-west-1:123:ops-alerts",
+            Subject="SQS DLQ Alert",
+            Message=f"Messages in DLQ: investigate failed processing",
         )
 ```
 
@@ -1063,20 +1034,18 @@ def monitor_dlq():
 # Solution: Check queue policy and VPC settings
 
 import boto3
-sqs = boto3.client('sqs')
+
+sqs = boto3.client("sqs")
 
 # Check queue attributes
-response = sqs.get_queue_attributes(
-    QueueUrl='your-queue-url',
-    AttributeNames=['All']
-)
-print(response['Attributes'])
+response = sqs.get_queue_attributes(QueueUrl="your-queue-url", AttributeNames=["All"])
+print(response["Attributes"])
 
 # Verify message visibility
 response = sqs.receive_message(
-    QueueUrl='your-queue-url',
+    QueueUrl="your-queue-url",
     VisibilityTimeout=0,  # Make visible immediately
-    WaitTimeSeconds=10
+    WaitTimeSeconds=10,
 )
 ```
 
@@ -1087,6 +1056,7 @@ response = sqs.receive_message(
 # Solution: Check logs and verify hook installation
 
 import logging
+
 logging.basicConfig(level=logging.DEBUG)
 
 # This will show hook execution

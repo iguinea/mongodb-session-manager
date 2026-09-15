@@ -19,6 +19,7 @@ Demonstrates automatic timing and token tracking.
 import asyncio
 import sys
 from pathlib import Path
+
 from strands import Agent, tool
 from strands_tools.calculator import calculator
 

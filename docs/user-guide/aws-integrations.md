@@ -29,7 +29,7 @@ pip install python-helpers
 ```python
 from mongodb_session_manager import (
     is_feedback_sns_hook_available,
-    is_metadata_sqs_hook_available
+    is_metadata_sqs_hook_available,
 )
 
 # Check if SNS hook is available
@@ -100,7 +100,7 @@ Send real-time SNS notifications when users submit feedback, with routing based 
 from mongodb_session_manager import (
     MongoDBSessionManager,
     create_feedback_sns_hook,
-    is_feedback_sns_hook_available
+    is_feedback_sns_hook_available,
 )
 
 # Check availability
@@ -111,7 +111,7 @@ if not is_feedback_sns_hook_available():
 feedback_hook = create_feedback_sns_hook(
     topic_arn_good="arn:aws:sns:eu-west-1:123456789:feedback-good",
     topic_arn_bad="arn:aws:sns:eu-west-1:123456789:feedback-bad",
-    topic_arn_neutral="arn:aws:sns:eu-west-1:123456789:feedback-neutral"
+    topic_arn_neutral="arn:aws:sns:eu-west-1:123456789:feedback-neutral",
 )
 
 # Create session manager with SNS notifications
@@ -119,26 +119,19 @@ session_manager = MongoDBSessionManager(
     session_id="user-session-123",
     connection_string="mongodb://localhost:27017/",
     database_name="my_db",
-    feedback_hook=feedback_hook
+    feedback_hook=feedback_hook,
 )
 
 # Negative feedback routes to topic_arn_bad
-session_manager.add_feedback({
-    "rating": "down",
-    "comment": "The response was incomplete"
-})
+session_manager.add_feedback(
+    {"rating": "down", "comment": "The response was incomplete"}
+)
 
 # Positive feedback routes to topic_arn_good
-session_manager.add_feedback({
-    "rating": "up",
-    "comment": "Great response!"
-})
+session_manager.add_feedback({"rating": "up", "comment": "Great response!"})
 
 # Neutral feedback routes to topic_arn_neutral
-session_manager.add_feedback({
-    "rating": None,
-    "comment": "Just saving for later"
-})
+session_manager.add_feedback({"rating": None, "comment": "Just saving for later"})
 ```
 
 ### Selective Notifications
@@ -148,29 +141,23 @@ Disable notifications for specific feedback types using `"none"`:
 ```python
 # Only notify on negative feedback
 feedback_hook = create_feedback_sns_hook(
-    topic_arn_good="none",      # No notifications for positive
+    topic_arn_good="none",  # No notifications for positive
     topic_arn_bad="arn:aws:sns:eu-west-1:123456789:feedback-bad",  # Notify on negative
-    topic_arn_neutral="none"    # No notifications for neutral
+    topic_arn_neutral="none",  # No notifications for neutral
 )
 
 session_manager = MongoDBSessionManager(
     session_id="user-session",
     connection_string="mongodb://localhost:27017/",
     database_name="my_db",
-    feedback_hook=feedback_hook
+    feedback_hook=feedback_hook,
 )
 
 # This triggers SNS notification
-session_manager.add_feedback({
-    "rating": "down",
-    "comment": "Issue with the code"
-})
+session_manager.add_feedback({"rating": "down", "comment": "Issue with the code"})
 
 # This does NOT trigger notification
-session_manager.add_feedback({
-    "rating": "up",
-    "comment": "Great!"
-})
+session_manager.add_feedback({"rating": "up", "comment": "Great!"})
 ```
 
 ### SNS Message Format
@@ -190,14 +177,11 @@ The response was incomplete and unclear
 **Message Attributes:**
 ```python
 {
-    "session_id": {
-        "DataType": "String",
-        "StringValue": "user-session-123"
-    },
+    "session_id": {"DataType": "String", "StringValue": "user-session-123"},
     "rating": {
         "DataType": "String",
-        "StringValue": "negative"  # positive, negative, or neutral
-    }
+        "StringValue": "negative",  # positive, negative, or neutral
+    },
 }
 ```
 
@@ -211,14 +195,14 @@ import os
 feedback_hook = create_feedback_sns_hook(
     topic_arn_good=os.getenv("SNS_TOPIC_FEEDBACK_GOOD"),
     topic_arn_bad=os.getenv("SNS_TOPIC_FEEDBACK_BAD"),
-    topic_arn_neutral="none"  # Don't notify on neutral
+    topic_arn_neutral="none",  # Don't notify on neutral
 )
 
 session_manager = MongoDBSessionManager(
     session_id="customer-support-001",
     connection_string=os.getenv("MONGODB_URI"),
     database_name="production_db",
-    feedback_hook=feedback_hook
+    feedback_hook=feedback_hook,
 )
 ```
 
@@ -240,7 +224,7 @@ Propagate metadata changes to SQS for Server-Sent Events (SSE) or real-time sync
 from mongodb_session_manager import (
     MongoDBSessionManager,
     create_metadata_sqs_hook,
-    is_metadata_sqs_hook_available
+    is_metadata_sqs_hook_available,
 )
 
 # Check availability
@@ -250,7 +234,7 @@ if not is_metadata_sqs_hook_available():
 # Create SQS hook with selective field propagation
 metadata_hook = create_metadata_sqs_hook(
     queue_url="https://sqs.eu-west-1.amazonaws.com/123456789/metadata-updates",
-    metadata_fields=["status", "agent_state", "priority"]  # Only sync these
+    metadata_fields=["status", "agent_state", "priority"],  # Only sync these
 )
 
 # Create session manager with SQS propagation
@@ -258,16 +242,18 @@ session_manager = MongoDBSessionManager(
     session_id="user-session-123",
     connection_string="mongodb://localhost:27017/",
     database_name="my_db",
-    metadata_hook=metadata_hook
+    metadata_hook=metadata_hook,
 )
 
 # Metadata changes are automatically sent to SQS
-session_manager.update_metadata({
-    "status": "processing",     # Sent to SQS
-    "agent_state": "thinking",  # Sent to SQS
-    "priority": "high",         # Sent to SQS
-    "internal_field": "value"   # NOT sent to SQS
-})
+session_manager.update_metadata(
+    {
+        "status": "processing",  # Sent to SQS
+        "agent_state": "thinking",  # Sent to SQS
+        "priority": "high",  # Sent to SQS
+        "internal_field": "value",  # NOT sent to SQS
+    }
+)
 ```
 
 ### SQS Message Format
@@ -290,14 +276,8 @@ session_manager.update_metadata({
 **Message Attributes:**
 ```python
 {
-    "session_id": {
-        "DataType": "String",
-        "StringValue": "user-session-123"
-    },
-    "event": {
-        "DataType": "String",
-        "StringValue": "metadata_update"
-    }
+    "session_id": {"DataType": "String", "StringValue": "user-session-123"},
+    "event": {"DataType": "String", "StringValue": "metadata_update"},
 }
 ```
 
@@ -309,29 +289,28 @@ from mongodb_session_manager import create_metadata_sqs_hook, MongoDBSessionMana
 
 metadata_hook = create_metadata_sqs_hook(
     queue_url="https://sqs.eu-west-1.amazonaws.com/123/metadata-queue",
-    metadata_fields=["status", "progress", "current_step"]
+    metadata_fields=["status", "progress", "current_step"],
 )
 
 session_manager = MongoDBSessionManager(
     session_id="workflow-123",
     connection_string="mongodb://localhost:27017/",
     database_name="my_db",
-    metadata_hook=metadata_hook
+    metadata_hook=metadata_hook,
 )
 
 # Update triggers SQS message
-session_manager.update_metadata({
-    "status": "running",
-    "progress": 50,
-    "current_step": "processing_data"
-})
+session_manager.update_metadata(
+    {"status": "running", "progress": 50, "current_step": "processing_data"}
+)
 
 # SSE Consumer: Read from SQS and send to connected clients
 import asyncio
 import boto3
 import json
 
-sqs = boto3.client('sqs')
+sqs = boto3.client("sqs")
+
 
 async def sse_consumer():
     """Read from SQS and send to SSE clients."""
@@ -340,26 +319,22 @@ async def sse_consumer():
         response = sqs.receive_message(
             QueueUrl="https://sqs.eu-west-1.amazonaws.com/123/metadata-queue",
             MaxNumberOfMessages=10,
-            WaitTimeSeconds=5
+            WaitTimeSeconds=5,
         )
 
-        for message in response.get('Messages', []):
+        for message in response.get("Messages", []):
             # Parse message
-            data = json.loads(message['Body'])
-            session_id = data['session_id']
-            metadata = data['metadata']
+            data = json.loads(message["Body"])
+            session_id = data["session_id"]
+            metadata = data["metadata"]
 
             # Send to connected SSE clients for this session
-            await broadcast_to_sse_clients(session_id, {
-                "type": "metadata_update",
-                "data": metadata
-            })
+            await broadcast_to_sse_clients(
+                session_id, {"type": "metadata_update", "data": metadata}
+            )
 
             # Delete message from queue
-            sqs.delete_message(
-                QueueUrl="...",
-                ReceiptHandle=message['ReceiptHandle']
-            )
+            sqs.delete_message(QueueUrl="...", ReceiptHandle=message["ReceiptHandle"])
 ```
 
 ### Production Example
@@ -371,22 +346,20 @@ from mongodb_session_manager import create_metadata_sqs_hook, MongoDBSessionMana
 # Use environment variables
 metadata_hook = create_metadata_sqs_hook(
     queue_url=os.getenv("SQS_METADATA_QUEUE_URL"),
-    metadata_fields=["status", "progress", "current_task", "errors"]
+    metadata_fields=["status", "progress", "current_task", "errors"],
 )
 
 session_manager = MongoDBSessionManager(
     session_id="workflow-456",
     connection_string=os.getenv("MONGODB_URI"),
     database_name="production_db",
-    metadata_hook=metadata_hook
+    metadata_hook=metadata_hook,
 )
 
 # Update workflow status - automatically propagated
-session_manager.update_metadata({
-    "status": "processing",
-    "progress": 75,
-    "current_task": "generating_report"
-})
+session_manager.update_metadata(
+    {"status": "processing", "progress": 75, "current_task": "generating_report"}
+)
 ```
 
 ## Configuration
@@ -437,19 +410,19 @@ aws sqs get-queue-url --queue-name metadata-updates
 from mongodb_session_manager import (
     MongoDBSessionManager,
     create_feedback_sns_hook,
-    create_metadata_sqs_hook
+    create_metadata_sqs_hook,
 )
 
 # Create both hooks
 feedback_hook = create_feedback_sns_hook(
     topic_arn_good=os.getenv("SNS_TOPIC_FEEDBACK_GOOD"),
     topic_arn_bad=os.getenv("SNS_TOPIC_FEEDBACK_BAD"),
-    topic_arn_neutral=os.getenv("SNS_TOPIC_FEEDBACK_NEUTRAL")
+    topic_arn_neutral=os.getenv("SNS_TOPIC_FEEDBACK_NEUTRAL"),
 )
 
 metadata_hook = create_metadata_sqs_hook(
     queue_url=os.getenv("SQS_METADATA_QUEUE_URL"),
-    metadata_fields=["status", "priority", "assigned_to"]
+    metadata_fields=["status", "priority", "assigned_to"],
 )
 
 # Use both hooks
@@ -458,21 +431,16 @@ session_manager = MongoDBSessionManager(
     connection_string=os.getenv("MONGODB_URI"),
     database_name="production_db",
     feedback_hook=feedback_hook,  # SNS for feedback
-    metadata_hook=metadata_hook    # SQS for metadata
+    metadata_hook=metadata_hook,  # SQS for metadata
 )
 
 # Feedback triggers SNS
-session_manager.add_feedback({
-    "rating": "down",
-    "comment": "Issue with billing"
-})
+session_manager.add_feedback({"rating": "down", "comment": "Issue with billing"})
 
 # Metadata triggers SQS
-session_manager.update_metadata({
-    "status": "escalated",
-    "priority": "high",
-    "assigned_to": "supervisor-jane"
-})
+session_manager.update_metadata(
+    {"status": "escalated", "priority": "high", "assigned_to": "supervisor-jane"}
+)
 ```
 
 ## Best Practices
@@ -484,7 +452,7 @@ session_manager.update_metadata({
 feedback_hook = create_feedback_sns_hook(
     topic_arn_good=os.getenv("SNS_TOPIC_FEEDBACK_GOOD"),
     topic_arn_bad=os.getenv("SNS_TOPIC_FEEDBACK_BAD"),
-    topic_arn_neutral=os.getenv("SNS_TOPIC_FEEDBACK_NEUTRAL")
+    topic_arn_neutral=os.getenv("SNS_TOPIC_FEEDBACK_NEUTRAL"),
 )
 
 # Bad - hardcoded
@@ -520,13 +488,13 @@ feedback_hook = create_feedback_sns_hook(...)  # May raise ImportError
 # Good - only necessary fields
 metadata_hook = create_metadata_sqs_hook(
     queue_url="...",
-    metadata_fields=["status", "priority"]  # Minimal data
+    metadata_fields=["status", "priority"],  # Minimal data
 )
 
 # Bad - all fields
 metadata_hook = create_metadata_sqs_hook(
     queue_url="...",
-    metadata_fields=None  # Sends everything!
+    metadata_fields=None,  # Sends everything!
 )
 ```
 
@@ -535,16 +503,16 @@ metadata_hook = create_metadata_sqs_hook(
 ```python
 import boto3
 
-sqs = boto3.client('sqs')
+sqs = boto3.client("sqs")
+
 
 def check_queue_health():
     """Monitor SQS queue depth."""
     attrs = sqs.get_queue_attributes(
-        QueueUrl="...",
-        AttributeNames=['ApproximateNumberOfMessages']
+        QueueUrl="...", AttributeNames=["ApproximateNumberOfMessages"]
     )
 
-    depth = int(attrs['Attributes']['ApproximateNumberOfMessages'])
+    depth = int(attrs["Attributes"]["ApproximateNumberOfMessages"])
 
     if depth > 1000:
         logger.warning(f"SQS queue backlog: {depth} messages")

@@ -97,7 +97,7 @@ manager = MongoDBSessionManager(
     session_id="user-123",
     connection_string="mongodb://localhost:27017/",
     database_name="chat_db",
-    collection_name="sessions"
+    collection_name="sessions",
 )
 
 # With connection pooling and custom options
@@ -108,18 +108,19 @@ manager = MongoDBSessionManager(
     collection_name="sessions",
     maxPoolSize=50,
     minPoolSize=5,
-    retryWrites=True
+    retryWrites=True,
 )
 
 # With existing client (recommended for FastAPI)
 from pymongo import MongoClient
+
 client = MongoClient("mongodb://localhost:27017/", maxPoolSize=100)
 
 manager = MongoDBSessionManager(
     session_id="user-123",
     client=client,  # Reuse existing connection
     database_name="chat_db",
-    collection_name="sessions"
+    collection_name="sessions",
 )
 
 # With metadata indexing
@@ -127,24 +128,27 @@ manager = MongoDBSessionManager(
     session_id="user-123",
     connection_string="mongodb://localhost:27017/",
     database_name="chat_db",
-    metadata_fields=["priority", "status", "category"]
+    metadata_fields=["priority", "status", "category"],
 )
+
 
 # With hooks for audit and notifications
 def audit_metadata(original_func, action, session_id, **kwargs):
     logger.info(f"Metadata {action} on {session_id}")
     return original_func(**kwargs) if kwargs else original_func()
 
+
 def notify_feedback(original_func, action, session_id, **kwargs):
     result = original_func(kwargs["feedback"])
     send_notification(session_id, kwargs["feedback"])
     return result
 
+
 manager = MongoDBSessionManager(
     session_id="user-123",
     connection_string="mongodb://localhost:27017/",
     metadata_hook=audit_metadata,
-    feedback_hook=notify_feedback
+    feedback_hook=notify_feedback,
 )
 ```
 
@@ -221,10 +225,7 @@ Both updates are performed in a single MongoDB operation for efficiency.
 from mongodb_session_manager.mongodb_session_manager import GUARDRAIL_ACTION_BLOCKED
 
 # Redact with default action (BLOCKED)
-redacted = Message(
-    role="assistant",
-    content="[Content removed for privacy]"
-)
+redacted = Message(role="assistant", content="[Content removed for privacy]")
 manager.redact_latest_message(redacted, agent)
 
 # Redact with custom action
@@ -274,10 +275,7 @@ The following metrics are automatically captured and stored:
 ```python
 from strands import Agent
 
-agent = Agent(
-    model="claude-3-sonnet",
-    session_manager=manager
-)
+agent = Agent(model="claude-3-sonnet", session_manager=manager)
 
 # Use the agent
 response = agent("What is the capital of France?")
@@ -351,11 +349,9 @@ This method performs a partial update of metadata, meaning only the specified fi
 
 ```python
 # Initial metadata
-manager.update_metadata({
-    "user_name": "Alice",
-    "priority": "high",
-    "category": "support"
-})
+manager.update_metadata(
+    {"user_name": "Alice", "priority": "high", "category": "support"}
+)
 
 # Partial update - only changes priority
 manager.update_metadata({"priority": "low"})
@@ -366,10 +362,7 @@ manager.update_metadata({"agent_state": "thinking"})
 # Result: All previous fields + agent_state="thinking"
 
 # Update multiple fields
-manager.update_metadata({
-    "status": "active",
-    "last_interaction": "2024-01-26T10:30:00"
-})
+manager.update_metadata({"status": "active", "last_interaction": "2024-01-26T10:30:00"})
 ```
 
 #### Hook Integration
@@ -397,11 +390,7 @@ Returns the complete metadata document for the session, including all fields tha
 
 ```python
 # Set some metadata
-manager.update_metadata({
-    "user_name": "Alice",
-    "priority": "high",
-    "topic": "AI"
-})
+manager.update_metadata({"user_name": "Alice", "priority": "high", "topic": "AI"})
 
 # Retrieve metadata
 metadata = manager.get_metadata()
@@ -438,12 +427,14 @@ This method removes the specified metadata fields from the session document usin
 
 ```python
 # Initial metadata
-manager.update_metadata({
-    "user_name": "Alice",
-    "temp_data": "xyz",
-    "session_token": "abc123",
-    "priority": "high"
-})
+manager.update_metadata(
+    {
+        "user_name": "Alice",
+        "temp_data": "xyz",
+        "session_token": "abc123",
+        "priority": "high",
+    }
+)
 
 # Delete sensitive or temporary fields
 manager.delete_metadata(["temp_data", "session_token"])
@@ -512,11 +503,7 @@ from strands import Agent
 metadata_tool = manager.get_metadata_tool()
 
 # Create agent with metadata capabilities
-agent = Agent(
-    model="claude-3-sonnet",
-    session_manager=manager,
-    tools=[metadata_tool]
-)
+agent = Agent(model="claude-3-sonnet", session_manager=manager, tools=[metadata_tool])
 
 # Agent can now manage metadata autonomously
 response = agent("Store my preference for email notifications as enabled")
@@ -568,30 +555,23 @@ This method stores feedback data in the session document, typically containing a
 
 ```python
 # Add positive feedback
-manager.add_feedback({
-    "rating": "up",
-    "comment": "Great response, very helpful!"
-})
+manager.add_feedback({"rating": "up", "comment": "Great response, very helpful!"})
 
 # Add negative feedback
-manager.add_feedback({
-    "rating": "down",
-    "comment": "Response was too slow"
-})
+manager.add_feedback({"rating": "down", "comment": "Response was too slow"})
 
 # Add neutral feedback
-manager.add_feedback({
-    "rating": None,
-    "comment": "Just testing the system"
-})
+manager.add_feedback({"rating": None, "comment": "Just testing the system"})
 
 # Add feedback with custom fields
-manager.add_feedback({
-    "rating": "up",
-    "comment": "Excellent!",
-    "category": "accuracy",
-    "user_id": "user-123"
-})
+manager.add_feedback(
+    {
+        "rating": "up",
+        "comment": "Excellent!",
+        "category": "accuracy",
+        "user_id": "user-123",
+    }
+)
 ```
 
 #### Hook Integration
@@ -619,14 +599,8 @@ Returns all feedback that has been added to the session, in the order it was sub
 
 ```python
 # Add some feedback
-manager.add_feedback({
-    "rating": "up",
-    "comment": "Great!"
-})
-manager.add_feedback({
-    "rating": "down",
-    "comment": "Too slow"
-})
+manager.add_feedback({"rating": "up", "comment": "Great!"})
+manager.add_feedback({"rating": "down", "comment": "Too slow"})
 
 # Retrieve all feedback
 feedbacks = manager.get_feedbacks()
@@ -687,7 +661,7 @@ agent = Agent(
     agent_id="support-agent",
     model="eu.anthropic.claude-sonnet-4-20250514-v1:0",
     system_prompt="You are a friendly customer support agent.",
-    session_manager=manager
+    session_manager=manager,
 )
 
 response = agent("Hello!")  # sync_agent() called automatically
@@ -745,21 +719,20 @@ This method allows you to modify an agent's stored configuration. You can update
 ```python
 # Update only the model (switch to faster model)
 manager.update_agent_config(
-    "support-agent",
-    model="eu.anthropic.claude-haiku-4-20250514-v1:0"
+    "support-agent", model="eu.anthropic.claude-haiku-4-20250514-v1:0"
 )
 
 # Update only the system prompt
 manager.update_agent_config(
     "support-agent",
-    system_prompt="You are a friendly and efficient customer support agent with 10 years of experience."
+    system_prompt="You are a friendly and efficient customer support agent with 10 years of experience.",
 )
 
 # Update both model and system prompt
 manager.update_agent_config(
     "support-agent",
     model="eu.anthropic.claude-opus-4-20250514-v1:0",
-    system_prompt="You are an expert customer support agent specializing in technical issues."
+    system_prompt="You are an expert customer support agent specializing in technical issues.",
 )
 
 # Verify the update
@@ -811,14 +784,17 @@ Must be called after `sync_agent()` (the agent must already exist in the session
 manager.sync_agent(agent)
 
 # Stamp prompt lineage metadata
-manager.set_prompt_metadata("support-agent", {
-    "prompt_id": "prompt-abc",
-    "prompt_name": "Customer Support V2",
-    "prompt_version": "1.2.0",
-    "deployment_id": "deploy-xyz",
-    "deployment_name": "production",
-    "temperature": 0.7,
-})
+manager.set_prompt_metadata(
+    "support-agent",
+    {
+        "prompt_id": "prompt-abc",
+        "prompt_name": "Customer Support V2",
+        "prompt_version": "1.2.0",
+        "deployment_id": "deploy-xyz",
+        "deployment_name": "production",
+        "temperature": 0.7,
+    },
+)
 
 # Verify
 config = manager.get_agent_config("support-agent")
@@ -860,14 +836,14 @@ translator = Agent(
     agent_id="translator",
     model="eu.anthropic.claude-sonnet-4-20250514-v1:0",
     system_prompt="You are a translation specialist.",
-    session_manager=manager
+    session_manager=manager,
 )
 
 support = Agent(
     agent_id="support",
     model="eu.anthropic.claude-haiku-4-20250514-v1:0",
     system_prompt="You provide technical support.",
-    session_manager=manager
+    session_manager=manager,
 )
 
 # Use both agents
@@ -929,8 +905,7 @@ This method closes the MongoDB connection if it was created by this session mana
 ```python
 # Manager with owned connection - will be closed
 manager1 = MongoDBSessionManager(
-    session_id="user-123",
-    connection_string="mongodb://localhost:27017/"
+    session_id="user-123", connection_string="mongodb://localhost:27017/"
 )
 # ... use manager ...
 manager1.close()  # Connection is closed
@@ -939,7 +914,7 @@ manager1.close()  # Connection is closed
 client = MongoClient("mongodb://localhost:27017/")
 manager2 = MongoDBSessionManager(
     session_id="user-456",
-    client=client  # Borrowed client
+    client=client,  # Borrowed client
 )
 # ... use manager ...
 manager2.close()  # Connection is NOT closed
@@ -947,8 +922,7 @@ client.close()  # You manage the client's lifecycle
 
 # Context manager pattern (recommended)
 manager = MongoDBSessionManager(
-    session_id="user-789",
-    connection_string="mongodb://localhost:27017/"
+    session_id="user-789", connection_string="mongodb://localhost:27017/"
 )
 try:
     # Use manager
@@ -1001,19 +975,20 @@ def audit_metadata_hook(original_func, action, session_id, **kwargs):
 
     if action == "update":
         logger.info(f"  Fields: {list(kwargs['metadata'].keys())}")
-        return original_func(kwargs['metadata'])
+        return original_func(kwargs["metadata"])
     elif action == "delete":
         logger.info(f"  Deleting: {kwargs['keys']}")
-        return original_func(kwargs['keys'])
+        return original_func(kwargs["keys"])
     else:  # get
         result = original_func()
         logger.info(f"  Retrieved: {len(result.get('metadata', {}))} fields")
         return result
 
+
 manager = MongoDBSessionManager(
     session_id="user-123",
     connection_string="mongodb://...",
-    metadata_hook=audit_metadata_hook
+    metadata_hook=audit_metadata_hook,
 )
 ```
 
@@ -1021,29 +996,30 @@ manager = MongoDBSessionManager(
 ```python
 def validation_metadata_hook(original_func, action, session_id, **kwargs):
     if action == "update":
-        metadata = kwargs['metadata']
+        metadata = kwargs["metadata"]
 
         # Validate priority field
-        if 'priority' in metadata:
-            allowed = ['low', 'medium', 'high', 'critical']
-            if metadata['priority'] not in allowed:
+        if "priority" in metadata:
+            allowed = ["low", "medium", "high", "critical"]
+            if metadata["priority"] not in allowed:
                 raise ValueError(f"Invalid priority. Must be one of: {allowed}")
 
         # Validate email format
-        if 'email' in metadata:
-            if '@' not in metadata['email']:
+        if "email" in metadata:
+            if "@" not in metadata["email"]:
                 raise ValueError("Invalid email format")
 
         return original_func(metadata)
     elif action == "delete":
-        return original_func(kwargs['keys'])
+        return original_func(kwargs["keys"])
     else:
         return original_func()
+
 
 manager = MongoDBSessionManager(
     session_id="user-123",
     connection_string="mongodb://...",
-    metadata_hook=validation_metadata_hook
+    metadata_hook=validation_metadata_hook,
 )
 ```
 
@@ -1079,11 +1055,11 @@ def feedback_hook(
 ```python
 def notification_feedback_hook(original_func, action, session_id, **kwargs):
     # Store the feedback first
-    result = original_func(kwargs['feedback'])
+    result = original_func(kwargs["feedback"])
 
     # Send notification for negative feedback
-    feedback = kwargs['feedback']
-    if feedback.get('rating') == 'down':
+    feedback = kwargs["feedback"]
+    if feedback.get("rating") == "down":
         send_alert(
             f"Negative feedback on session {session_id}: "
             f"{feedback.get('comment', 'No comment')}"
@@ -1091,35 +1067,40 @@ def notification_feedback_hook(original_func, action, session_id, **kwargs):
 
     return result
 
+
 manager = MongoDBSessionManager(
     session_id="user-123",
     connection_string="mongodb://...",
-    feedback_hook=notification_feedback_hook
+    feedback_hook=notification_feedback_hook,
 )
 ```
 
 **Analytics Hook**:
 ```python
 def analytics_feedback_hook(original_func, action, session_id, **kwargs):
-    feedback = kwargs['feedback']
+    feedback = kwargs["feedback"]
 
     # Store in MongoDB
     result = original_func(feedback)
 
     # Send to analytics service
-    analytics.track('feedback_submitted', {
-        'session_id': session_id,
-        'rating': feedback.get('rating'),
-        'has_comment': bool(feedback.get('comment')),
-        'timestamp': datetime.now()
-    })
+    analytics.track(
+        "feedback_submitted",
+        {
+            "session_id": session_id,
+            "rating": feedback.get("rating"),
+            "has_comment": bool(feedback.get("comment")),
+            "timestamp": datetime.now(),
+        },
+    )
 
     return result
+
 
 manager = MongoDBSessionManager(
     session_id="user-123",
     connection_string="mongodb://...",
-    feedback_hook=analytics_feedback_hook
+    feedback_hook=analytics_feedback_hook,
 )
 ```
 
@@ -1162,7 +1143,7 @@ manager = create_mongodb_session_manager(
     session_id="user-123",
     connection_string="mongodb://localhost:27017/",
     database_name="chat_db",
-    collection_name="sessions"
+    collection_name="sessions",
 )
 
 # With custom options
@@ -1171,7 +1152,7 @@ manager = create_mongodb_session_manager(
     connection_string="mongodb://localhost:27017/",
     database_name="chat_db",
     maxPoolSize=50,
-    retryWrites=True
+    retryWrites=True,
 )
 ```
 
@@ -1190,25 +1171,27 @@ manager = MongoDBSessionManager(
     database_name="chat_db",
     collection_name="sessions",
     metadata_fields=["priority", "status"],
-    maxPoolSize=50
+    maxPoolSize=50,
 )
 
 # Create agent with session persistence
 agent = Agent(
     model="claude-3-sonnet",
     session_manager=manager,
-    tools=[manager.get_metadata_tool()]
+    tools=[manager.get_metadata_tool()],
 )
 
 # Initialize with existing history
 manager.initialize(agent)
 
 # Set initial metadata
-manager.update_metadata({
-    "user_name": "Alice",
-    "priority": "high",
-    "session_start": datetime.now().isoformat()
-})
+manager.update_metadata(
+    {
+        "user_name": "Alice",
+        "priority": "high",
+        "session_start": datetime.now().isoformat(),
+    }
+)
 
 # Have a conversation
 response = agent("Hello, I need help with my account")
@@ -1222,10 +1205,7 @@ response = agent("Can you check my balance?")
 manager.sync_agent(agent)
 
 # Add user feedback
-manager.add_feedback({
-    "rating": "up",
-    "comment": "Very helpful and quick response!"
-})
+manager.add_feedback({"rating": "up", "comment": "Very helpful and quick response!"})
 
 # Retrieve session information
 metadata = manager.get_metadata()

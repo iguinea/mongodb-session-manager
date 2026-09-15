@@ -15,29 +15,28 @@ This example demonstrates real-time streaming responses with session persistence
 and the factory pattern for optimized connection management.
 """
 
-import logging
 import asyncio
+import logging
 import signal
 import sys
+from builtins import Exception, KeyboardInterrupt, print
 from contextlib import asynccontextmanager
 
+from CaseType import CaseType
 from fastapi import FastAPI, Header, HTTPException, Request
-from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-from uvicorn.logging import DefaultFormatter
+from fastapi.responses import StreamingResponse
+from session_context import set_session_context_id
 from strands import Agent
-from builtins import Exception, str, dict, print, max, min, KeyboardInterrupt
+from tools_agent_state import get_state, set_state
+from uvicorn.logging import DefaultFormatter
 
 from mongodb_session_manager import (
-    initialize_global_factory,
-    close_global_factory,
     MongoDBConnectionPool,
+    close_global_factory,
     get_global_factory,
+    initialize_global_factory,
 )
-from session_context import set_session_context_id
-from CaseType import CaseType
-from tools_agent_state import set_state, get_state
-
 
 # Usar el mismo formatter que Uvicorn para consistencia visual
 handler = logging.StreamHandler()
@@ -207,7 +206,7 @@ async def chat(request: Request, data: dict, session_id: str = Header(...)):
 
     except Exception as e:
         logging.error(f"Error processing chat request: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 # # --- New endpoints for session management features ---
@@ -256,7 +255,7 @@ async def get_metrics():
         return {"connection_pool": pool_stats}
     except Exception as e:
         logging.error(f"Error getting metrics: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 # Add this to handle running with uvicorn programmatically

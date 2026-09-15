@@ -40,12 +40,14 @@ metadata updates directly to connected WebSocket clients via AWS API Gateway.
 import logging
 import os
 import time
+
+from strands import Agent
+
 from mongodb_session_manager import (
     MongoDBSessionManager,
     create_metadata_websocket_hook,
     is_metadata_websocket_hook_available,
 )
-from strands import Agent
 
 # Configure logging
 logging.basicConfig(

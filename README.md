@@ -49,7 +49,7 @@ session_manager = create_mongodb_session_manager(
     session_id="customer-12345",
     connection_string="mongodb://user:pass@host:27017/",
     database_name="my_database",
-    application_name="customer-support-bot"  # Optional: categorize sessions by app
+    application_name="customer-support-bot",  # Optional: categorize sessions by app
 )
 
 # Create agent with session persistence
@@ -57,7 +57,7 @@ agent = Agent(
     model="us.anthropic.claude-sonnet-4-20250514-v1:0",
     agent_id="support-agent",
     session_manager=session_manager,
-    system_prompt="You are a helpful assistant."
+    system_prompt="You are a helpful assistant.",
 )
 
 # Use the agent - conversation is automatically persisted
@@ -83,8 +83,9 @@ from contextlib import asynccontextmanager
 from mongodb_session_manager import (
     initialize_global_factory,
     get_global_factory,
-    close_global_factory
+    close_global_factory,
 )
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -94,13 +95,15 @@ async def lifespan(app: FastAPI):
         database_name="my_database",
         application_name="my-fastapi-app",  # Default for all sessions
         maxPoolSize=100,
-        minPoolSize=10
+        minPoolSize=10,
     )
     yield
     # Shutdown: Clean up connections
     close_global_factory()
 
+
 app = FastAPI(lifespan=lifespan)
+
 
 @app.post("/chat")
 async def chat(request: Request, session_id: str, message: str):
@@ -110,7 +113,7 @@ async def chat(request: Request, session_id: str, message: str):
     agent = Agent(
         model="us.anthropic.claude-sonnet-4-20250514-v1:0",
         agent_id="assistant",
-        session_manager=manager
+        session_manager=manager,
     )
 
     response = agent(message)
@@ -132,10 +135,10 @@ manager = create_mongodb_session_manager(
     session_id="unique-session-id",
     connection_string="mongodb://...",
     database_name="my_db",
-    collection_name="my_sessions",     # optional, default: "collection_name"
-    application_name="my-app",         # optional: categorize sessions
-    metadata_hook=my_hook,             # optional
-    feedback_hook=my_hook              # optional
+    collection_name="my_sessions",  # optional, default: "collection_name"
+    application_name="my-app",  # optional: categorize sessions
+    metadata_hook=my_hook,  # optional
+    feedback_hook=my_hook,  # optional
 )
 ```
 
@@ -174,14 +177,12 @@ Factory for creating session managers with connection pooling.
 from mongodb_session_manager import (
     initialize_global_factory,
     get_global_factory,
-    close_global_factory
+    close_global_factory,
 )
 
 # Initialize once at app startup
 factory = initialize_global_factory(
-    connection_string="mongodb://...",
-    database_name="my_db",
-    maxPoolSize=100
+    connection_string="mongodb://...", database_name="my_db", maxPoolSize=100
 )
 
 # Get factory anywhere in the app
@@ -204,7 +205,7 @@ metadata_tool = session_manager.get_metadata_tool()
 agent = Agent(
     model="us.anthropic.claude-sonnet-4-20250514-v1:0",
     tools=[metadata_tool],
-    session_manager=session_manager
+    session_manager=session_manager,
 )
 
 # Agent can now use manage_metadata tool
@@ -227,11 +228,12 @@ def my_metadata_hook(original_func, action, session_id, **kwargs):
     else:
         return original_func()
 
+
 session_manager = MongoDBSessionManager(
     session_id="...",
     connection_string="...",
     metadata_hook=my_metadata_hook,
-    feedback_hook=my_feedback_hook
+    feedback_hook=my_feedback_hook,
 )
 ```
 
@@ -269,7 +271,7 @@ session_manager.update_agent_config(
 ```python
 from mongodb_session_manager import (
     create_feedback_sns_hook,
-    is_feedback_sns_hook_available
+    is_feedback_sns_hook_available,
 )
 
 if is_feedback_sns_hook_available():
@@ -277,13 +279,10 @@ if is_feedback_sns_hook_available():
         topic_arn_good="arn:aws:sns:...:feedback-good",
         topic_arn_bad="arn:aws:sns:...:feedback-bad",
         topic_arn_neutral="arn:aws:sns:...:feedback-neutral",
-        subject_prefix_bad="[URGENT] "
+        subject_prefix_bad="[URGENT] ",
     )
 
-    session_manager = MongoDBSessionManager(
-        session_id="...",
-        feedback_hook=hook
-    )
+    session_manager = MongoDBSessionManager(session_id="...", feedback_hook=hook)
 ```
 
 ### SQS Metadata Propagation
@@ -291,13 +290,12 @@ if is_feedback_sns_hook_available():
 ```python
 from mongodb_session_manager import (
     create_metadata_sqs_hook,
-    is_metadata_sqs_hook_available
+    is_metadata_sqs_hook_available,
 )
 
 if is_metadata_sqs_hook_available():
     hook = create_metadata_sqs_hook(
-        queue_url="https://sqs...",
-        metadata_fields=["status", "priority"]
+        queue_url="https://sqs...", metadata_fields=["status", "priority"]
     )
 ```
 
@@ -306,13 +304,13 @@ if is_metadata_sqs_hook_available():
 ```python
 from mongodb_session_manager import (
     create_metadata_websocket_hook,
-    is_metadata_websocket_hook_available
+    is_metadata_websocket_hook_available,
 )
 
 if is_metadata_websocket_hook_available():
     hook = create_metadata_websocket_hook(
         api_gateway_endpoint="https://abc123.execute-api...",
-        metadata_fields=["status", "progress"]
+        metadata_fields=["status", "progress"],
     )
 ```
 

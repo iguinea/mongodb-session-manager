@@ -64,6 +64,7 @@ def metadata_hook(
 ```python
 from mongodb_session_manager import MongoDBSessionManager
 
+
 def my_metadata_hook(original_func, action, session_id, **kwargs):
     # Add your custom logic here
     if action == "update":
@@ -75,11 +76,12 @@ def my_metadata_hook(original_func, action, session_id, **kwargs):
     else:  # action == "get"
         return original_func()
 
+
 # Create session manager with hook
 manager = MongoDBSessionManager(
     session_id="user-123",
     connection_string="mongodb://localhost:27017/",
-    metadata_hook=my_metadata_hook
+    metadata_hook=my_metadata_hook,
 )
 ```
 
@@ -93,6 +95,7 @@ Track all metadata operations for compliance and debugging:
 import logging
 
 logger = logging.getLogger(__name__)
+
 
 def audit_metadata_hook(original_func, action, session_id, **kwargs):
     """Log all metadata operations for audit trail"""
@@ -108,10 +111,7 @@ def audit_metadata_hook(original_func, action, session_id, **kwargs):
 
     elif action == "delete":
         keys = kwargs["keys"]
-        logger.info(
-            f"[AUDIT] Metadata DELETE on session {session_id} - "
-            f"Keys: {keys}"
-        )
+        logger.info(f"[AUDIT] Metadata DELETE on session {session_id} - Keys: {keys}")
         result = original_func(keys)
         logger.info(f"[AUDIT] Delete completed for session {session_id}")
         return result
@@ -121,16 +121,16 @@ def audit_metadata_hook(original_func, action, session_id, **kwargs):
         result = original_func()
         field_count = len(result.get("metadata", {}))
         logger.info(
-            f"[AUDIT] Retrieved {field_count} metadata fields "
-            f"for session {session_id}"
+            f"[AUDIT] Retrieved {field_count} metadata fields for session {session_id}"
         )
         return result
+
 
 # Usage
 manager = MongoDBSessionManager(
     session_id="user-123",
     connection_string="mongodb://...",
-    metadata_hook=audit_metadata_hook
+    metadata_hook=audit_metadata_hook,
 )
 ```
 
@@ -181,11 +181,12 @@ def validation_metadata_hook(original_func, action, session_id, **kwargs):
     else:  # get
         return original_func()
 
+
 # Usage
 manager = MongoDBSessionManager(
     session_id="user-123",
     connection_string="mongodb://...",
-    metadata_hook=validation_metadata_hook
+    metadata_hook=validation_metadata_hook,
 )
 
 # This will raise ValueError
@@ -202,6 +203,7 @@ Cache frequently accessed metadata to reduce database queries:
 ```python
 from typing import Dict, Any
 from datetime import datetime, timedelta
+
 
 class MetadataCache:
     def __init__(self, ttl_seconds: int = 300):
@@ -222,8 +224,10 @@ class MetadataCache:
         if session_id in self.cache:
             del self.cache[session_id]
 
+
 # Create cache instance
 cache = MetadataCache(ttl_seconds=300)
+
 
 def caching_metadata_hook(original_func, action, session_id, **kwargs):
     """Cache metadata to reduce database queries"""
@@ -253,11 +257,12 @@ def caching_metadata_hook(original_func, action, session_id, **kwargs):
         result = original_func(kwargs["keys"])
         return result
 
+
 # Usage
 manager = MongoDBSessionManager(
     session_id="user-123",
     connection_string="mongodb://...",
-    metadata_hook=caching_metadata_hook
+    metadata_hook=caching_metadata_hook,
 )
 
 # First call - database query
@@ -273,6 +278,7 @@ Transform metadata before storage:
 
 ```python
 from datetime import datetime
+
 
 def transformation_metadata_hook(original_func, action, session_id, **kwargs):
     """Transform metadata before storage"""
@@ -298,11 +304,12 @@ def transformation_metadata_hook(original_func, action, session_id, **kwargs):
     else:
         return original_func()
 
+
 # Usage
 manager = MongoDBSessionManager(
     session_id="user-123",
     connection_string="mongodb://...",
-    metadata_hook=transformation_metadata_hook
+    metadata_hook=transformation_metadata_hook,
 )
 
 # Email will be normalized to lowercase
@@ -347,6 +354,7 @@ Should return `None` (or the result of `original_func`)
 ```python
 from mongodb_session_manager import MongoDBSessionManager
 
+
 def my_feedback_hook(original_func, action, session_id, **kwargs):
     # Add your custom logic here
     if action == "add":
@@ -354,11 +362,12 @@ def my_feedback_hook(original_func, action, session_id, **kwargs):
         # ... custom logic ...
         return original_func(feedback)
 
+
 # Create session manager with hook
 manager = MongoDBSessionManager(
     session_id="user-123",
     connection_string="mongodb://localhost:27017/",
-    feedback_hook=my_feedback_hook
+    feedback_hook=my_feedback_hook,
 )
 ```
 
@@ -372,6 +381,7 @@ Track all feedback submissions:
 import logging
 
 logger = logging.getLogger(__name__)
+
 
 def audit_feedback_hook(original_func, action, session_id, **kwargs):
     """Log all feedback submissions for audit trail"""
@@ -390,11 +400,12 @@ def audit_feedback_hook(original_func, action, session_id, **kwargs):
         logger.info(f"[AUDIT] Feedback stored for session {session_id}")
         return result
 
+
 # Usage
 manager = MongoDBSessionManager(
     session_id="user-123",
     connection_string="mongodb://...",
-    feedback_hook=audit_feedback_hook
+    feedback_hook=audit_feedback_hook,
 )
 ```
 
@@ -427,11 +438,12 @@ def validation_feedback_hook(original_func, action, session_id, **kwargs):
 
         return original_func(feedback)
 
+
 # Usage
 manager = MongoDBSessionManager(
     session_id="user-123",
     connection_string="mongodb://...",
-    feedback_hook=validation_feedback_hook
+    feedback_hook=validation_feedback_hook,
 )
 ```
 
@@ -441,6 +453,7 @@ Send notifications for specific feedback:
 
 ```python
 import requests
+
 
 def notification_feedback_hook(original_func, action, session_id, **kwargs):
     """Send notifications for negative feedback"""
@@ -464,18 +477,19 @@ def notification_feedback_hook(original_func, action, session_id, **kwargs):
                 requests.post(
                     "https://hooks.slack.com/services/YOUR/WEBHOOK/URL",
                     json={"text": message},
-                    timeout=5
+                    timeout=5,
                 )
             except Exception as e:
                 logger.error(f"Failed to send notification: {e}")
 
         return result
 
+
 # Usage
 manager = MongoDBSessionManager(
     session_id="user-123",
     connection_string="mongodb://...",
-    feedback_hook=notification_feedback_hook
+    feedback_hook=notification_feedback_hook,
 )
 ```
 
@@ -486,6 +500,7 @@ Track feedback metrics:
 ```python
 from collections import defaultdict
 from datetime import datetime
+
 
 class FeedbackAnalytics:
     def __init__(self):
@@ -514,8 +529,10 @@ class FeedbackAnalytics:
     def get_stats(self) -> dict:
         return dict(self.stats)
 
+
 # Create analytics instance
 analytics = FeedbackAnalytics()
+
 
 def analytics_feedback_hook(original_func, action, session_id, **kwargs):
     """Track feedback analytics"""
@@ -534,11 +551,12 @@ def analytics_feedback_hook(original_func, action, session_id, **kwargs):
 
         return result
 
+
 # Usage
 manager = MongoDBSessionManager(
     session_id="user-123",
     connection_string="mongodb://...",
-    feedback_hook=analytics_feedback_hook
+    feedback_hook=analytics_feedback_hook,
 )
 
 # Later, get analytics
@@ -644,7 +662,7 @@ Hook function compatible with `MongoDBSessionManager(feedback_hook=...)`
 from mongodb_session_manager import (
     MongoDBSessionManager,
     create_feedback_sns_hook,
-    is_feedback_sns_hook_available
+    is_feedback_sns_hook_available,
 )
 
 # Check availability
@@ -656,7 +674,7 @@ if not is_feedback_sns_hook_available():
 sns_hook = create_feedback_sns_hook(
     topic_arn_good="arn:aws:sns:eu-west-1:123456789:feedback-good",
     topic_arn_bad="arn:aws:sns:eu-west-1:123456789:feedback-bad",
-    topic_arn_neutral="arn:aws:sns:eu-west-1:123456789:feedback-neutral"
+    topic_arn_neutral="arn:aws:sns:eu-west-1:123456789:feedback-neutral",
 )
 
 # Create session manager with SNS notifications
@@ -664,24 +682,30 @@ manager = MongoDBSessionManager(
     session_id="user-session-123",
     connection_string="mongodb://localhost:27017/",
     database_name="chat_db",
-    feedback_hook=sns_hook
+    feedback_hook=sns_hook,
 )
 
 # Feedback is automatically sent to SNS
-manager.add_feedback({
-    "rating": "down",  # Routes to topic_arn_bad
-    "comment": "Response was incomplete"
-})
+manager.add_feedback(
+    {
+        "rating": "down",  # Routes to topic_arn_bad
+        "comment": "Response was incomplete",
+    }
+)
 
-manager.add_feedback({
-    "rating": "up",  # Routes to topic_arn_good
-    "comment": "Great response!"
-})
+manager.add_feedback(
+    {
+        "rating": "up",  # Routes to topic_arn_good
+        "comment": "Great response!",
+    }
+)
 
-manager.add_feedback({
-    "rating": None,  # Routes to topic_arn_neutral
-    "comment": "Just testing"
-})
+manager.add_feedback(
+    {
+        "rating": None,  # Routes to topic_arn_neutral
+        "comment": "Just testing",
+    }
+)
 ```
 
 ### Selective Notifications
@@ -693,7 +717,7 @@ You can disable notifications for specific rating types by using `"none"`:
 sns_hook = create_feedback_sns_hook(
     topic_arn_good="none",  # No notifications for positive
     topic_arn_bad="arn:aws:sns:eu-west-1:123456789:feedback-bad",
-    topic_arn_neutral="none"  # No notifications for neutral
+    topic_arn_neutral="none",  # No notifications for neutral
 )
 ```
 
@@ -823,7 +847,7 @@ Hook function compatible with `MongoDBSessionManager(metadata_hook=...)`
 from mongodb_session_manager import (
     MongoDBSessionManager,
     create_metadata_sqs_hook,
-    is_metadata_sqs_hook_available
+    is_metadata_sqs_hook_available,
 )
 
 # Check availability
@@ -834,7 +858,7 @@ if not is_metadata_sqs_hook_available():
 # Create SQS hook with selective field propagation
 sqs_hook = create_metadata_sqs_hook(
     queue_url="https://sqs.eu-west-1.amazonaws.com/123456789/metadata-updates",
-    metadata_fields=["status", "agent_state", "priority"]
+    metadata_fields=["status", "agent_state", "priority"],
 )
 
 # Create session manager with SQS propagation
@@ -842,15 +866,17 @@ manager = MongoDBSessionManager(
     session_id="user-session-123",
     connection_string="mongodb://localhost:27017/",
     database_name="chat_db",
-    metadata_hook=sqs_hook
+    metadata_hook=sqs_hook,
 )
 
 # Metadata changes are automatically sent to SQS
-manager.update_metadata({
-    "status": "processing",  # Sent to SQS
-    "agent_state": "thinking",  # Sent to SQS
-    "internal_field": "value"  # NOT sent to SQS (not in metadata_fields)
-})
+manager.update_metadata(
+    {
+        "status": "processing",  # Sent to SQS
+        "agent_state": "thinking",  # Sent to SQS
+        "internal_field": "value",  # NOT sent to SQS (not in metadata_fields)
+    }
+)
 
 # Delete operations also propagated
 manager.delete_metadata(["old_field"])
@@ -933,11 +959,12 @@ def create_combined_metadata_hook():
 
     return combined_hook
 
+
 # Usage
 manager = MongoDBSessionManager(
     session_id="user-123",
     connection_string="mongodb://...",
-    metadata_hook=create_combined_metadata_hook()
+    metadata_hook=create_combined_metadata_hook(),
 )
 ```
 
@@ -949,6 +976,7 @@ For operations that shouldn't block (like sending notifications), use async:
 import asyncio
 import threading
 
+
 def async_notification_hook(original_func, action, session_id, **kwargs):
     """Send notifications asynchronously"""
     if action == "add":
@@ -959,6 +987,7 @@ def async_notification_hook(original_func, action, session_id, **kwargs):
 
         # Send notification asynchronously
         if feedback.get("rating") == "down":
+
             async def send_notification():
                 await send_slack_message(session_id, feedback)
 
@@ -970,6 +999,7 @@ def async_notification_hook(original_func, action, session_id, **kwargs):
                 # No running loop, use thread
                 def run_async():
                     asyncio.run(send_notification())
+
                 thread = threading.Thread(target=run_async, daemon=True)
                 thread.start()
 
@@ -1020,6 +1050,7 @@ def safe_hook(original_func, action, session_id, **kwargs):
 import pytest
 from unittest.mock import Mock
 
+
 def test_validation_hook():
     """Test metadata validation hook"""
     # Create mock original function
@@ -1027,20 +1058,14 @@ def test_validation_hook():
 
     # Test valid priority
     validation_metadata_hook(
-        original_func,
-        "update",
-        "session-123",
-        metadata={"priority": "high"}
+        original_func, "update", "session-123", metadata={"priority": "high"}
     )
     original_func.assert_called_once()
 
     # Test invalid priority
     with pytest.raises(ValueError):
         validation_metadata_hook(
-            original_func,
-            "update",
-            "session-123",
-            metadata={"priority": "invalid"}
+            original_func, "update", "session-123", metadata={"priority": "invalid"}
         )
 ```
 
@@ -1056,6 +1081,7 @@ from typing import Dict, Any, Callable
 from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
+
 
 class ProductionMetadataHook:
     """Production-ready metadata hook with caching, validation, and audit"""
@@ -1094,13 +1120,7 @@ class ProductionMetadataHook:
         if session_id in self.cache:
             del self.cache[session_id]
 
-    def __call__(
-        self,
-        original_func: Callable,
-        action: str,
-        session_id: str,
-        **kwargs
-    ):
+    def __call__(self, original_func: Callable, action: str, session_id: str, **kwargs):
         """Hook implementation"""
         try:
             # Audit log
@@ -1121,9 +1141,7 @@ class ProductionMetadataHook:
                 # Execute
                 result = original_func(metadata)
 
-                logger.info(
-                    f"[METADATA] Updated fields: {list(metadata.keys())}"
-                )
+                logger.info(f"[METADATA] Updated fields: {list(metadata.keys())}")
                 return result
 
             elif action == "delete":
@@ -1157,10 +1175,10 @@ class ProductionMetadataHook:
 
         except Exception as e:
             logger.error(
-                f"[METADATA] Error in {action} for {session_id}: {e}",
-                exc_info=True
+                f"[METADATA] Error in {action} for {session_id}: {e}", exc_info=True
             )
             raise
+
 
 # Usage
 metadata_hook = ProductionMetadataHook(cache_ttl=300)
@@ -1168,7 +1186,7 @@ metadata_hook = ProductionMetadataHook(cache_ttl=300)
 manager = MongoDBSessionManager(
     session_id="user-123",
     connection_string="mongodb://localhost:27017/",
-    metadata_hook=metadata_hook
+    metadata_hook=metadata_hook,
 )
 ```
 
@@ -1179,14 +1197,12 @@ import asyncio
 from typing import Dict, Any
 import requests
 
+
 class MultiChannelFeedbackHook:
     """Send feedback to multiple notification channels"""
 
     def __init__(
-        self,
-        slack_webhook: str = None,
-        email_api: str = None,
-        sms_api: str = None
+        self, slack_webhook: str = None, email_api: str = None, sms_api: str = None
     ):
         self.slack_webhook = slack_webhook
         self.email_api = email_api
@@ -1208,10 +1224,7 @@ class MultiChannelFeedbackHook:
 
         try:
             await asyncio.to_thread(
-                requests.post,
-                self.slack_webhook,
-                json=message,
-                timeout=5
+                requests.post, self.slack_webhook, json=message, timeout=5
             )
         except Exception as e:
             logger.error(f"Slack notification failed: {e}")
@@ -1224,13 +1237,7 @@ class MultiChannelFeedbackHook:
         # Implement email sending
         pass
 
-    def __call__(
-        self,
-        original_func,
-        action: str,
-        session_id: str,
-        **kwargs
-    ):
+    def __call__(self, original_func, action: str, session_id: str, **kwargs):
         """Hook implementation"""
         if action == "add":
             feedback = kwargs["feedback"]
@@ -1240,11 +1247,12 @@ class MultiChannelFeedbackHook:
 
             # Send notifications asynchronously for negative feedback
             if feedback.get("rating") == "down":
+
                 async def send_notifications():
                     await asyncio.gather(
                         self.send_slack(session_id, feedback),
                         self.send_email(session_id, feedback),
-                        return_exceptions=True
+                        return_exceptions=True,
                     )
 
                 try:
@@ -1253,23 +1261,26 @@ class MultiChannelFeedbackHook:
                 except RuntimeError:
                     # No running loop
                     import threading
+
                     def run():
                         asyncio.run(send_notifications())
+
                     thread = threading.Thread(target=run, daemon=True)
                     thread.start()
 
             return result
 
+
 # Usage
 feedback_hook = MultiChannelFeedbackHook(
     slack_webhook="https://hooks.slack.com/services/YOUR/WEBHOOK",
-    email_api="https://api.example.com/send-email"
+    email_api="https://api.example.com/send-email",
 )
 
 manager = MongoDBSessionManager(
     session_id="user-123",
     connection_string="mongodb://localhost:27017/",
-    feedback_hook=feedback_hook
+    feedback_hook=feedback_hook,
 )
 ```
 

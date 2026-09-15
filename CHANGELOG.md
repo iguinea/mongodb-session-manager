@@ -13,9 +13,24 @@
 - **`update_agent()` could falsify an agent's `created_at`**: it read the timestamp back to rewrite it, another read-after-write. A stale read would replace the original with `now`. The field is now preserved by omission — a `$set` that does not name it leaves it alone
 - Sync updates that match no document are now logged instead of disappearing
 
+### Fixed (CI)
+- **The `test` job never ran a single test**: it invoked `pytest test_*.py`, a path that stopped existing when tests moved to `tests/`. It failed with "file or directory not found" and, because `build` needed it, nothing was ever built either
+- **The `lint` job never linted a single line**: `uv sync` does not install the `dev` group, so ruff was missing and the step died with "Failed to spawn: ruff". Now `uv sync --all-extras`, and ruff is an explicit dev dependency
+- **Explicit `[tool.ruff]` ruleset**: there was none, so the lint depended on whatever defaults the installed ruff version happened to carry — a new version added rules and broke CI without anyone touching the code. The ruleset is now pinned in `pyproject.toml`, with every exclusion justified in place
+- Cleared the 345 accumulated lint errors and formatted the 36 unformatted files
+- `runs-on` now reads from the `CI_RUNS_ON` repository variable, so switching between hosted and self-hosted runners no longer needs a PR
+- The MongoDB service in CI waits for a healthcheck before the tests start
+- `build` verifies that a wheel *and* an sdist were actually produced, instead of just listing the directory
+
+### Fixed (also caught by the lint pass)
+- `dispatch_async()` did not keep a reference to the task it created. The event loop only holds weak references, so a hook could be garbage collected mid-flight and never run
+- `send_message()` and `publish_message()` lost the original exception when re-raising, making failures harder to trace
+- `publish_message()` declared `message: str | dict = None`, an implicit Optional
+
 ### Notes
 - No public API or document schema changes
 - The root `updated_at` keeps being refreshed on the last write of every turn — two external consumers derive "End" and "Duration" from it. Now pinned by a regression test
+- `claude-review` fails for a reason outside this repository: the `CLAUDE_CODE_OAUTH_TOKEN` secret has expired (`API Error: 401`). It needs to be regenerated; no code change fixes it
 
 ## [2026-03-23] PR #46 - Chore: release v0.9.1 (@iguinea)
 
@@ -531,13 +546,14 @@ The response was incomplete
 ```python
 # Create session (password auto-generated)
 session_manager = create_mongodb_session_manager(
-    session_id="user-session",
-    connection_string="mongodb://localhost:27017/"
+    session_id="user-session", connection_string="mongodb://localhost:27017/"
 )
 
 # Retrieve password for Session Viewer link
 password = session_manager.get_session_viewer_password()
-print(f"Session Viewer URL: http://localhost:8883?session_id=user-session&password={password}")
+print(
+    f"Session Viewer URL: http://localhost:8883?session_id=user-session&password={password}"
+)
 ```
 
 ## [0.2.5] - 2025-10-29
@@ -1087,7 +1103,7 @@ feedback_hook = create_feedback_sns_hook(
 feedback_hook = create_feedback_sns_hook(
     topic_arn_good="arn:aws:sns:eu-west-1:123456789:feedback-good",
     topic_arn_bad="arn:aws:sns:eu-west-1:123456789:feedback-bad",
-    topic_arn_neutral="arn:aws:sns:eu-west-1:123456789:feedback-neutral"
+    topic_arn_neutral="arn:aws:sns:eu-west-1:123456789:feedback-neutral",
 )
 ```
 

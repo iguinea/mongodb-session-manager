@@ -50,7 +50,7 @@ session_manager = create_mongodb_session_manager(
     session_id="quickstart-session-001",
     connection_string="mongodb://localhost:27017/",
     database_name="quickstart_db",
-    collection_name="agent_sessions"
+    collection_name="agent_sessions",
 )
 
 # Step 2: Create an agent with session persistence
@@ -58,7 +58,7 @@ agent = Agent(
     model="claude-3-sonnet",
     agent_id="assistant",
     session_manager=session_manager,
-    system_prompt="You are a helpful assistant that remembers our conversation."
+    system_prompt="You are a helpful assistant that remembers our conversation.",
 )
 
 # Step 3: Have a conversation
@@ -108,7 +108,7 @@ session_manager = create_mongodb_session_manager(
     session_id="quickstart-session-001",  # Same as before!
     connection_string="mongodb://localhost:27017/",
     database_name="quickstart_db",
-    collection_name="agent_sessions"
+    collection_name="agent_sessions",
 )
 
 # Create agent with the SAME agent_id
@@ -116,7 +116,7 @@ agent = Agent(
     model="claude-3-sonnet",
     agent_id="assistant",  # Same as before!
     session_manager=session_manager,
-    system_prompt="You are a helpful assistant that remembers our conversation."
+    system_prompt="You are a helpful assistant that remembers our conversation.",
 )
 
 # The agent remembers the previous conversation!
@@ -147,32 +147,24 @@ from strands import Agent
 session_manager = create_mongodb_session_manager(
     session_id="metadata-example",
     connection_string="mongodb://localhost:27017/",
-    database_name="quickstart_db"
+    database_name="quickstart_db",
 )
 
 # Add metadata to track conversation context
-session_manager.update_metadata({
-    "user_id": "user-123",
-    "language": "en",
-    "topic": "general",
-    "priority": "normal"
-})
+session_manager.update_metadata(
+    {"user_id": "user-123", "language": "en", "topic": "general", "priority": "normal"}
+)
 
 # Create and use agent
 agent = Agent(
-    model="claude-3-sonnet",
-    agent_id="assistant",
-    session_manager=session_manager
+    model="claude-3-sonnet", agent_id="assistant", session_manager=session_manager
 )
 
 response = agent("Hello!")
 session_manager.sync_agent(agent)
 
 # Update metadata during conversation
-session_manager.update_metadata({
-    "topic": "technical-support",
-    "priority": "high"
-})
+session_manager.update_metadata({"topic": "technical-support", "priority": "high"})
 
 # Retrieve metadata
 metadata = session_manager.get_metadata()
@@ -192,13 +184,11 @@ from strands import Agent
 session_manager = create_mongodb_session_manager(
     session_id="feedback-example",
     connection_string="mongodb://localhost:27017/",
-    database_name="quickstart_db"
+    database_name="quickstart_db",
 )
 
 agent = Agent(
-    model="claude-3-sonnet",
-    agent_id="assistant",
-    session_manager=session_manager
+    model="claude-3-sonnet", agent_id="assistant", session_manager=session_manager
 )
 
 # Have a conversation
@@ -207,10 +197,12 @@ print(f"Agent: {response}\n")
 session_manager.sync_agent(agent)
 
 # User provides feedback
-session_manager.add_feedback({
-    "rating": "up",  # or "down" or None
-    "comment": "Clear and concise explanation!"
-})
+session_manager.add_feedback(
+    {
+        "rating": "up",  # or "down" or None
+        "comment": "Clear and concise explanation!",
+    }
+)
 
 # Later, retrieve all feedback
 feedbacks = session_manager.get_feedbacks()
@@ -227,29 +219,28 @@ For production applications (like FastAPI), use the factory pattern:
 from mongodb_session_manager import (
     initialize_global_factory,
     get_global_factory,
-    close_global_factory
+    close_global_factory,
 )
 
 # Startup: Initialize once
 factory = initialize_global_factory(
     connection_string="mongodb://localhost:27017/",
     database_name="production_db",
-    maxPoolSize=100  # Connection pool size
+    maxPoolSize=100,  # Connection pool size
 )
+
 
 # Per-request: Create session managers (fast!)
 def handle_request(session_id: str):
     session_manager = factory.create_session_manager(session_id)
 
-    agent = Agent(
-        model="claude-3-sonnet",
-        session_manager=session_manager
-    )
+    agent = Agent(model="claude-3-sonnet", session_manager=session_manager)
 
     response = agent("Hello!")
     session_manager.sync_agent(agent)
 
     return response
+
 
 # Use it multiple times
 handle_request("user-001")
@@ -295,7 +286,7 @@ def create_user_session(user_id: str):
     return create_mongodb_session_manager(
         session_id=session_id,
         connection_string="mongodb://localhost:27017/",
-        database_name="app_db"
+        database_name="app_db",
     )
 ```
 
@@ -303,6 +294,7 @@ def create_user_session(user_id: str):
 
 ```python
 from datetime import datetime
+
 
 def create_daily_session(user_id: str):
     """Create a new session each day."""
@@ -312,7 +304,7 @@ def create_daily_session(user_id: str):
     return create_mongodb_session_manager(
         session_id=session_id,
         connection_string="mongodb://localhost:27017/",
-        database_name="app_db"
+        database_name="app_db",
     )
 ```
 
@@ -322,21 +314,21 @@ def create_daily_session(user_id: str):
 session_manager = create_mongodb_session_manager(
     session_id="multi-agent-session",
     connection_string="mongodb://localhost:27017/",
-    database_name="app_db"
+    database_name="app_db",
 )
 
 # Translator agent
 translator = Agent(
     model="claude-3-sonnet",
     agent_id="translator",  # Different agent ID
-    session_manager=session_manager
+    session_manager=session_manager,
 )
 
 # Support agent
 support = Agent(
     model="claude-3-haiku",
     agent_id="support",  # Different agent ID
-    session_manager=session_manager
+    session_manager=session_manager,
 )
 
 # Each agent has separate conversation history in the same session

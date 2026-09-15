@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pymongo import MongoClient
 
@@ -22,12 +22,12 @@ class MongoDBSessionManagerFactory:
 
     def __init__(
         self,
-        connection_string: Optional[str] = None,
+        connection_string: str | None = None,
         database_name: str = "database_name",
         collection_name: str = "collection_name",
-        client: Optional[MongoClient] = None,
-        metadata_fields: Optional[List[str]] = None,
-        application_name: Optional[str] = None,
+        client: MongoClient | None = None,
+        metadata_fields: list[str] | None = None,
+        application_name: str | None = None,
         **client_kwargs: Any,
     ) -> None:
         """Initialize the session manager factory.
@@ -64,10 +64,10 @@ class MongoDBSessionManagerFactory:
     def create_session_manager(
         self,
         session_id: str,
-        database_name: Optional[str] = None,
-        collection_name: Optional[str] = None,
-        metadata_fields: Optional[List[str]] = None,
-        application_name: Optional[str] = None,
+        database_name: str | None = None,
+        collection_name: str | None = None,
+        metadata_fields: list[str] | None = None,
+        application_name: str | None = None,
         **kwargs: Any,
     ) -> MongoDBSessionManager:
         """Create a new session manager instance.
@@ -107,7 +107,7 @@ class MongoDBSessionManagerFactory:
 
         return manager
 
-    def get_connection_stats(self) -> Dict[str, Any]:
+    def get_connection_stats(self) -> dict[str, Any]:
         """Get statistics about the MongoDB connection pool.
 
         Returns:
@@ -131,15 +131,15 @@ class MongoDBSessionManagerFactory:
 
 
 # Global factory instance for FastAPI integration
-_global_factory: Optional[MongoDBSessionManagerFactory] = None
+_global_factory: MongoDBSessionManagerFactory | None = None
 
 
 def initialize_global_factory(
     connection_string: str,
     database_name: str = "database_name",
     collection_name: str = "collection_name",
-    metadata_fields: Optional[List[str]] = None,
-    application_name: Optional[str] = None,
+    metadata_fields: list[str] | None = None,
+    application_name: str | None = None,
     **client_kwargs: Any,
 ) -> MongoDBSessionManagerFactory:
     """Initialize the global factory instance.

@@ -7,15 +7,15 @@ permitiendo publicar mensajes a tópicos, suscribir endpoints y gestionar notifi
 
 import json
 import os
-from typing import Optional, Dict, Any, Union
+from typing import Any
+
 import boto3
-from botocore.exceptions import ClientError, NoCredentialsError
+from botocore.exceptions import ClientError
+
+_sns_clients: dict[str, Any] = {}
 
 
-_sns_clients: Dict[str, Any] = {}
-
-
-def _get_sns_client(region_name: Optional[str] = None):
+def _get_sns_client(region_name: str | None = None):
     """
     Get or create a cached SNS client for the given region.
 
@@ -34,25 +34,24 @@ def _get_sns_client(region_name: Optional[str] = None):
     if region_name in _sns_clients:
         return _sns_clients[region_name]
 
-    try:
-        client = boto3.Session().client(service_name="sns", region_name=region_name)
-        _sns_clients[region_name] = client
-        return client
-    except NoCredentialsError:
-        raise NoCredentialsError()
+    # NoCredentialsError se propaga sola: no hay nada que hacer aquí con ella,
+    # y capturarla solo para relanzarla oscurecía el flujo.
+    client = boto3.Session().client(service_name="sns", region_name=region_name)
+    _sns_clients[region_name] = client
+    return client
 
 
 def publish_message(
-    topic_arn: Optional[str] = None,
-    phone_number: Optional[str] = None,
-    message: Union[str, Dict[str, Any]] = None,
-    subject: Optional[str] = None,
-    message_attributes: Optional[Dict[str, Dict[str, Any]]] = None,
-    message_structure: Optional[str] = None,
-    message_deduplication_id: Optional[str] = None,
-    message_group_id: Optional[str] = None,
-    region_name: Optional[str] = None,
-) -> Dict[str, Any]:
+    topic_arn: str | None = None,
+    phone_number: str | None = None,
+    message: str | dict[str, Any] | None = None,
+    subject: str | None = None,
+    message_attributes: dict[str, dict[str, Any]] | None = None,
+    message_structure: str | None = None,
+    message_deduplication_id: str | None = None,
+    message_group_id: str | None = None,
+    region_name: str | None = None,
+) -> dict[str, Any]:
     """
     Publicar un mensaje a un tópico SNS o directamente a un número de teléfono.
 
@@ -135,7 +134,7 @@ def publish_message(
         _handle_sns_client_error(e, topic_arn)
 
 
-def _handle_sns_client_error(error: ClientError, topic_arn: Optional[str]) -> None:
+def _handle_sns_client_error(error: ClientError, topic_arn: str | None) -> None:
     """Handle SNS ClientError and raise appropriate exceptions."""
     error_code = error.response["Error"]["Code"]
     error_map = {

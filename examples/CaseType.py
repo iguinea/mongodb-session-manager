@@ -1,8 +1,8 @@
-from enum import Enum
+from enum import StrEnum
 
 
 # Case Types Enum
-class CaseType(str, Enum):
+class CaseType(StrEnum):
     NEW_CLIENT = "New Client"
     NEW_CASE = "New Case"
     NEW_CASE_TYPE = "New Case Type"

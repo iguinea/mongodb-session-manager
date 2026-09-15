@@ -18,10 +18,12 @@ relying on the agent's interpretation.
 """
 
 import asyncio
-from mongodb_session_manager import create_mongodb_session_manager
-from strands import Agent
 import os
-from datetime import datetime
+from datetime import UTC, datetime
+
+from strands import Agent
+
+from mongodb_session_manager import create_mongodb_session_manager
 
 # Get MongoDB connection from environment or use local
 MONGO_CONNECTION = os.getenv(
@@ -41,7 +43,7 @@ async def main():
     print_section("Direct Metadata Tool Usage Example")
 
     # Create session manager
-    session_id = f"direct-tool-demo-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    session_id = f"direct-tool-demo-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}"
 
     session_manager = create_mongodb_session_manager(
         session_id=session_id,
@@ -67,7 +69,7 @@ async def main():
                     "language": "en",
                     "notifications": True,
                 },
-                "created_at": datetime.now().isoformat(),
+                "created_at": datetime.now(UTC).isoformat(),
             },
         )
         print(f"Tool result: {result}")
@@ -91,7 +93,7 @@ async def main():
             action="update",
             metadata={
                 "session_type": "production",
-                "last_activity": datetime.now().isoformat(),
+                "last_activity": datetime.now(UTC).isoformat(),
                 "interaction_count": 5,
             },
         )

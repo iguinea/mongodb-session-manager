@@ -8,8 +8,8 @@ import pytest
 
 from mongodb_session_manager.hooks.metadata_websocket_hook import (
     MetadataWebSocketHook,
-    create_metadata_hook,
     _build_delete_metadata,
+    create_metadata_hook,
 )
 from mongodb_session_manager.hooks.utils_async import dispatch_async as _dispatch_async
 
@@ -49,9 +49,11 @@ class TestMetadataWebSocketHookInit:
             )
 
     def test_raises_import_error(self):
-        with patch("mongodb_session_manager.hooks.metadata_websocket_hook.boto3", None):
-            with pytest.raises(ImportError, match="boto3 module not available"):
-                MetadataWebSocketHook("https://api.example.com")
+        with (
+            patch("mongodb_session_manager.hooks.metadata_websocket_hook.boto3", None),
+            pytest.raises(ImportError, match="boto3 module not available"),
+        ):
+            MetadataWebSocketHook("https://api.example.com")
 
     def test_stores_metadata_fields(self):
         with patch(

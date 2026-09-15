@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from threading import RLock
-from typing import Any, Dict, Optional
+from typing import Any
 
 from pymongo import MongoClient
 from pymongo.errors import PyMongoError
@@ -20,12 +20,12 @@ class MongoDBConnectionPool:
     environments like FastAPI.
     """
 
-    _instance: Optional[MongoDBConnectionPool] = None
+    _instance: MongoDBConnectionPool | None = None
     _lock: RLock = RLock()
-    _client: Optional[MongoClient] = None
-    _connection_string: Optional[str] = None
-    _user_kwargs: Optional[Dict[str, Any]] = None
-    _resolved_kwargs: Optional[Dict[str, Any]] = None
+    _client: MongoClient | None = None
+    _connection_string: str | None = None
+    _user_kwargs: dict[str, Any] | None = None
+    _resolved_kwargs: dict[str, Any] | None = None
 
     def __new__(cls) -> MongoDBConnectionPool:
         """Ensure singleton pattern."""
@@ -108,7 +108,7 @@ class MongoDBConnectionPool:
                 raise
 
     @classmethod
-    def get_client(cls) -> Optional[MongoClient]:
+    def get_client(cls) -> MongoClient | None:
         """Get the current MongoDB client.
 
         Returns:
@@ -135,7 +135,7 @@ class MongoDBConnectionPool:
                     instance._resolved_kwargs = None
 
     @classmethod
-    def get_pool_stats(cls) -> Dict[str, Any]:
+    def get_pool_stats(cls) -> dict[str, Any]:
         """Get connection pool statistics.
 
         Returns:

@@ -43,11 +43,11 @@ class TestMetadataSQSHookInit:
         assert hook.metadata_fields == ["status", "priority"]
 
     def test_raises_import_error(self):
-        with patch(
-            "mongodb_session_manager.hooks.metadata_sqs_hook.send_message", None
+        with (
+            patch("mongodb_session_manager.hooks.metadata_sqs_hook.send_message", None),
+            pytest.raises(ImportError, match="SQS utilities not available"),
         ):
-            with pytest.raises(ImportError, match="SQS utilities not available"):
-                MetadataSQSHook("https://sqs.example.com/q", [])
+            MetadataSQSHook("https://sqs.example.com/q", [])
 
 
 # ---------------------------------------------------------------------------
