@@ -21,7 +21,10 @@ htmlcov/
 logs
 *.log
 
-uv.lock
+# uv.lock SÍ se versiona: sin él, CI resuelve dependencias frescas en cada run y
+# deja de ser reproducible. Estaba ignorado, y por eso el CI instalaba
+# strands-agents 1.55.1 mientras en local se usaba 1.30.0.
+# Ver .claude/rules/coding-dependencies.md.
 
 
 .devcontainer

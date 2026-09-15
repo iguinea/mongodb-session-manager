@@ -17,6 +17,7 @@
 - **The `test` job never ran a single test**: it invoked `pytest test_*.py`, a path that stopped existing when tests moved to `tests/`. It failed with "file or directory not found" and, because `build` needed it, nothing was ever built either
 - **The `lint` job never linted a single line**: `uv sync` does not install the `dev` group, so ruff was missing and the step died with "Failed to spawn: ruff". Now `uv sync --all-extras`, and ruff is an explicit dev dependency
 - **Explicit `[tool.ruff]` ruleset**: there was none, so the lint depended on whatever defaults the installed ruff version happened to carry — a new version added rules and broke CI without anyone touching the code. The ruleset is now pinned in `pyproject.toml`, with every exclusion justified in place
+- **`uv.lock` is versioned now**: it was in `.gitignore`, so CI resolved dependencies afresh on every run and was never reproducible. It installed `strands-agents` 1.55.1 while local development used 1.30.0 — the same commit produced different environments. CI now runs `uv sync --locked`, which also fails loudly if someone edits `pyproject.toml` without regenerating the lock
 - Cleared the 345 accumulated lint errors and formatted the 36 unformatted files
 - `runs-on` now reads from the `CI_RUNS_ON` repository variable, so switching between hosted and self-hosted runners no longer needs a PR
 - The MongoDB service in CI waits for a healthcheck before the tests start
