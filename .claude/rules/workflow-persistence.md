@@ -37,9 +37,11 @@ src/
 # domain/ports/session_repository.py
 from typing import Protocol
 
+
 class SessionRepository(Protocol):
     def find_by_id(self, session_id: str) -> Session | None: ...
     def save(self, session: Session) -> None: ...
+
 
 # infrastructure/persistence/mongodb/mongo_session_repository.py
 class MongoSessionRepository:  # implementa el Protocol implicitamente

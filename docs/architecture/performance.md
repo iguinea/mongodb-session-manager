@@ -70,7 +70,7 @@ for session_id in session_ids:
     manager = create_mongodb_session_manager(
         session_id=session_id,
         connection_string=MONGODB_URL,
-        database_name=DATABASE_NAME
+        database_name=DATABASE_NAME,
     )
     # Perform operations
     manager.close()  # Close connection
@@ -94,9 +94,7 @@ Operations per second: 162.60
 ```python
 # Create factory with connection pool
 factory = MongoDBSessionManagerFactory(
-    connection_string=MONGODB_URL,
-    database_name=DATABASE_NAME,
-    maxPoolSize=50
+    connection_string=MONGODB_URL, database_name=DATABASE_NAME, maxPoolSize=50
 )
 
 for session_id in session_ids:
@@ -155,7 +153,7 @@ Requests per second: 22.47
 ```python
 factory = MongoDBSessionManagerFactory(
     connection_string=MONGODB_URL,
-    maxPoolSize=50  # Shared pool
+    maxPoolSize=50,  # Shared pool
 )
 
 with ThreadPoolExecutor(max_workers=10) as executor:
@@ -223,7 +221,7 @@ from pymongo import MongoClient
 # Without pooling
 start = time.time()
 client = MongoClient("mongodb://localhost:27017/")
-client.admin.command('ping')  # Ensure connection
+client.admin.command("ping")  # Ensure connection
 elapsed = (time.time() - start) * 1000
 print(f"Connection time: {elapsed}ms")
 client.close()
@@ -244,9 +242,7 @@ MongoDB Atlas (EU):   30-80ms
 ```python
 start = time.time()
 factory = MongoDBSessionManagerFactory(
-    connection_string=mongodb_uri,
-    maxPoolSize=100,
-    minPoolSize=10
+    connection_string=mongodb_uri, maxPoolSize=100, minPoolSize=10
 )
 elapsed = (time.time() - start) * 1000
 print(f"Pool initialization: {elapsed}ms")
@@ -317,10 +313,7 @@ async def chat(session_id: str, message: str):
     manager = factory.create_session_manager(session_id)
 
     # Create agent for this request
-    agent = Agent(
-        model="claude-3-sonnet",
-        session_manager=manager
-    )
+    agent = Agent(model="claude-3-sonnet", session_manager=manager)
 
     # Process (may run concurrently with other requests)
     response = agent(message)
@@ -344,15 +337,16 @@ Request N → Manager N → Pool → MongoDB  (concurrent)
 ```python
 from concurrent.futures import ThreadPoolExecutor
 
+
 def process_request(session_id):
     manager = factory.create_session_manager(session_id)
     # Simulate work
     manager.get_metadata()
     return True
 
+
 with ThreadPoolExecutor(max_workers=20) as executor:
-    futures = [executor.submit(process_request, f"session-{i}")
-               for i in range(100)]
+    futures = [executor.submit(process_request, f"session-{i}") for i in range(100)]
     results = [f.result() for f in futures]
 ```
 
@@ -376,10 +370,10 @@ with ThreadPoolExecutor(max_workers=20) as executor:
 # For high concurrency
 factory = MongoDBSessionManagerFactory(
     connection_string=mongodb_uri,
-    maxPoolSize=100,      # High pool size
-    minPoolSize=20,       # Keep warm connections
+    maxPoolSize=100,  # High pool size
+    minPoolSize=20,  # Keep warm connections
     maxIdleTimeMS=45000,  # Keep connections alive longer
-    waitQueueTimeoutMS=10000  # Timeout for queued requests
+    waitQueueTimeoutMS=10000,  # Timeout for queued requests
 )
 ```
 
@@ -443,8 +437,8 @@ Total: ~65 MB
 # Memory-constrained environment (Lambda)
 factory = MongoDBSessionManagerFactory(
     connection_string=mongodb_uri,
-    maxPoolSize=10,   # Lower pool size
-    minPoolSize=2     # Fewer warm connections
+    maxPoolSize=10,  # Lower pool size
+    minPoolSize=2,  # Fewer warm connections
 )
 # Memory savings: ~1.5 MB
 ```
@@ -454,7 +448,7 @@ factory = MongoDBSessionManagerFactory(
 # Only fetch metadata (not entire session)
 doc = collection.find_one(
     {"_id": session_id},
-    {"metadata": 1}  # Projection
+    {"metadata": 1},  # Projection
 )
 # Saves: 90% of memory for large sessions
 ```
@@ -465,8 +459,8 @@ doc = collection.find_one(
 messages = repository.list_messages(
     session_id="session-123",
     agent_id="agent-A",
-    limit=10,    # Only 10 messages
-    offset=0
+    limit=10,  # Only 10 messages
+    offset=0,
 )
 # Saves: Memory proportional to conversation size
 ```
@@ -510,10 +504,7 @@ metadata = session["metadata"]
 **After**:
 ```python
 # Fetch only metadata (~1 KB)
-session = collection.find_one(
-    {"_id": session_id},
-    {"metadata": 1}
-)
+session = collection.find_one({"_id": session_id}, {"metadata": 1})
 metadata = session["metadata"]
 ```
 
@@ -532,8 +523,7 @@ last_message = session["agents"]["agent-A"]["messages"][-1]
 ```python
 # Fetch only last message
 session = collection.find_one(
-    {"_id": session_id},
-    {"agents.agent-A.messages": {"$slice": -1}}
+    {"_id": session_id}, {"agents.agent-A.messages": {"$slice": -1}}
 )
 last_message = session["agents"]["agent-A"]["messages"][0]
 ```
@@ -575,19 +565,13 @@ metadata = session["metadata"]
 metadata["priority"] = "high"
 
 # Write (another request could have modified in between)
-collection.update_one(
-    {"_id": session_id},
-    {"$set": {"metadata": metadata}}
-)
+collection.update_one({"_id": session_id}, {"$set": {"metadata": metadata}})
 ```
 
 **After** (Atomic):
 ```python
 # Single atomic operation
-collection.update_one(
-    {"_id": session_id},
-    {"$set": {"metadata.priority": "high"}}
-)
+collection.update_one({"_id": session_id}, {"$set": {"metadata.priority": "high"}})
 ```
 
 **Improvement**: No race conditions, 2x faster (one query vs two)
@@ -640,12 +624,14 @@ db.sessions.find({"metadata.priority": "high"}).explain("executionStats")
 
 ### Automatic Index Creation
 
-**On Repository Initialization**:
+**Once per client, on the first repository that sees a collection** (since v0.10.0):
 ```python
 def _ensure_indexes(self):
-    # These indexes are created automatically
+    # Skipped entirely if this client already ensured this collection
     self.collection.create_index("created_at")
     self.collection.create_index("updated_at")
+    self.collection.create_index("session_id")
+    self.collection.create_index("application_name")
 
     # Optional metadata indexes
     if self.metadata_fields:
@@ -653,12 +639,47 @@ def _ensure_indexes(self):
             self.collection.create_index(f"metadata.{field}")
 ```
 
+**Why it is tracked**: pymongo does not cache `create_index` — every call is a
+round-trip to the server even when the index already exists. With a session
+manager created per request (the recommended factory pattern), that meant 4+
+round-trips per instantiation: 8 per turn in an application with a supervisor
+and a sub-agent.
+
+The registry is a `WeakKeyDictionary` keyed by `MongoClient`, not by collection
+name, so two clients pointing at different clusters that happen to share
+database and collection names each get their own indexes. Entries disappear
+when the client is closed and garbage collected. A failed `create_index` is not
+recorded, so the next manager retries.
+
 **Performance Impact**:
-- First initialization: 100-500ms (depends on collection size)
-- Subsequent initializations: <10ms (indexes already exist)
+- First initialization per client: 100-500ms (depends on collection size)
+- Subsequent managers: 0 round-trips
 - No impact on empty collections
 
-**Code Reference**: `/workspace/src/mongodb_session_manager/mongodb_session_repository.py` (lines 181-195)
+**Code Reference**: `src/mongodb_session_manager/mongodb_session_repository.py` (`_ensure_indexes`, `_INDEX_REGISTRY`)
+
+### Writes per Turn
+
+On DocumentDB every `update` costs 40-55 ms regardless of its size, so what
+drives latency is the **number** of round-trips, not the payload.
+
+A turn is driven by messages, not by streaming: the Strands SDK registers both
+`append_message` and `sync_agent` on the same `MessageAddedEvent`, plus a final
+`sync_agent` on `AfterInvocationEvent`. The same turn emitting 1 chunk or 200
+chunks produces exactly the same writes.
+
+Measured on a turn with a supervisor and a sub-agent (one tool call):
+
+| | v0.9.1 | v0.10.0 |
+|---|---|---|
+| `update` | 21 | 15 |
+| `find` | 13 | 6 |
+| `createIndexes` | 8 | 0 |
+| **total** | **42** | **21** |
+
+The remaining 15 writes break down as 6 `create_message` (one per message),
+8 fused syncs (metrics + agent config in a single `update_one`) and 1
+`update_agent`.
 
 ### Index Cardinality
 
@@ -707,11 +728,13 @@ db.sessions.count({"metadata.priority": "high"})  // 500
 **When to Use**:
 ```python
 # Frequent query pattern
-sessions = collection.find({
-    "metadata.department": "sales",
-    "metadata.priority": "high",
-    "updated_at": {"$gte": date}
-})
+sessions = collection.find(
+    {
+        "metadata.department": "sales",
+        "metadata.priority": "high",
+        "updated_at": {"$gte": date},
+    }
+)
 ```
 
 **Optimal Compound Index**:
@@ -811,6 +834,7 @@ factory = MongoDBSessionManagerFactory(
 import time
 from pymongo import MongoClient, monitoring
 
+
 class NetworkMonitor(monitoring.CommandListener):
     def started(self, event):
         self.start_time = time.time()
@@ -818,6 +842,7 @@ class NetworkMonitor(monitoring.CommandListener):
     def succeeded(self, event):
         duration = (time.time() - self.start_time) * 1000
         print(f"{event.command_name}: {duration}ms")
+
 
 monitoring.register(NetworkMonitor())
 ```
@@ -965,16 +990,16 @@ sh.shardCollection(
 ```python
 factory = MongoDBSessionManagerFactory(
     connection_string=mongodb_uri,
-    maxPoolSize=200,              # Large pool
-    minPoolSize=50,               # Many warm connections
-    maxIdleTimeMS=60000,          # Keep connections 1 minute
-    waitQueueTimeoutMS=10000,     # 10s timeout for queue
-    serverSelectionTimeoutMS=5000, # 5s server selection
-    connectTimeoutMS=10000,       # 10s connection timeout
-    socketTimeoutMS=45000,        # 45s socket timeout
-    retryWrites=True,             # Automatic write retry
-    retryReads=True,              # Automatic read retry
-    compressors="snappy,zlib"     # Compression
+    maxPoolSize=200,  # Large pool
+    minPoolSize=50,  # Many warm connections
+    maxIdleTimeMS=60000,  # Keep connections 1 minute
+    waitQueueTimeoutMS=10000,  # 10s timeout for queue
+    serverSelectionTimeoutMS=5000,  # 5s server selection
+    connectTimeoutMS=10000,  # 10s connection timeout
+    socketTimeoutMS=45000,  # 45s socket timeout
+    retryWrites=True,  # Automatic write retry
+    retryReads=True,  # Automatic read retry
+    compressors="snappy,zlib",  # Compression
 )
 ```
 
@@ -1019,9 +1044,11 @@ alerts:
 ```python
 from functools import lru_cache
 
+
 @lru_cache(maxsize=1000)
 def get_session_metadata(session_id: str):
     return repository.get_metadata(session_id)
+
 
 # Cache hit: 0.01ms
 # Cache miss: 5ms (MongoDB query)
@@ -1032,7 +1059,9 @@ def get_session_metadata(session_id: str):
 **Redis Cache**:
 ```python
 import redis
+
 cache = redis.Redis()
+
 
 def get_session_with_cache(session_id: str):
     # Try cache first
@@ -1044,11 +1073,7 @@ def get_session_with_cache(session_id: str):
     session = repository.read_session(session_id)
 
     # Cache for 5 minutes
-    cache.setex(
-        f"session:{session_id}",
-        300,
-        json.dumps(session)
-    )
+    cache.setex(f"session:{session_id}", 300, json.dumps(session))
 
     return session
 ```
@@ -1079,10 +1104,7 @@ for session in sessions:
 **Inefficient** (N writes):
 ```python
 for metadata_update in updates:
-    repository.update_metadata(
-        metadata_update["session_id"],
-        metadata_update["data"]
-    )
+    repository.update_metadata(metadata_update["session_id"], metadata_update["data"])
 ```
 
 **Efficient** (1 bulk write):
@@ -1092,7 +1114,7 @@ from pymongo import UpdateOne
 operations = [
     UpdateOne(
         {"_id": update["session_id"]},
-        {"$set": {f"metadata.{k}": v for k, v in update["data"].items()}}
+        {"$set": {f"metadata.{k}": v for k, v in update["data"].items()}},
     )
     for update in updates
 ]
@@ -1150,6 +1172,7 @@ Messages before limit: ~10,000-50,000
 import time
 from fastapi import Request
 
+
 @app.middleware("http")
 async def metrics_middleware(request: Request, call_next):
     start = time.time()
@@ -1174,22 +1197,23 @@ async def metrics_middleware(request: Request, call_next):
 from prometheus_client import Histogram, Counter
 
 request_duration = Histogram(
-    'session_manager_request_duration_ms',
-    'Request duration in milliseconds',
-    ['endpoint', 'method']
+    "session_manager_request_duration_ms",
+    "Request duration in milliseconds",
+    ["endpoint", "method"],
 )
 
 request_count = Counter(
-    'session_manager_requests_total',
-    'Total request count',
-    ['endpoint', 'method', 'status']
+    "session_manager_requests_total",
+    "Total request count",
+    ["endpoint", "method", "status"],
 )
+
 
 @app.post("/chat")
 async def chat(session_id: str):
-    with request_duration.labels('/chat', 'POST').time():
+    with request_duration.labels("/chat", "POST").time():
         # Handle request
-        request_count.labels('/chat', 'POST', '200').inc()
+        request_count.labels("/chat", "POST", "200").inc()
 ```
 
 ### MongoDB Metrics
@@ -1205,7 +1229,7 @@ async def pool_metrics():
         "status": stats["status"],
         "max_pool_size": stats["pool_config"]["maxPoolSize"],
         "min_pool_size": stats["pool_config"]["minPoolSize"],
-        "server_version": stats["server_version"]
+        "server_version": stats["server_version"],
     }
 ```
 
@@ -1253,17 +1277,14 @@ panels:
 ```python
 from locust import HttpUser, task, between
 
+
 class SessionManagerUser(HttpUser):
     wait_time = between(1, 3)
 
     @task
     def chat(self):
         self.client.post(
-            "/chat",
-            json={
-                "session_id": f"session-{self.user_id}",
-                "message": "Hello"
-            }
+            "/chat", json={"session_id": f"session-{self.user_id}", "message": "Hello"}
         )
 
     @task(2)

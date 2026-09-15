@@ -443,6 +443,7 @@ Then in your code:
 
 ```python
 from dotenv import load_dotenv
+
 load_dotenv()  # Loads .env file
 ```
 
@@ -512,7 +513,7 @@ from mongodb_session_manager import create_mongodb_session_manager
 manager = create_mongodb_session_manager(
     session_id="test-setup",
     connection_string="mongodb://admin:password@localhost:27017/",
-    database_name="test_db"
+    database_name="test_db",
 )
 
 # Test basic operations
@@ -576,6 +577,7 @@ sudo systemctl status mongod
 ```python
 # Correct formats:
 "mongodb://localhost:27017/"  # No auth
+
 "mongodb://user:pass@localhost:27017/"  # With auth
 "mongodb+srv://user:pass@cluster.mongodb.net/"  # Atlas
 ```

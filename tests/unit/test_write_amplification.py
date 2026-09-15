@@ -1,0 +1,450 @@
+"""Tests de amplificación de escrituras (issue #54).
+
+Cuentan el NÚMERO de operaciones contra MongoDB, que es la métrica que gobierna
+la latencia en DocumentDB: allí cada `update` cuesta 40-55 ms sea cual sea su
+tamaño.
+
+Dos tipos de test conviven aquí:
+
+- **Regresión de conteo**: fallan contra v0.9.1 porque documentan el
+  comportamiento actual como no deseado.
+- **Guardarraíl**: `TestRootUpdatedAtInvariant` pasa desde el primer día. No es
+  un test inútil: fija un contrato del que dependen dos consumidores externos
+  («Fin» y «Duración» en el Session Viewer y en el informe de auditoría) para
+  que ninguna optimización futura pueda romperlo por descuido.
+"""
+
+from unittest.mock import MagicMock, patch
+
+import pytest
+from pymongo.errors import PyMongoError
+from strands.types.session import SessionMessage
+
+from mongodb_session_manager.mongodb_session_manager import MongoDBSessionManager
+from mongodb_session_manager.mongodb_session_repository import (
+    MongoDBSessionRepository,
+    _reset_index_registry,
+)
+
+
+@pytest.fixture(autouse=True)
+def clean_index_registry():
+    """Aísla el registro de índices entre tests."""
+    _reset_index_registry()
+    yield
+    _reset_index_registry()
+
+
+def make_client():
+    """MongoClient falso con su propia colección, distinguible de otros."""
+    collection = MagicMock()
+    collection.find_one.return_value = None
+    collection.update_one.return_value = MagicMock(matched_count=1, modified_count=1)
+    db = MagicMock()
+    db.__getitem__ = MagicMock(return_value=collection)
+    client = MagicMock()
+    client.__getitem__ = MagicMock(return_value=db)
+    return client, collection
+
+
+def make_manager(client, session_id="s1", **kwargs):
+    """Manager real sobre un cliente falso, con la sesión ya existente."""
+    mgr = MongoDBSessionManager(
+        session_id=session_id,
+        client=client,
+        database_name="db",
+        collection_name="coll",
+        **kwargs,
+    )
+    return mgr
+
+
+# ---------------------------------------------------------------------------
+# 1. Índices: idempotentes por cliente
+# ---------------------------------------------------------------------------
+
+
+class TestIndexCreationIsIdempotent:
+    def test_second_manager_on_same_client_creates_no_indexes(self):
+        """Segundo manager del mismo proceso: 0 createIndexes.
+
+        Hoy son 4 por cada create_session_manager(): 8 por turno con supervisor
+        + sub-agente.
+        """
+        client, collection = make_client()
+
+        make_manager(client, "s1")
+        first_call_count = collection.create_index.call_count
+        collection.create_index.reset_mock()
+
+        make_manager(client, "s2")
+
+        assert first_call_count > 0, "el primer manager sí debe crear los índices"
+        assert collection.create_index.call_count == 0
+
+    def test_different_clients_each_create_indexes(self):
+        """Dos clusters distintos con los mismos nombres: ambos indexan.
+
+        Keyear el registro solo por (db, colección) dejaría el segundo cluster
+        sin índices.
+        """
+        client_a, collection_a = make_client()
+        client_b, collection_b = make_client()
+
+        make_manager(client_a, "s1")
+        make_manager(client_b, "s1")
+
+        assert collection_a.create_index.call_count > 0
+        assert collection_b.create_index.call_count > 0
+
+    def test_new_metadata_fields_trigger_reindex(self):
+        """Pedir un metadata_field nuevo sobre la misma colección sí reindexa."""
+        client, collection = make_client()
+
+        make_manager(client, "s1", metadata_fields=["status"])
+        collection.create_index.reset_mock()
+
+        make_manager(client, "s2", metadata_fields=["status", "priority"])
+
+        assert collection.create_index.call_count > 0
+
+    def test_index_failure_does_not_poison_registry(self):
+        """Si create_index falla, el siguiente manager debe reintentarlo."""
+        client, collection = make_client()
+        collection.create_index.side_effect = PyMongoError("boom")
+
+        make_manager(client, "s1")
+
+        collection.create_index.side_effect = None
+        collection.create_index.reset_mock()
+        make_manager(client, "s2")
+
+        assert collection.create_index.call_count > 0
+
+
+# ---------------------------------------------------------------------------
+# 2. Último message_id: desde memoria, no desde la base de datos
+# ---------------------------------------------------------------------------
+
+
+class TestLastMessageIdFromMemory:
+    def test_no_find_when_message_in_memory(self, mock_agent):
+        """El camino caliente no lee: el dato ya está en _latest_agent_message.
+
+        Además de ahorrar un find, elimina un read-after-write sobre un
+        secundario que puede atribuir las métricas al mensaje equivocado.
+        """
+        client, collection = make_client()
+        mgr = make_manager(client)
+        agent = mock_agent(agent_id="a1", latency_ms=100)
+
+        mgr._latest_agent_message["a1"] = SessionMessage(
+            message_id=7, message={"role": "assistant", "content": [{"text": "hi"}]}
+        )
+        collection.find_one.reset_mock()
+
+        assert mgr._get_last_message_id(agent) == 7
+        assert collection.find_one.call_count == 0
+
+    def test_falls_back_to_find_when_not_in_memory(self, mock_agent):
+        """Sin dato en memoria, se sigue leyendo (sesión restaurada)."""
+        client, collection = make_client()
+        mgr = make_manager(client)
+        agent = mock_agent(agent_id="a1")
+
+        mgr._latest_agent_message["a1"] = None
+        collection.find_one.return_value = {
+            "agents": {"a1": {"messages": [{"message_id": 3}]}}
+        }
+        collection.find_one.reset_mock()
+
+        assert mgr._get_last_message_id(agent) == 3
+        assert collection.find_one.call_count == 1
+
+    def test_falls_back_when_agent_unknown(self, mock_agent):
+        """Agente que no está en el dict: fallback, no KeyError."""
+        client, collection = make_client()
+        mgr = make_manager(client)
+        agent = mock_agent(agent_id="desconocido")
+
+        collection.find_one.return_value = None
+        assert mgr._get_last_message_id(agent) is None
+
+    def test_unmatched_metrics_update_is_logged(self, mock_agent, caplog):
+        """Si el update de métricas no casa, debe dejar rastro, no desaparecer."""
+        client, collection = make_client()
+        mgr = make_manager(client)
+        agent = mock_agent(agent_id="a1", latency_ms=100)
+        mgr._latest_agent_message["a1"] = SessionMessage(
+            message_id=7, message={"role": "assistant", "content": [{"text": "x"}]}
+        )
+        collection.update_one.return_value = MagicMock(matched_count=0)
+
+        with caplog.at_level("WARNING"):
+            mgr._update_last_message_metrics(agent, {}, {}, {}, {})
+
+        assert any(
+            "7" in r.message or "metrics" in r.message.lower() for r in caplog.records
+        )
+
+
+# ---------------------------------------------------------------------------
+# 3. update_agent sin lectura previa
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateAgentDoesNotRead:
+    def test_no_find_before_update(self, sample_session_agent):
+        """Preservar created_at no requiere leerlo: $set no toca lo que no nombra."""
+        client, collection = make_client()
+        with patch.object(MongoDBSessionRepository, "_ensure_indexes"):
+            repo = MongoDBSessionRepository(
+                client=client, database_name="db", collection_name="coll"
+            )
+        collection.find_one.reset_mock()
+
+        repo.update_agent("s1", sample_session_agent)
+
+        assert collection.find_one.call_count == 0
+        assert collection.update_one.call_count == 1
+
+    def test_does_not_overwrite_created_at(self, sample_session_agent):
+        """El $set no debe mencionar el created_at del agente."""
+        client, collection = make_client()
+        with patch.object(MongoDBSessionRepository, "_ensure_indexes"):
+            repo = MongoDBSessionRepository(
+                client=client, database_name="db", collection_name="coll"
+            )
+
+        repo.update_agent("s1", sample_session_agent)
+
+        set_keys = collection.update_one.call_args[0][1]["$set"].keys()
+        agent_id = sample_session_agent.agent_id
+        assert f"agents.{agent_id}.created_at" not in set_keys
+
+
+# ---------------------------------------------------------------------------
+# 4. Configuración del agente: solo cuando cambia
+# ---------------------------------------------------------------------------
+
+
+class TestAgentConfigWrittenOnlyOnChange:
+    def test_second_identical_capture_writes_nothing(self, mock_agent):
+        client, collection = make_client()
+        mgr = make_manager(client)
+        agent = mock_agent(
+            agent_id="a1", system_prompt="eres un asistente", model_id="m1"
+        )
+
+        mgr._capture_agent_config(agent)
+        collection.update_one.reset_mock()
+        mgr._capture_agent_config(agent)
+
+        assert collection.update_one.call_count == 0
+
+    def test_changed_system_prompt_writes_again(self, mock_agent):
+        client, collection = make_client()
+        mgr = make_manager(client)
+        agent = mock_agent(agent_id="a1", system_prompt="v1", model_id="m1")
+
+        mgr._capture_agent_config(agent)
+        agent.system_prompt = "v2"
+        collection.update_one.reset_mock()
+        mgr._capture_agent_config(agent)
+
+        assert collection.update_one.call_count == 1
+
+    def test_cache_is_per_agent(self, mock_agent):
+        """Dos agentes alternando en el mismo manager no se pisan la caché.
+
+        Con un único slot, cada alternancia invalidaría la entrada anterior y
+        volvería a escribir siempre.
+        """
+        client, collection = make_client()
+        mgr = make_manager(client)
+        a1 = mock_agent(agent_id="a1", system_prompt="p1", model_id="m1")
+        a2 = mock_agent(agent_id="a2", system_prompt="p2", model_id="m2")
+
+        mgr._capture_agent_config(a1)
+        mgr._capture_agent_config(a2)
+        collection.update_one.reset_mock()
+
+        mgr._capture_agent_config(a1)
+        mgr._capture_agent_config(a2)
+        mgr._capture_agent_config(a1)
+
+        assert collection.update_one.call_count == 0
+
+
+# ---------------------------------------------------------------------------
+# 5. sync_agent: una sola escritura nuestra
+# ---------------------------------------------------------------------------
+
+
+class TestSyncAgentWriteCount:
+    def test_first_sync_issues_single_update(self, mock_agent):
+        """Métricas y config van al mismo documento: un solo update_one.
+
+        `super().sync_agent()` usa el repositorio, que aquí está mockeado; lo
+        que se cuenta es lo que el manager escribe por su cuenta.
+        """
+        client, collection = make_client()
+        mock_repo = MagicMock()
+        mock_repo.read_session.return_value = None
+        mock_repo.collection = collection
+        with patch(
+            "mongodb_session_manager.mongodb_session_manager.MongoDBSessionRepository",
+            return_value=mock_repo,
+        ):
+            mgr = MongoDBSessionManager(session_id="s1", client=client)
+
+        agent = mock_agent(
+            agent_id="a1", latency_ms=100, system_prompt="p", model_id="m1"
+        )
+        agent.state._get_version.return_value = 1
+        agent._interrupt_state._get_version.return_value = 1
+        agent.conversation_manager.get_state.return_value = {}
+        mgr._latest_agent_message["a1"] = SessionMessage(
+            message_id=2, message={"role": "assistant", "content": [{"text": "x"}]}
+        )
+        collection.update_one.reset_mock()
+
+        mgr.sync_agent(agent)
+
+        assert collection.update_one.call_count == 1
+
+    def test_second_sync_without_changes_issues_single_update(self, mock_agent):
+        """El sync de cierre ya no reescribe la config, solo las métricas."""
+        client, collection = make_client()
+        mock_repo = MagicMock()
+        mock_repo.read_session.return_value = None
+        mock_repo.collection = collection
+        with patch(
+            "mongodb_session_manager.mongodb_session_manager.MongoDBSessionRepository",
+            return_value=mock_repo,
+        ):
+            mgr = MongoDBSessionManager(session_id="s1", client=client)
+
+        agent = mock_agent(
+            agent_id="a1", latency_ms=100, system_prompt="p", model_id="m1"
+        )
+        agent.state._get_version.return_value = 1
+        agent._interrupt_state._get_version.return_value = 1
+        agent.conversation_manager.get_state.return_value = {}
+        mgr._latest_agent_message["a1"] = SessionMessage(
+            message_id=2, message={"role": "assistant", "content": [{"text": "x"}]}
+        )
+
+        mgr.sync_agent(agent)
+        collection.update_one.reset_mock()
+        mgr.sync_agent(agent)
+
+        assert collection.update_one.call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# 6. Guardarraíl: el updated_at raíz (contrato externo)
+# ---------------------------------------------------------------------------
+
+
+class TestRootUpdatedAtInvariant:
+    """Dos consumidores externos calculan «Fin» y «Duración» con este campo.
+
+    Si dejara de refrescarse al cierre del turno, las sesiones mostrarían una
+    duración corta de menos, en silencio.
+    """
+
+    def test_create_message_refreshes_root_updated_at(self, sample_session_message):
+        client, collection = make_client()
+        with patch.object(MongoDBSessionRepository, "_ensure_indexes"):
+            repo = MongoDBSessionRepository(
+                client=client, database_name="db", collection_name="coll"
+            )
+
+        repo.create_message("s1", "a1", sample_session_message)
+
+        assert "updated_at" in collection.update_one.call_args[0][1]["$set"]
+
+    def test_update_agent_refreshes_root_updated_at(self, sample_session_agent):
+        client, collection = make_client()
+        with patch.object(MongoDBSessionRepository, "_ensure_indexes"):
+            repo = MongoDBSessionRepository(
+                client=client, database_name="db", collection_name="coll"
+            )
+
+        repo.update_agent("s1", sample_session_agent)
+
+        assert "updated_at" in collection.update_one.call_args[0][1]["$set"]
+
+    def test_manager_own_writes_never_touch_root_updated_at(self, mock_agent):
+        """Las escrituras del manager no tocan el raíz — y no deben empezar.
+
+        Si alguna lo hiciera, el razonamiento de que recortarlas es seguro
+        dejaría de ser válido.
+        """
+        client, collection = make_client()
+        mgr = make_manager(client)
+        agent = mock_agent(
+            agent_id="a1", latency_ms=100, system_prompt="p", model_id="m"
+        )
+        mgr._latest_agent_message["a1"] = SessionMessage(
+            message_id=1, message={"role": "assistant", "content": [{"text": "x"}]}
+        )
+        collection.update_one.reset_mock()
+
+        mgr._update_last_message_metrics(agent, {}, {}, {}, {})
+        mgr._capture_agent_config(agent)
+
+        for call in collection.update_one.call_args_list:
+            assert "updated_at" not in call[0][1].get("$set", {})
+
+
+# ---------------------------------------------------------------------------
+# 7. Conteo de extremo a extremo
+# ---------------------------------------------------------------------------
+
+
+class TestTurnWriteBudget:
+    def test_turn_with_tool_call_stays_within_budget(self, mock_agent):
+        """Un turno de 4 mensajes debe caber en el presupuesto de escrituras.
+
+        Simula la secuencia de callbacks del SDK: por cada mensaje añadido,
+        `append_message` + `sync_agent`, y un `sync_agent` final de cierre.
+
+        Presupuesto de 10, desglosado para que el número no sea mágico:
+          4  create_message ($push, uno por mensaje)
+          1  update_agent (el SDK salta el resto: el state no cambia)
+          5  sync fusionado (métricas + config en un solo update_one)
+
+        Contra v0.9.1 eran 15 updates y 6 finds: las métricas y la config iban
+        por separado (5 + 5) y cada sync leía el último message_id.
+        """
+        client, collection = make_client()
+        mgr = make_manager(client)
+
+        agent = mock_agent(
+            agent_id="a1", latency_ms=100, system_prompt="p", model_id="m1"
+        )
+        agent.state._get_version.return_value = 1
+        agent._interrupt_state._get_version.return_value = 1
+        agent.conversation_manager.get_state.return_value = {}
+        mgr._latest_agent_message["a1"] = None
+        mgr._last_synced_internal_state = {}
+
+        collection.update_one.reset_mock()
+        collection.find_one.reset_mock()
+
+        # user, assistant(toolUse), user(toolResult), assistant(final)
+        for i in range(4):
+            message = {
+                "role": "user" if i % 2 == 0 else "assistant",
+                "content": [{"text": "m"}],
+            }
+            mgr.append_message(message, agent)
+            mgr.sync_agent(agent)
+        mgr.sync_agent(agent)  # AfterInvocationEvent
+
+        updates = collection.update_one.call_count
+        finds = collection.find_one.call_count
+        assert updates <= 10, f"{updates} updates en un turno de 4 mensajes"
+        assert finds == 0, f"{finds} finds evitables en el camino caliente"

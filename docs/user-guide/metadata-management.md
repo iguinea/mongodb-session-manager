@@ -87,21 +87,16 @@ from mongodb_session_manager import create_mongodb_session_manager
 session_manager = create_mongodb_session_manager(
     session_id="user-123",
     connection_string="mongodb://localhost:27017/",
-    database_name="chat_db"
+    database_name="chat_db",
 )
 
 # Update metadata
-session_manager.update_metadata({
-    "user_id": "alice-123",
-    "priority": "high",
-    "department": "sales"
-})
+session_manager.update_metadata(
+    {"user_id": "alice-123", "priority": "high", "department": "sales"}
+)
 
 # Add more fields
-session_manager.update_metadata({
-    "tags": ["important", "customer"],
-    "status": "active"
-})
+session_manager.update_metadata({"tags": ["important", "customer"], "status": "active"})
 ```
 
 ### 2. Get Metadata
@@ -141,11 +136,7 @@ session_manager.delete_metadata(["user_email", "phone_number"])
 session_manager.delete_metadata(["temp_status", "processing_flag"])
 
 # Multiple deletions
-session_manager.delete_metadata([
-    "internal_notes",
-    "debug_info",
-    "temporary_data"
-])
+session_manager.delete_metadata(["internal_notes", "debug_info", "temporary_data"])
 ```
 
 ## Partial Updates
@@ -156,17 +147,17 @@ One of the most powerful features is **partial updates** - updating specific fie
 
 ```python
 # Initial metadata
-session_manager.update_metadata({
-    "user_id": "alice-123",
-    "priority": "normal",
-    "department": "sales",
-    "created_at": "2024-01-15T10:00:00Z"
-})
+session_manager.update_metadata(
+    {
+        "user_id": "alice-123",
+        "priority": "normal",
+        "department": "sales",
+        "created_at": "2024-01-15T10:00:00Z",
+    }
+)
 
 # Update only priority (other fields preserved!)
-session_manager.update_metadata({
-    "priority": "high"
-})
+session_manager.update_metadata({"priority": "high"})
 
 # Get metadata - all fields still present
 metadata = session_manager.get_metadata()
@@ -191,10 +182,7 @@ session_manager.update_metadata({"priority": "high", "status": "active"})
 # Becomes this MongoDB operation:
 collection.update_one(
     {"_id": "session-id"},
-    {"$set": {
-        "metadata.priority": "high",
-        "metadata.status": "active"
-    }}
+    {"$set": {"metadata.priority": "high", "metadata.status": "active"}},
 )
 # Other fields in metadata remain unchanged!
 ```
@@ -203,27 +191,18 @@ collection.update_one(
 
 ```python
 # Step 1: Initial metadata
-session_manager.update_metadata({
-    "session_type": "support"
-})
+session_manager.update_metadata({"session_type": "support"})
 
 # Step 2: Add user info when identified
-session_manager.update_metadata({
-    "user_id": "alice-123",
-    "user_name": "Alice"
-})
+session_manager.update_metadata({"user_id": "alice-123", "user_name": "Alice"})
 
 # Step 3: Add priority when assessed
-session_manager.update_metadata({
-    "priority": "high",
-    "urgency": "critical"
-})
+session_manager.update_metadata({"priority": "high", "urgency": "critical"})
 
 # Step 4: Add resolution info when closed
-session_manager.update_metadata({
-    "status": "resolved",
-    "resolved_at": datetime.now().isoformat()
-})
+session_manager.update_metadata(
+    {"status": "resolved", "resolved_at": datetime.now().isoformat()}
+)
 
 # All metadata accumulated progressively!
 ```
@@ -241,7 +220,7 @@ from strands import Agent
 session_manager = create_mongodb_session_manager(
     session_id="user-123",
     connection_string="mongodb://localhost:27017/",
-    database_name="chat_db"
+    database_name="chat_db",
 )
 
 # Get the metadata tool
@@ -253,7 +232,7 @@ agent = Agent(
     agent_id="assistant",
     session_manager=session_manager,
     tools=[metadata_tool],  # Agent can now manage metadata!
-    system_prompt="You are a helpful assistant with metadata access."
+    system_prompt="You are a helpful assistant with metadata access.",
 )
 ```
 
@@ -271,10 +250,7 @@ result = metadata_tool(action="get", keys=["user_id", "priority"])
 # Returns: "Metadata retrieved: {\"user_id\": \"alice-123\", \"priority\": \"high\"}"
 
 # 3. SET/UPDATE - Add or update metadata
-result = metadata_tool(
-    action="set",
-    metadata={"priority": "high", "status": "active"}
-)
+result = metadata_tool(action="set", metadata={"priority": "high", "status": "active"})
 # Returns: "Successfully updated metadata fields: ['priority', 'status']"
 
 # 4. DELETE - Remove metadata fields
@@ -292,7 +268,7 @@ from strands import Agent
 session_manager = create_mongodb_session_manager(
     session_id="customer-support",
     connection_string="mongodb://localhost:27017/",
-    database_name="support_db"
+    database_name="support_db",
 )
 
 metadata_tool = session_manager.get_metadata_tool()
@@ -306,7 +282,7 @@ agent = Agent(
     You are a support agent. When you learn information about the customer,
     use the manage_metadata tool to store it. When someone asks what you know
     about the customer, retrieve it using the tool.
-    """
+    """,
 )
 
 # Agent autonomously manages metadata
@@ -397,6 +373,7 @@ import json
 
 logger = logging.getLogger(__name__)
 
+
 def metadata_audit_hook(original_func, action, session_id, **kwargs):
     """Audit all metadata operations."""
     logger.info(f"[METADATA AUDIT] {action} on session {session_id}")
@@ -412,6 +389,7 @@ def metadata_audit_hook(original_func, action, session_id, **kwargs):
         logger.info(f"[METADATA AUDIT] Retrieved metadata")
         return result
 
+
 # Use the hook
 from mongodb_session_manager import MongoDBSessionManager
 
@@ -419,13 +397,13 @@ session_manager = MongoDBSessionManager(
     session_id="audited-session",
     connection_string="mongodb://localhost:27017/",
     database_name="my_db",
-    metadata_hook=metadata_audit_hook  # All operations logged
+    metadata_hook=metadata_audit_hook,  # All operations logged
 )
 
 # All metadata operations will be audited
 session_manager.update_metadata({"status": "active"})  # Logged!
-metadata = session_manager.get_metadata()              # Logged!
-session_manager.delete_metadata(["temp_field"])        # Logged!
+metadata = session_manager.get_metadata()  # Logged!
+session_manager.delete_metadata(["temp_field"])  # Logged!
 ```
 
 ### Example 2: Validation Hook
@@ -434,6 +412,7 @@ Validate metadata before saving:
 
 ```python
 from datetime import datetime
+
 
 def metadata_validation_hook(original_func, action, session_id, **kwargs):
     """Validate metadata before operations."""
@@ -451,7 +430,9 @@ def metadata_validation_hook(original_func, action, session_id, **kwargs):
         # Auto-add required fields
         for field in REQUIRED_FIELDS:
             if field not in metadata:
-                metadata[field] = "system" if field == "updated_by" else datetime.now().isoformat()
+                metadata[field] = (
+                    "system" if field == "updated_by" else datetime.now().isoformat()
+                )
 
         # Add validation timestamp
         metadata["_validated_at"] = datetime.now().isoformat()
@@ -468,12 +449,13 @@ def metadata_validation_hook(original_func, action, session_id, **kwargs):
     else:  # get
         return original_func()
 
+
 # Use the hook
 session_manager = MongoDBSessionManager(
     session_id="validated-session",
     connection_string="mongodb://localhost:27017/",
     database_name="my_db",
-    metadata_hook=metadata_validation_hook
+    metadata_hook=metadata_validation_hook,
 )
 
 # Validation happens automatically
@@ -493,6 +475,7 @@ Implement read caching for better performance:
 
 ```python
 import time
+
 
 class MetadataCacheHook:
     """Hook that caches metadata reads."""
@@ -529,13 +512,14 @@ class MetadataCacheHook:
             else:  # delete
                 return original_func(kwargs["keys"])
 
+
 # Use the cache hook
 cache_hook = MetadataCacheHook(ttl_seconds=30)
 session_manager = MongoDBSessionManager(
     session_id="cached-session",
     connection_string="mongodb://localhost:27017/",
     database_name="my_db",
-    metadata_hook=cache_hook
+    metadata_hook=cache_hook,
 )
 
 # First get - cache miss
@@ -558,18 +542,22 @@ Chain multiple hooks together:
 ```python
 def create_combined_hook(*hooks):
     """Combine multiple hooks into one."""
+
     def combined_hook(original_func, action, session_id, **kwargs):
         # Apply hooks in order
         current_func = original_func
 
         for hook in reversed(hooks):
+
             def make_wrapper(h, f):
                 def wrapper(*args, **kw):
                     if args:
                         return f(*args, **kw)
                     else:
                         return h(f, action, session_id, **kw)
+
                 return wrapper
+
             current_func = make_wrapper(hook, current_func)
 
         # Execute
@@ -582,17 +570,15 @@ def create_combined_hook(*hooks):
 
     return combined_hook
 
+
 # Combine audit and validation
-combined = create_combined_hook(
-    metadata_audit_hook,
-    metadata_validation_hook
-)
+combined = create_combined_hook(metadata_audit_hook, metadata_validation_hook)
 
 session_manager = MongoDBSessionManager(
     session_id="combined-session",
     connection_string="mongodb://localhost:27017/",
     database_name="my_db",
-    metadata_hook=combined  # Both hooks active!
+    metadata_hook=combined,  # Both hooks active!
 )
 
 # Operations are both audited AND validated
@@ -605,19 +591,18 @@ session_manager.update_metadata({"project": "demo"})
 
 ```python
 # Store user information
-session_manager.update_metadata({
-    "user_id": "alice-123",
-    "user_name": "Alice Johnson",
-    "user_email": "alice@example.com",
-    "subscription_tier": "premium",
-    "preferred_language": "en"
-})
+session_manager.update_metadata(
+    {
+        "user_id": "alice-123",
+        "user_name": "Alice Johnson",
+        "user_email": "alice@example.com",
+        "subscription_tier": "premium",
+        "preferred_language": "en",
+    }
+)
 
 # Update preferences progressively
-session_manager.update_metadata({
-    "theme": "dark",
-    "notifications": True
-})
+session_manager.update_metadata({"theme": "dark", "notifications": True})
 
 # Remove sensitive data before archival
 session_manager.delete_metadata(["user_email", "phone_number"])
@@ -629,62 +614,69 @@ session_manager.delete_metadata(["user_email", "phone_number"])
 from datetime import datetime
 
 # Initialize session
-session_manager.update_metadata({
-    "status": "initiated",
-    "created_at": datetime.now().isoformat(),
-    "interaction_count": 0
-})
+session_manager.update_metadata(
+    {
+        "status": "initiated",
+        "created_at": datetime.now().isoformat(),
+        "interaction_count": 0,
+    }
+)
 
 # Update as conversation progresses
-session_manager.update_metadata({
-    "status": "active",
-    "last_activity": datetime.now().isoformat(),
-    "interaction_count": 5
-})
+session_manager.update_metadata(
+    {
+        "status": "active",
+        "last_activity": datetime.now().isoformat(),
+        "interaction_count": 5,
+    }
+)
 
 # Mark completion
-session_manager.update_metadata({
-    "status": "completed",
-    "completed_at": datetime.now().isoformat(),
-    "resolution": "satisfied"
-})
+session_manager.update_metadata(
+    {
+        "status": "completed",
+        "completed_at": datetime.now().isoformat(),
+        "resolution": "satisfied",
+    }
+)
 ```
 
 ### Use Case 3: Customer Support
 
 ```python
 # Initial contact
-session_manager.update_metadata({
-    "customer_id": "CUST-12345",
-    "issue_type": "billing",
-    "priority": "normal",
-    "assigned_to": None
-})
+session_manager.update_metadata(
+    {
+        "customer_id": "CUST-12345",
+        "issue_type": "billing",
+        "priority": "normal",
+        "assigned_to": None,
+    }
+)
 
 # Escalate if needed
-session_manager.update_metadata({
-    "priority": "high",
-    "escalated": True,
-    "assigned_to": "supervisor-jane"
-})
+session_manager.update_metadata(
+    {"priority": "high", "escalated": True, "assigned_to": "supervisor-jane"}
+)
 
 # Track resolution
-session_manager.update_metadata({
-    "status": "resolved",
-    "resolution_time_minutes": 45,
-    "customer_satisfaction": 5
-})
+session_manager.update_metadata(
+    {"status": "resolved", "resolution_time_minutes": 45, "customer_satisfaction": 5}
+)
 ```
 
 ### Use Case 4: Multi-Step Workflows
 
 ```python
 # Workflow state machine
-session_manager.update_metadata({
-    "workflow": "order_processing",
-    "current_step": "validate_order",
-    "steps_completed": []
-})
+session_manager.update_metadata(
+    {
+        "workflow": "order_processing",
+        "current_step": "validate_order",
+        "steps_completed": [],
+    }
+)
+
 
 # Progress through workflow
 def complete_step(step_name):
@@ -692,10 +684,10 @@ def complete_step(step_name):
     steps = metadata.get("metadata", {}).get("steps_completed", [])
     steps.append(step_name)
 
-    session_manager.update_metadata({
-        "steps_completed": steps,
-        "current_step": get_next_step(step_name)
-    })
+    session_manager.update_metadata(
+        {"steps_completed": steps, "current_step": get_next_step(step_name)}
+    )
+
 
 complete_step("validate_order")
 complete_step("process_payment")
@@ -709,18 +701,18 @@ import random
 
 # Assign experiment variant
 variant = "A" if random.random() < 0.5 else "B"
-session_manager.update_metadata({
-    "experiment": "new_prompt_test",
-    "variant": variant,
-    "experiment_started": datetime.now().isoformat()
-})
+session_manager.update_metadata(
+    {
+        "experiment": "new_prompt_test",
+        "variant": variant,
+        "experiment_started": datetime.now().isoformat(),
+    }
+)
 
 # Track metrics
-session_manager.update_metadata({
-    "messages_sent": 10,
-    "average_response_time": 1.2,
-    "user_satisfaction": 4.5
-})
+session_manager.update_metadata(
+    {"messages_sent": 10, "average_response_time": 1.2, "user_satisfaction": 4.5}
+)
 ```
 
 ## Best Practices
@@ -729,51 +721,31 @@ session_manager.update_metadata({
 
 ```python
 # Good - clear and descriptive
-session_manager.update_metadata({
-    "customer_tier": "premium",
-    "issue_category": "technical",
-    "escalation_level": 2
-})
+session_manager.update_metadata(
+    {"customer_tier": "premium", "issue_category": "technical", "escalation_level": 2}
+)
 
 # Bad - unclear abbreviations
-session_manager.update_metadata({
-    "ct": "pm",
-    "ic": "tech",
-    "el": 2
-})
+session_manager.update_metadata({"ct": "pm", "ic": "tech", "el": 2})
 ```
 
 ### 2. Keep Metadata Flat
 
 ```python
 # Good - flat structure
-session_manager.update_metadata({
-    "user_name": "Alice",
-    "user_email": "alice@example.com",
-    "user_tier": "premium"
-})
+session_manager.update_metadata(
+    {"user_name": "Alice", "user_email": "alice@example.com", "user_tier": "premium"}
+)
 
 # Acceptable - one level of nesting if needed
-session_manager.update_metadata({
-    "user": {
-        "name": "Alice",
-        "email": "alice@example.com",
-        "tier": "premium"
-    }
-})
+session_manager.update_metadata(
+    {"user": {"name": "Alice", "email": "alice@example.com", "tier": "premium"}}
+)
 
 # Bad - deep nesting
-session_manager.update_metadata({
-    "data": {
-        "user": {
-            "profile": {
-                "info": {
-                    "name": "Alice"
-                }
-            }
-        }
-    }
-})
+session_manager.update_metadata(
+    {"data": {"user": {"profile": {"info": {"name": "Alice"}}}}}
+)
 ```
 
 ### 3. Use Partial Updates
@@ -798,7 +770,7 @@ session_manager = MongoDBSessionManager(
     session_id="user-123",
     connection_string="mongodb://localhost:27017/",
     database_name="my_db",
-    metadata_fields=["user_id", "priority", "status"]  # Will be indexed!
+    metadata_fields=["user_id", "priority", "status"],  # Will be indexed!
 )
 ```
 
@@ -806,12 +778,9 @@ session_manager = MongoDBSessionManager(
 
 ```python
 # Before archiving or exporting
-session_manager.delete_metadata([
-    "user_email",
-    "phone_number",
-    "credit_card_last_4",
-    "internal_notes"
-])
+session_manager.delete_metadata(
+    ["user_email", "phone_number", "credit_card_last_4", "internal_notes"]
+)
 ```
 
 ### 6. Use Validation Hooks
@@ -846,7 +815,7 @@ METADATA_SCHEMA = {
     "status": "enum - active|pending|resolved|archived",
     "tags": "array - custom tags for categorization",
     "created_at": "ISO 8601 datetime",
-    "updated_at": "ISO 8601 datetime"
+    "updated_at": "ISO 8601 datetime",
 }
 ```
 
@@ -861,22 +830,18 @@ from mongodb_session_manager import MongoDBSessionRepository
 repo = MongoDBSessionRepository(
     connection_string="mongodb://localhost:27017/",
     database_name="my_db",
-    collection_name="sessions"
+    collection_name="sessions",
 )
 
 # Find sessions by metadata
-high_priority_sessions = repo.collection.find({
-    "metadata.priority": "high",
-    "metadata.status": "active"
-})
+high_priority_sessions = repo.collection.find(
+    {"metadata.priority": "high", "metadata.status": "active"}
+)
 
 # Aggregate by metadata fields
 pipeline = [
     {"$match": {"metadata.department": "sales"}},
-    {"$group": {
-        "_id": "$metadata.priority",
-        "count": {"$sum": 1}
-    }}
+    {"$group": {"_id": "$metadata.priority", "count": {"$sum": 1}}},
 ]
 results = repo.collection.aggregate(pipeline)
 ```
@@ -885,6 +850,7 @@ results = repo.collection.aggregate(pipeline)
 
 ```python
 from datetime import datetime
+
 
 def versioned_metadata_hook(original_func, action, session_id, **kwargs):
     """Add version tracking to metadata updates."""
@@ -913,17 +879,11 @@ def sync_to_crm_hook(original_func, action, session_id, **kwargs):
     if action == "update":
         result = original_func(kwargs["metadata"])
         # Sync to external system
-        crm_client.update_customer(
-            session_id=session_id,
-            data=kwargs["metadata"]
-        )
+        crm_client.update_customer(session_id=session_id, data=kwargs["metadata"])
     elif action == "delete":
         result = original_func(kwargs["keys"])
         # Remove from external system
-        crm_client.delete_fields(
-            session_id=session_id,
-            fields=kwargs["keys"]
-        )
+        crm_client.delete_fields(session_id=session_id, fields=kwargs["keys"])
     else:
         result = original_func()
 

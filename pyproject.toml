@@ -1,6 +1,6 @@
 [project]
 name = "mongodb-session-manager"
-version = "0.9.1"
+version = "0.10.0"
 description = "MongoDB session management for Strands Agents"
 readme = "README.md"
 requires-python = ">=3.12.8"
@@ -29,6 +29,7 @@ dev = [
     "pytest-cov>=6.0.0",
     "pytest-mock>=3.14.0",
     "pytest-asyncio>=1.0.0",
+    "ruff>=0.16.7",
 ]
 
 [[project.authors]]
@@ -45,6 +46,55 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/mongodb_session_manager"]
+
+[tool.ruff]
+# Sin esta sección, ruff usa su ruleset por defecto, que crece con cada versión:
+# al subir de versión aparecieron reglas nuevas y el CI se rompió solo, sin que
+# nadie tocara una línea de código. Fijar el ruleset hace el lint reproducible.
+target-version = "py312"
+line-length = 88
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort: stdlib -> third-party -> local
+    "UP",  # pyupgrade: sintaxis moderna (list[str], X | None)
+    "B",   # bugbear: errores sutiles
+    "SIM", # simplify
+    "DTZ", # datetimez: nada de datetime.now() sin tzinfo
+    "LOG", # logging: nada de llamadas al root logger
+    "G",   # logging-format
+    "RUF", # reglas propias de ruff
+]
+ignore = [
+    # La longitud de línea la gobierna el formatter, que ya parte donde puede.
+    # Mantenerla como error de lint solo genera ruido en strings y URLs largas.
+    "E501",
+    # El proyecto usa `except Exception` a propósito en los bordes de
+    # persistencia, para degradar de forma controlada (loguear y devolver None)
+    # en vez de tumbar al agente. Ver .claude/rules/coding-errors.md.
+    "BLE001",
+    # f-strings en logging. Son 111 llamadas y el estilo es consistente en todo
+    # el proyecto; migrarlas a formato lazy (%s) es un cambio transversal que
+    # merece su propio PR, no ir de polizón en uno de rendimiento.
+    "G004",
+    # "Caracteres unicode ambiguos": aquí son tildes, eñes y rayas de un
+    # proyecto documentado en español. La regla está pensada para detectar
+    # homoglifos maliciosos, no prosa.
+    "RUF001",
+    "RUF002",
+    "RUF003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Los tests instancian dobles y fijan fechas fijas a propósito.
+"tests/**" = ["DTZ001", "DTZ005"]
+# Los ejemplos son scripts de demostración: `logging.basicConfig()` seguido de
+# `logging.info()` sobre el root logger es lo idiomático ahí, y obligarles a
+# crear un logger con nombre solo añadiría ruido a lo que quieren enseñar.
+"examples/**" = ["LOG015"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

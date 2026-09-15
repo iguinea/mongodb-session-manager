@@ -5,7 +5,6 @@ from strands.types.session import Session, SessionAgent, SessionMessage
 
 from mongodb_session_manager.mongodb_session_repository import MongoDBSessionRepository
 
-
 pytestmark = pytest.mark.integration
 
 

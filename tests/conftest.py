@@ -2,12 +2,10 @@
 
 import os
 import uuid
-
-import pytest
 from unittest.mock import MagicMock, patch
 
+import pytest
 from strands.types.session import Session, SessionAgent, SessionMessage
-
 
 # ---------------------------------------------------------------------------
 # Unit-test fixtures (no MongoDB required)

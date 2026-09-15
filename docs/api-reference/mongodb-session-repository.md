@@ -152,7 +152,7 @@ from pymongo import MongoClient
 repo = MongoDBSessionRepository(
     connection_string="mongodb://localhost:27017/",
     database_name="chat_db",
-    collection_name="sessions"
+    collection_name="sessions",
 )
 # ... use repository ...
 repo.close()  # Closes the connection
@@ -162,7 +162,7 @@ client = MongoClient("mongodb://localhost:27017/", maxPoolSize=100)
 repo = MongoDBSessionRepository(
     client=client,  # Borrowed client
     database_name="chat_db",
-    collection_name="sessions"
+    collection_name="sessions",
 )
 # ... use repository ...
 repo.close()  # Does NOT close the client
@@ -173,7 +173,7 @@ repo = MongoDBSessionRepository(
     connection_string="mongodb://localhost:27017/",
     database_name="chat_db",
     collection_name="sessions",
-    metadata_fields=["priority", "status", "category"]
+    metadata_fields=["priority", "status", "category"],
 )
 
 # With custom MongoDB client options
@@ -183,7 +183,7 @@ repo = MongoDBSessionRepository(
     collection_name="sessions",
     maxPoolSize=50,
     minPoolSize=10,
-    retryWrites=True
+    retryWrites=True,
 )
 ```
 
@@ -221,10 +221,7 @@ Initializes a new session with empty agents, metadata, and feedbacks arrays. Aut
 from strands.types.session import Session
 
 # Create a new session
-session = Session(
-    session_id="user-123",
-    session_type="chat"
-)
+session = Session(session_id="user-123", session_type="chat")
 
 created_session = repo.create_session(session)
 print(f"Created session: {created_session.session_id}")
@@ -304,7 +301,7 @@ from strands.types.session import SessionAgent
 agent = SessionAgent(
     agent_id="assistant-1",
     model="claude-3-sonnet",
-    system_prompt="You are a helpful assistant"
+    system_prompt="You are a helpful assistant",
 )
 
 repo.create_agent("user-123", agent)
@@ -429,18 +426,12 @@ Appends a message to the agent's messages array with automatic timestamps.
 from strands.types.session import SessionMessage
 
 # Create user message
-user_msg = SessionMessage(
-    message_id=1,
-    role="user",
-    content="Hello, how are you?"
-)
+user_msg = SessionMessage(message_id=1, role="user", content="Hello, how are you?")
 repo.create_message("user-123", "assistant-1", user_msg)
 
 # Create assistant message
 assistant_msg = SessionMessage(
-    message_id=2,
-    role="assistant",
-    content="I'm doing well, thank you!"
+    message_id=2, role="assistant", content="I'm doing well, thank you!"
 )
 repo.create_message("user-123", "assistant-1", assistant_msg)
 ```
@@ -614,21 +605,18 @@ Updates only the specified metadata fields while preserving all other existing f
 
 ```python
 # Initial metadata
-repo.update_metadata("user-123", {
-    "user_name": "Alice",
-    "priority": "high",
-    "category": "support"
-})
+repo.update_metadata(
+    "user-123", {"user_name": "Alice", "priority": "high", "category": "support"}
+)
 
 # Partial update - only changes priority
 repo.update_metadata("user-123", {"priority": "low"})
 # Result: user_name="Alice", priority="low", category="support"
 
 # Add new fields
-repo.update_metadata("user-123", {
-    "status": "active",
-    "last_interaction": "2024-01-26T10:30:00"
-})
+repo.update_metadata(
+    "user-123", {"status": "active", "last_interaction": "2024-01-26T10:30:00"}
+)
 ```
 
 ### `get_metadata`
@@ -718,18 +706,18 @@ Appends a feedback entry to the session's feedbacks array with an automatic `cre
 
 ```python
 # Add positive feedback
-repo.add_feedback("user-123", {
-    "rating": "up",
-    "comment": "Great response!"
-})
+repo.add_feedback("user-123", {"rating": "up", "comment": "Great response!"})
 
 # Add negative feedback with custom fields
-repo.add_feedback("user-123", {
-    "rating": "down",
-    "comment": "Too slow",
-    "category": "performance",
-    "user_id": "alice"
-})
+repo.add_feedback(
+    "user-123",
+    {
+        "rating": "down",
+        "comment": "Too slow",
+        "category": "performance",
+        "user_id": "alice",
+    },
+)
 ```
 
 ### `get_feedbacks`
@@ -785,18 +773,14 @@ Only closes the connection if it was created by this repository (owned client). 
 ```python
 # With owned connection
 repo = MongoDBSessionRepository(
-    connection_string="mongodb://localhost:27017/",
-    database_name="chat_db"
+    connection_string="mongodb://localhost:27017/", database_name="chat_db"
 )
 # ... use repository ...
 repo.close()  # Closes connection
 
 # With borrowed connection
 client = MongoClient("mongodb://localhost:27017/")
-repo = MongoDBSessionRepository(
-    client=client,
-    database_name="chat_db"
-)
+repo = MongoDBSessionRepository(client=client, database_name="chat_db")
 # ... use repository ...
 repo.close()  # Does NOT close connection
 client.close()  # You must close it yourself
@@ -836,7 +820,7 @@ repo = MongoDBSessionRepository(
     client=client,
     database_name="chat_db",
     collection_name="sessions",
-    metadata_fields=["priority", "status"]
+    metadata_fields=["priority", "status"],
 )
 
 # Create a new session
@@ -844,39 +828,27 @@ session = Session(session_id="user-123", session_type="chat")
 repo.create_session(session)
 
 # Set metadata
-repo.update_metadata("user-123", {
-    "user_name": "Alice",
-    "priority": "high"
-})
+repo.update_metadata("user-123", {"user_name": "Alice", "priority": "high"})
 
 # Create an agent
 agent = SessionAgent(
     agent_id="assistant-1",
     model="claude-3-sonnet",
-    system_prompt="You are a helpful assistant"
+    system_prompt="You are a helpful assistant",
 )
 repo.create_agent("user-123", agent)
 
 # Add messages
-user_msg = SessionMessage(
-    message_id=1,
-    role="user",
-    content="Hello!"
-)
+user_msg = SessionMessage(message_id=1, role="user", content="Hello!")
 repo.create_message("user-123", "assistant-1", user_msg)
 
 assistant_msg = SessionMessage(
-    message_id=2,
-    role="assistant",
-    content="Hi! How can I help?"
+    message_id=2, role="assistant", content="Hi! How can I help?"
 )
 repo.create_message("user-123", "assistant-1", assistant_msg)
 
 # Add feedback
-repo.add_feedback("user-123", {
-    "rating": "up",
-    "comment": "Great service!"
-})
+repo.add_feedback("user-123", {"rating": "up", "comment": "Great service!"})
 
 # Retrieve data
 messages = repo.list_messages("user-123", "assistant-1")
@@ -906,15 +878,14 @@ from pymongo import MongoClient
 client = MongoClient("mongodb://localhost:27017/", maxPoolSize=100)
 
 # Create shared repository
-repo = MongoDBSessionRepository(
-    client=client,
-    database_name="chat_db"
-)
+repo = MongoDBSessionRepository(client=client, database_name="chat_db")
+
 
 # Safe to use from multiple threads
 def process_session(session_id):
     session = repo.read_session(session_id)
     # ... process session ...
+
 
 with ThreadPoolExecutor(max_workers=10) as executor:
     session_ids = ["user-1", "user-2", "user-3"]

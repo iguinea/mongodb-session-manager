@@ -52,11 +52,13 @@ class TestFeedbackSNSHookInit:
         assert hook.body_prefix_bad == "ALERT: "
 
     def test_raises_import_error(self):
-        with patch(
-            "mongodb_session_manager.hooks.feedback_sns_hook.publish_message", None
+        with (
+            patch(
+                "mongodb_session_manager.hooks.feedback_sns_hook.publish_message", None
+            ),
+            pytest.raises(ImportError, match="SNS utilities not available"),
         ):
-            with pytest.raises(ImportError, match="SNS utilities not available"):
-                FeedbackSNSHook("arn:g", "arn:b", "arn:n")
+            FeedbackSNSHook("arn:g", "arn:b", "arn:n")
 
 
 # ---------------------------------------------------------------------------

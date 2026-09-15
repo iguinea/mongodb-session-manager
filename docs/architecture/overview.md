@@ -161,21 +161,21 @@ get_feedbacks() -> List[Dict[str, Any]]
 **Document Structure**:
 ```python
 {
-    "_id": "session-id",                    # Primary key (same as session_id)
-    "session_id": "session-id",             # Session identifier
-    "session_type": "default",              # Session type
-    "created_at": ISODate(),                # Session creation timestamp
-    "updated_at": ISODate(),                # Last update timestamp
-    "metadata": {},                         # User-defined metadata
-    "feedbacks": [],                        # Feedback array
-    "agents": {                             # Nested agent documents
+    "_id": "session-id",  # Primary key (same as session_id)
+    "session_id": "session-id",  # Session identifier
+    "session_type": "default",  # Session type
+    "created_at": ISODate(),  # Session creation timestamp
+    "updated_at": ISODate(),  # Last update timestamp
+    "metadata": {},  # User-defined metadata
+    "feedbacks": [],  # Feedback array
+    "agents": {  # Nested agent documents
         "agent-id": {
-            "agent_data": {...},            # Agent state and configuration
-            "created_at": ISODate(),        # Agent creation timestamp
-            "updated_at": ISODate(),        # Agent update timestamp
-            "messages": [...]               # Message array
+            "agent_data": {...},  # Agent state and configuration
+            "created_at": ISODate(),  # Agent creation timestamp
+            "updated_at": ISODate(),  # Agent update timestamp
+            "messages": [...],  # Message array
         }
-    }
+    },
 }
 ```
 
@@ -212,9 +212,9 @@ close()
 **Index Strategy**:
 ```python
 # Automatically created indexes:
-- "created_at"              # For session creation time queries
-- "updated_at"              # For recent session queries
-- "metadata.{field}"        # For each metadata_field specified
+-"created_at"  # For session creation time queries
+-"updated_at"  # For recent session queries
+-"metadata.{field}"  # For each metadata_field specified
 ```
 
 ### 3. MongoDBConnectionPool
@@ -248,15 +248,15 @@ class MongoDBConnectionPool:
 **Default Configuration**:
 ```python
 {
-    "maxPoolSize": 100,              # Maximum connections in pool
-    "minPoolSize": 10,               # Minimum connections to maintain
-    "maxIdleTimeMS": 30000,          # Close idle connections after 30s
-    "waitQueueTimeoutMS": 5000,      # Timeout waiting for connection
-    "serverSelectionTimeoutMS": 5000, # Server selection timeout
-    "connectTimeoutMS": 10000,       # Initial connection timeout
-    "socketTimeoutMS": 30000,        # Socket operation timeout
-    "retryWrites": True,             # Automatic retry for writes
-    "retryReads": True               # Automatic retry for reads
+    "maxPoolSize": 100,  # Maximum connections in pool
+    "minPoolSize": 10,  # Minimum connections to maintain
+    "maxIdleTimeMS": 30000,  # Close idle connections after 30s
+    "waitQueueTimeoutMS": 5000,  # Timeout waiting for connection
+    "serverSelectionTimeoutMS": 5000,  # Server selection timeout
+    "connectTimeoutMS": 10000,  # Initial connection timeout
+    "socketTimeoutMS": 30000,  # Socket operation timeout
+    "retryWrites": True,  # Automatic retry for writes
+    "retryReads": True,  # Automatic retry for reads
 }
 ```
 
@@ -322,16 +322,12 @@ get_connection_stats() -> Dict[str, Any]
 **Usage Patterns**:
 ```python
 # Pattern 1: Global factory (recommended for FastAPI)
-factory = initialize_global_factory(
-    connection_string="mongodb://...",
-    maxPoolSize=100
-)
+factory = initialize_global_factory(connection_string="mongodb://...", maxPoolSize=100)
 manager = get_global_factory().create_session_manager("session-123")
 
 # Pattern 2: Local factory
 factory = MongoDBSessionManagerFactory(
-    connection_string="mongodb://...",
-    database_name="mydb"
+    connection_string="mongodb://...", database_name="mydb"
 )
 manager = factory.create_session_manager("session-123")
 ```
@@ -353,9 +349,9 @@ manager = factory.create_session_manager("session-123")
 ```python
 def metadata_hook(
     original_func: Callable,
-    action: str,              # "update", "get", or "delete"
+    action: str,  # "update", "get", or "delete"
     session_id: str,
-    **kwargs                  # metadata for update, keys for delete
+    **kwargs,  # metadata for update, keys for delete
 ):
     # Custom logic before
     if action == "update":
@@ -377,9 +373,9 @@ def metadata_hook(
 ```python
 def feedback_hook(
     original_func: Callable,
-    action: str,              # "add"
+    action: str,  # "add"
     session_id: str,
-    **kwargs                  # feedback object
+    **kwargs,  # feedback object
 ):
     # Custom logic before
     result = original_func(kwargs["feedback"])
@@ -562,6 +558,7 @@ The MongoDB Session Manager implements Strands SDK interfaces:
 class MongoDBSessionManager(RepositorySessionManager):
     pass
 
+
 # Implements interface
 class MongoDBSessionRepository(SessionRepository):
     pass
@@ -591,15 +588,13 @@ def list_messages(session_id: str, agent_id: str) -> List[SessionMessage]
 manager = MongoDBSessionManager(
     session_id="session-123",
     connection_string="mongodb://user:pass@host:27017/",
-    database_name="mydb"
+    database_name="mydb",
 )
 
 # Method 2: Shared client (reuses connection)
 client = MongoClient("mongodb://...")
 manager = MongoDBSessionManager(
-    session_id="session-123",
-    client=client,
-    database_name="mydb"
+    session_id="session-123", client=client, database_name="mydb"
 )
 ```
 
@@ -622,23 +617,24 @@ from contextlib import asynccontextmanager
 from mongodb_session_manager import (
     initialize_global_factory,
     get_global_factory,
-    close_global_factory
+    close_global_factory,
 )
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
     factory = initialize_global_factory(
-        connection_string="mongodb://...",
-        database_name="sessions",
-        maxPoolSize=100
+        connection_string="mongodb://...", database_name="sessions", maxPoolSize=100
     )
     app.state.session_factory = factory
     yield
     # Shutdown
     close_global_factory()
 
+
 app = FastAPI(lifespan=lifespan)
+
 
 @app.post("/chat")
 async def chat(request: Request, session_id: str):
@@ -662,13 +658,13 @@ from mongodb_session_manager import create_feedback_sns_hook
 feedback_hook = create_feedback_sns_hook(
     topic_arn_good="arn:aws:sns:region:account:feedback-good",
     topic_arn_bad="arn:aws:sns:region:account:feedback-bad",
-    topic_arn_neutral="arn:aws:sns:region:account:feedback-neutral"
+    topic_arn_neutral="arn:aws:sns:region:account:feedback-neutral",
 )
 
 manager = MongoDBSessionManager(
     session_id="session-123",
     connection_string="mongodb://...",
-    feedback_hook=feedback_hook
+    feedback_hook=feedback_hook,
 )
 ```
 
@@ -678,13 +674,13 @@ from mongodb_session_manager import create_metadata_sqs_hook
 
 metadata_hook = create_metadata_sqs_hook(
     queue_url="https://sqs.region.amazonaws.com/account/queue-name",
-    metadata_fields=["status", "priority", "agent_state"]
+    metadata_fields=["status", "priority", "agent_state"],
 )
 
 manager = MongoDBSessionManager(
     session_id="session-123",
     connection_string="mongodb://...",
-    metadata_hook=metadata_hook
+    metadata_hook=metadata_hook,
 )
 ```
 
@@ -745,8 +741,8 @@ graph TB
 factory = initialize_global_factory(
     connection_string=os.getenv("MONGODB_URI"),
     database_name="production",
-    maxPoolSize=50,        # 50 connections per instance
-    minPoolSize=10
+    maxPoolSize=50,  # 50 connections per instance
+    minPoolSize=10,
 )
 ```
 
@@ -769,6 +765,7 @@ from mongodb_session_manager import MongoDBSessionManagerFactory
 # Global variable (reused across warm invocations)
 factory = None
 
+
 def lambda_handler(event, context):
     global factory
 
@@ -777,9 +774,9 @@ def lambda_handler(event, context):
         factory = MongoDBSessionManagerFactory(
             connection_string=os.getenv("MONGODB_URI"),
             database_name="lambda_sessions",
-            maxPoolSize=10,      # Lower pool size for Lambda
+            maxPoolSize=10,  # Lower pool size for Lambda
             minPoolSize=1,
-            maxIdleTimeMS=60000  # Keep connections longer
+            maxIdleTimeMS=60000,  # Keep connections longer
         )
 
     # Create session manager (reuses connection if warm)
@@ -875,11 +872,11 @@ Total MongoDB Connections = (Application Instances) × (maxPoolSize)
 # High-performance configuration
 factory = initialize_global_factory(
     connection_string=mongodb_uri,
-    maxPoolSize=200,           # More connections per instance
-    minPoolSize=50,            # Higher baseline
-    maxIdleTimeMS=45000,       # Keep connections alive longer
+    maxPoolSize=200,  # More connections per instance
+    minPoolSize=50,  # Higher baseline
+    maxIdleTimeMS=45000,  # Keep connections alive longer
     waitQueueTimeoutMS=10000,  # Higher timeout for burst traffic
-    serverSelectionTimeoutMS=10000
+    serverSelectionTimeoutMS=10000,
 )
 ```
 
@@ -903,7 +900,7 @@ factory = initialize_global_factory(
     "max_instances": 20,
     "target_cpu": 70,
     "scale_up_cooldown": 60,
-    "scale_down_cooldown": 300
+    "scale_down_cooldown": 300,
 }
 ```
 
@@ -948,8 +945,8 @@ async def metrics():
         "instances": {
             "active_sessions": session_counter.value,
             "requests_per_second": request_rate.rate(),
-            "avg_latency_ms": latency_histogram.mean()
-        }
+            "avg_latency_ms": latency_histogram.mean(),
+        },
     }
 ```
 

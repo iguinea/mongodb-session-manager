@@ -73,7 +73,7 @@ from pymongo import MongoClient
 factory = MongoDBSessionManagerFactory(
     connection_string="mongodb://localhost:27017/",
     database_name="chat_db",
-    collection_name="sessions"
+    collection_name="sessions",
 )
 
 # Initialize with custom pool settings
@@ -83,7 +83,7 @@ factory = MongoDBSessionManagerFactory(
     collection_name="sessions",
     maxPoolSize=200,  # Passed to connection pool
     minPoolSize=20,
-    retryWrites=True
+    retryWrites=True,
 )
 
 # Initialize with existing client (factory borrows connection)
@@ -91,7 +91,7 @@ client = MongoClient("mongodb://localhost:27017/", maxPoolSize=100)
 factory = MongoDBSessionManagerFactory(
     client=client,  # Borrowed client
     database_name="chat_db",
-    collection_name="sessions"
+    collection_name="sessions",
 )
 
 # Initialize with metadata field indexing
@@ -99,7 +99,7 @@ factory = MongoDBSessionManagerFactory(
     connection_string="mongodb://localhost:27017/",
     database_name="chat_db",
     collection_name="sessions",
-    metadata_fields=["priority", "status", "category"]
+    metadata_fields=["priority", "status", "category"],
 )
 ```
 
@@ -149,8 +149,9 @@ manager1 = factory.create_session_manager("user-123")
 # Create session manager with overridden database
 manager2 = factory.create_session_manager(
     session_id="user-456",
-    database_name="special_db"  # Override factory default
+    database_name="special_db",  # Override factory default
 )
+
 
 # Create session manager with hooks
 def audit_hook(original_func, action, session_id, **kwargs):
@@ -162,17 +163,15 @@ def audit_hook(original_func, action, session_id, **kwargs):
     else:
         return original_func()
 
+
 manager3 = factory.create_session_manager(
     session_id="user-789",
-    metadata_hook=audit_hook  # Hook passed via kwargs
+    metadata_hook=audit_hook,  # Hook passed via kwargs
 )
 
 # Create many managers efficiently
 session_ids = ["user-1", "user-2", "user-3", "user-4", "user-5"]
-managers = [
-    factory.create_session_manager(sid)
-    for sid in session_ids
-]
+managers = [factory.create_session_manager(sid) for sid in session_ids]
 # All managers share the same connection - no overhead!
 ```
 
@@ -198,19 +197,13 @@ Returns connection pool statistics if the factory owns the connection (initializ
     "status": "connected",
     "connection_string": "mongodb://localhost:27017/",
     "server_version": "7.0.5",
-    "pool_config": {
-        "maxPoolSize": 100,
-        "minPoolSize": 10
-    }
+    "pool_config": {"maxPoolSize": 100, "minPoolSize": 10},
 }
 ```
 
 **When Using External Client**:
 ```python
-{
-    "status": "external_client",
-    "message": "Using externally managed MongoDB client"
-}
+{"status": "external_client", "message": "Using externally managed MongoDB client"}
 ```
 
 #### Example
@@ -229,6 +222,7 @@ elif stats["status"] == "external_client":
 from fastapi import FastAPI
 
 app = FastAPI()
+
 
 @app.get("/health/factory")
 async def factory_health():
@@ -255,9 +249,7 @@ If the factory owns the connection pool (initialized via `connection_string`), t
 
 ```python
 # Factory owns connection
-factory = MongoDBSessionManagerFactory(
-    connection_string="mongodb://localhost:27017/"
-)
+factory = MongoDBSessionManagerFactory(connection_string="mongodb://localhost:27017/")
 # ... use factory ...
 factory.close()  # Closes connection pool
 
@@ -274,12 +266,14 @@ from fastapi import FastAPI
 app = FastAPI()
 factory = None
 
+
 @app.on_event("startup")
 async def startup():
     global factory
     factory = MongoDBSessionManagerFactory(
         connection_string="mongodb://localhost:27017/"
     )
+
 
 @app.on_event("shutdown")
 async def shutdown():
@@ -339,6 +333,7 @@ from fastapi import FastAPI
 
 app = FastAPI()
 
+
 @app.on_event("startup")
 async def startup_event():
     """Initialize global factory on startup"""
@@ -347,9 +342,10 @@ async def startup_event():
         database_name="chat_db",
         collection_name="sessions",
         maxPoolSize=100,
-        minPoolSize=10
+        minPoolSize=10,
     )
     print("Global factory initialized")
+
 
 # With metadata fields
 @app.on_event("startup")
@@ -357,7 +353,7 @@ async def startup_event():
     initialize_global_factory(
         connection_string="mongodb://localhost:27017/",
         database_name="chat_db",
-        metadata_fields=["priority", "status"]
+        metadata_fields=["priority", "status"],
     )
 ```
 
@@ -386,6 +382,7 @@ from mongodb_session_manager import get_global_factory
 from fastapi import FastAPI, HTTPException
 
 app = FastAPI()
+
 
 @app.post("/chat/{session_id}")
 async def chat(session_id: str, message: str):
@@ -424,6 +421,7 @@ from fastapi import FastAPI
 
 app = FastAPI()
 
+
 @app.on_event("shutdown")
 async def shutdown_event():
     """Close global factory on shutdown"""
@@ -440,12 +438,13 @@ from fastapi import FastAPI, HTTPException, BackgroundTasks
 from mongodb_session_manager import (
     initialize_global_factory,
     get_global_factory,
-    close_global_factory
+    close_global_factory,
 )
 from strands import Agent
 from typing import Dict
 
 app = FastAPI()
+
 
 # Startup: Initialize global factory
 @app.on_event("startup")
@@ -457,9 +456,10 @@ async def startup_event():
         metadata_fields=["priority", "status"],
         maxPoolSize=100,
         minPoolSize=10,
-        retryWrites=True
+        retryWrites=True,
     )
     print("Global factory initialized")
+
 
 # Shutdown: Close factory
 @app.on_event("shutdown")
@@ -467,21 +467,17 @@ async def shutdown_event():
     close_global_factory()
     print("Global factory closed")
 
+
 # Health check endpoint
 @app.get("/health")
 async def health_check():
     try:
         factory = get_global_factory()
         stats = factory.get_connection_stats()
-        return {
-            "status": "healthy",
-            "mongodb": stats
-        }
+        return {"status": "healthy", "mongodb": stats}
     except Exception as e:
-        return {
-            "status": "unhealthy",
-            "error": str(e)
-        }
+        return {"status": "unhealthy", "error": str(e)}
+
 
 # Chat endpoint
 @app.post("/chat/{session_id}")
@@ -492,10 +488,7 @@ async def chat(session_id: str, message: str):
         manager = factory.create_session_manager(session_id)
 
         # Create agent with session persistence
-        agent = Agent(
-            model="claude-3-sonnet",
-            session_manager=manager
-        )
+        agent = Agent(model="claude-3-sonnet", session_manager=manager)
 
         # Initialize with history
         manager.initialize(agent)
@@ -507,31 +500,24 @@ async def chat(session_id: str, message: str):
         # Clean up (manager doesn't own connection)
         manager.close()
 
-        return {
-            "session_id": session_id,
-            "response": response
-        }
+        return {"session_id": session_id, "response": response}
 
     except RuntimeError as e:
         raise HTTPException(status_code=500, detail="Factory not initialized")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
 # Endpoint with metadata
 @app.post("/chat/{session_id}/with-metadata")
-async def chat_with_metadata(
-    session_id: str,
-    message: str,
-    priority: str = "normal"
-):
+async def chat_with_metadata(session_id: str, message: str, priority: str = "normal"):
     factory = get_global_factory()
     manager = factory.create_session_manager(session_id)
 
     # Set metadata
-    manager.update_metadata({
-        "priority": priority,
-        "last_message_at": datetime.now().isoformat()
-    })
+    manager.update_metadata(
+        {"priority": priority, "last_message_at": datetime.now().isoformat()}
+    )
 
     agent = Agent(model="claude-3-sonnet", session_manager=manager)
     manager.initialize(agent)
@@ -547,23 +533,17 @@ async def chat_with_metadata(
     return {
         "session_id": session_id,
         "response": response,
-        "metadata": manager.get_metadata()
+        "metadata": manager.get_metadata(),
     }
+
 
 # Endpoint with feedback
 @app.post("/feedback/{session_id}")
-async def add_feedback(
-    session_id: str,
-    rating: str,
-    comment: str = ""
-):
+async def add_feedback(session_id: str, rating: str, comment: str = ""):
     factory = get_global_factory()
     manager = factory.create_session_manager(session_id)
 
-    manager.add_feedback({
-        "rating": rating,
-        "comment": comment
-    })
+    manager.add_feedback({"rating": rating, "comment": comment})
 
     manager.close()
 
@@ -584,7 +564,7 @@ async def chat(session_id: str, message: str):
     manager = MongoDBSessionManager(
         session_id=session_id,
         connection_string="mongodb://localhost:27017/",
-        database_name="chat_db"
+        database_name="chat_db",
     )
     # ... process ...
     manager.close()  # Closes connection
@@ -639,14 +619,14 @@ from mongodb_session_manager import MongoDBSessionManagerFactory
 main_factory = MongoDBSessionManagerFactory(
     connection_string="mongodb://localhost:27017/",
     database_name="main_db",
-    collection_name="sessions"
+    collection_name="sessions",
 )
 
 # Factory for analytics database
 analytics_factory = MongoDBSessionManagerFactory(
     connection_string="mongodb://analytics:27017/",
     database_name="analytics_db",
-    collection_name="sessions"
+    collection_name="sessions",
 )
 
 # Use appropriate factory
@@ -659,8 +639,10 @@ analytics_manager = analytics_factory.create_session_manager("user-123")
 ```python
 from mongodb_session_manager import MongoDBSessionManagerFactory
 
+
 def create_audit_metadata_hook():
     """Factory function for metadata hooks"""
+
     def hook(original_func, action, session_id, **kwargs):
         logger.info(f"[AUDIT] {action} on {session_id}")
         if action == "update":
@@ -669,18 +651,18 @@ def create_audit_metadata_hook():
             return original_func(kwargs["keys"])
         else:
             return original_func()
+
     return hook
+
 
 # Initialize factory
 factory = MongoDBSessionManagerFactory(
-    connection_string="mongodb://localhost:27017/",
-    database_name="chat_db"
+    connection_string="mongodb://localhost:27017/", database_name="chat_db"
 )
 
 # Create managers with hooks
 manager = factory.create_session_manager(
-    session_id="user-123",
-    metadata_hook=create_audit_metadata_hook()
+    session_id="user-123", metadata_hook=create_audit_metadata_hook()
 )
 ```
 
@@ -690,23 +672,22 @@ manager = factory.create_session_manager(
 from fastapi import Depends
 from mongodb_session_manager import get_global_factory, MongoDBSessionManagerFactory
 
+
 def get_factory() -> MongoDBSessionManagerFactory:
     """Dependency that provides the factory"""
     return get_global_factory()
 
+
 def get_session_manager(
-    session_id: str,
-    factory: MongoDBSessionManagerFactory = Depends(get_factory)
+    session_id: str, factory: MongoDBSessionManagerFactory = Depends(get_factory)
 ):
     """Dependency that provides a session manager"""
     return factory.create_session_manager(session_id)
 
+
 # Use in endpoints
 @app.post("/chat/{session_id}")
-async def chat(
-    message: str,
-    manager = Depends(get_session_manager)
-):
+async def chat(message: str, manager=Depends(get_session_manager)):
     agent = Agent(model="claude-3-sonnet", session_manager=manager)
     manager.initialize(agent)
     response = agent(message)

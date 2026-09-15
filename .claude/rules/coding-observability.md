@@ -6,6 +6,7 @@
 
 ```python
 import structlog
+
 logger = structlog.get_logger()
 logger.info("session_saved", session_id=session_id, agent_count=len(agents))
 logger.error("save_failed", session_id=session_id, error=str(e))

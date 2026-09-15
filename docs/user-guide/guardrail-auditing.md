@@ -87,7 +87,7 @@ from mongodb_session_manager import create_mongodb_session_manager
 session_manager = create_mongodb_session_manager(
     session_id="user-123",
     connection_string="mongodb://localhost:27017/",
-    database_name="my_db"
+    database_name="my_db",
 )
 
 # Agent with Bedrock Guardrails configured in the model
@@ -95,7 +95,7 @@ agent = Agent(
     model="us.anthropic.claude-sonnet-4-20250514-v1:0",
     agent_id="support-agent",
     session_manager=session_manager,
-    system_prompt="You are a helpful assistant."
+    system_prompt="You are a helpful assistant.",
 )
 
 # If a guardrail intervenes, the event is recorded automatically
@@ -112,10 +112,7 @@ from strands.types.content import Message
 from mongodb_session_manager.mongodb_session_manager import GUARDRAIL_ACTION_BLOCKED
 
 # Redact with default action (BLOCKED)
-redacted = Message(
-    role="assistant",
-    content="[Content removed for privacy]"
-)
+redacted = Message(role="assistant", content="[Content removed for privacy]")
 session_manager.redact_latest_message(redacted, agent)
 
 # Redact with custom action
@@ -136,15 +133,16 @@ guardrail_trace = {
         "contentPolicy": {
             "filters": [
                 {"type": "HATE", "confidence": "HIGH"},
-                {"type": "VIOLENCE", "confidence": "MEDIUM"}
+                {"type": "VIOLENCE", "confidence": "MEDIUM"},
             ]
         }
     },
-    "outputAssessments": []
+    "outputAssessments": [],
 }
 
 session_manager.redact_latest_message(
-    redacted, agent,
+    redacted,
+    agent,
     action="BLOCKED",
     stop_reason="guardrail_intervened",
     guardrail_trace=guardrail_trace,
@@ -178,14 +176,13 @@ db = client["my_db"]
 collection = db["agent_sessions"]
 
 # Get all guardrail events for a session
-session = collection.find_one(
-    {"session_id": "user-123"},
-    {"guardrail_events": 1}
-)
+session = collection.find_one({"session_id": "user-123"}, {"guardrail_events": 1})
 
 for event in session.get("guardrail_events", []):
-    print(f"Message {event['message_id']} by {event['agent_id']}: "
-          f"{event['action']} at {event['timestamp']}")
+    print(
+        f"Message {event['message_id']} by {event['agent_id']}: "
+        f"{event['action']} at {event['timestamp']}"
+    )
 ```
 
 ### Sessions with Guardrail Interventions
@@ -195,14 +192,12 @@ Find all sessions that had guardrail interventions:
 ```python
 # Sessions with any guardrail events
 sessions = collection.find(
-    {"guardrail_events": {"$ne": []}},
-    {"session_id": 1, "guardrail_events": 1}
+    {"guardrail_events": {"$ne": []}}, {"session_id": 1, "guardrail_events": 1}
 )
 
 # Sessions with BLOCKED actions specifically
 sessions = collection.find(
-    {"guardrail_events.action": "BLOCKED"},
-    {"session_id": 1, "guardrail_events": 1}
+    {"guardrail_events.action": "BLOCKED"}, {"session_id": 1, "guardrail_events": 1}
 )
 ```
 
@@ -211,11 +206,8 @@ sessions = collection.find(
 ```python
 pipeline = [
     {"$unwind": "$guardrail_events"},
-    {"$group": {
-        "_id": "$guardrail_events.action",
-        "count": {"$sum": 1}
-    }},
-    {"$sort": {"count": -1}}
+    {"$group": {"_id": "$guardrail_events.action", "count": {"$sum": 1}}},
+    {"$sort": {"count": -1}},
 ]
 
 results = collection.aggregate(pipeline)

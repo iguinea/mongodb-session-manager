@@ -5,14 +5,13 @@ Migrates factory integration tests from test_application_name.py.
 
 import pytest
 
+import mongodb_session_manager.mongodb_session_factory as factory_module
 from mongodb_session_manager import (
     MongoDBSessionManagerFactory,
-    initialize_global_factory,
-    get_global_factory,
     close_global_factory,
+    get_global_factory,
+    initialize_global_factory,
 )
-import mongodb_session_manager.mongodb_session_factory as factory_module
-
 
 pytestmark = pytest.mark.integration
 

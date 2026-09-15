@@ -22,11 +22,13 @@ validation, notifications, and FastAPI integration.
 import asyncio
 import json
 import logging
-import time
-from datetime import datetime
-from typing import Any, Callable, Dict
-from mongodb_session_manager import MongoDBSessionManager
 import os
+import time
+from collections.abc import Callable
+from datetime import UTC, datetime
+from typing import Any
+
+from mongodb_session_manager import MongoDBSessionManager
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -78,7 +80,7 @@ def feedback_audit_hook(
         return result
 
     except Exception as e:
-        logger.error(f"[FEEDBACK AUDIT] Error in {action}: {str(e)}")
+        logger.error(f"[FEEDBACK AUDIT] Error in {action}: {e!s}")
         raise
 
 
@@ -115,7 +117,7 @@ def feedback_validation_hook(
         feedback["comment"] = comment.strip()
 
         # Add validation timestamp
-        feedback["_validated_at"] = datetime.now().isoformat()
+        feedback["_validated_at"] = datetime.now(UTC).isoformat()
 
         logger.info(f"[VALIDATION] Feedback validated for session {session_id}")
 
@@ -162,7 +164,7 @@ class FeedbackNotificationHook:
 
         return original_func(kwargs["feedback"])
 
-    def _send_alert(self, session_id: str, feedback: Dict[str, Any]):
+    def _send_alert(self, session_id: str, feedback: dict[str, Any]):
         """Simulate sending an alert (in production, this would integrate with notification services)."""
         logger.info(
             f"[NOTIFICATION] Alert sent for session {session_id} - would notify support team"
@@ -207,7 +209,7 @@ class FeedbackAnalyticsHook:
             ) / total
 
             # Track by hour
-            hour = datetime.now().hour
+            hour = datetime.now(UTC).hour
             self.metrics["feedback_by_hour"][hour] = (
                 self.metrics["feedback_by_hour"].get(hour, 0) + 1
             )
@@ -218,7 +220,7 @@ class FeedbackAnalyticsHook:
 
         return original_func(kwargs["feedback"])
 
-    def get_metrics(self) -> Dict[str, Any]:
+    def get_metrics(self) -> dict[str, Any]:
         """Get current analytics metrics."""
         return self.metrics.copy()
 
@@ -415,15 +417,15 @@ async def add_feedback(session_id: str, feedback_data: FeedbackRequest):
                 FeedbackNotificationHook()
             )
         )
-        
+
         # Add feedback
         session_manager.add_feedback({
             "rating": feedback_data.rating,
             "comment": feedback_data.comment
         })
-        
+
         return {"status": "success", "message": "Feedback recorded"}
-        
+
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

@@ -2,8 +2,15 @@
 package-lock.json
 __pycache__
 .pytest_cache
+.ruff_cache
 .venv
 *.egg-info
+
+# Artefactos de build y cobertura (los genera `uv build` y `pytest --cov`)
+dist/
+.coverage
+coverage.xml
+htmlcov/
 
 # Environment variables
 .env
@@ -14,7 +21,10 @@ __pycache__
 logs
 *.log
 
-uv.lock
+# uv.lock SÍ se versiona: sin él, CI resuelve dependencias frescas en cada run y
+# deja de ser reproducible. Estaba ignorado, y por eso el CI instalaba
+# strands-agents 1.55.1 mientras en local se usaba 1.30.0.
+# Ver .claude/rules/coding-dependencies.md.
 
 
 .devcontainer
@@ -23,3 +33,7 @@ uv.lock
 # CLAUDE.md
 CLAUDE.local.md
 site/
+
+# Informes de análisis en artifacts/: se versionan el .md y el snapshot JSON.
+# La app HTML (7,9 MB de runtime Vite generado por Codex) no.
+artifacts/performance-report-html/

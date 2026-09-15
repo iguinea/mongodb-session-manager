@@ -119,7 +119,7 @@ If you don't need AWS features, the library works fine without them. Check avail
 ```python
 from mongodb_session_manager import (
     is_feedback_sns_hook_available,
-    is_metadata_sqs_hook_available
+    is_metadata_sqs_hook_available,
 )
 
 print(f"SNS available: {is_feedback_sns_hook_available()}")
@@ -138,6 +138,7 @@ uv sync
 **Check current version:**
 ```python
 from mongodb_session_manager import __version__
+
 print(__version__)  # e.g., "0.5.0"
 ```
 
@@ -152,14 +153,10 @@ Use the same `session_id` and `agent_id`:
 manager1 = create_mongodb_session_manager(
     session_id="user-123-chat",
     connection_string="mongodb://localhost:27017/",
-    database_name="myapp"
+    database_name="myapp",
 )
 
-agent1 = Agent(
-    agent_id="assistant",
-    model="claude-3-sonnet",
-    session_manager=manager1
-)
+agent1 = Agent(agent_id="assistant", model="claude-3-sonnet", session_manager=manager1)
 
 response1 = agent1("My name is Alice")
 manager1.sync_agent(agent1)
@@ -169,13 +166,13 @@ manager1.close()
 manager2 = create_mongodb_session_manager(
     session_id="user-123-chat",  # Same session_id
     connection_string="mongodb://localhost:27017/",
-    database_name="myapp"
+    database_name="myapp",
 )
 
 agent2 = Agent(
     agent_id="assistant",  # Same agent_id
     model="claude-3-sonnet",
-    session_manager=manager2
+    session_manager=manager2,
 )
 
 response2 = agent2("What's my name?")  # Agent remembers "Alice"
@@ -189,7 +186,7 @@ Yes! Each agent maintains its own conversation history within the session:
 session_manager = create_mongodb_session_manager(
     session_id="customer-support-session",
     connection_string="mongodb://localhost:27017/",
-    database_name="myapp"
+    database_name="myapp",
 )
 
 # Agent 1: Customer support
@@ -197,7 +194,7 @@ support_agent = Agent(
     agent_id="support",
     model="claude-3-sonnet",
     session_manager=session_manager,
-    system_prompt="You are a customer support agent"
+    system_prompt="You are a customer support agent",
 )
 
 # Agent 2: Sales
@@ -205,7 +202,7 @@ sales_agent = Agent(
     agent_id="sales",
     model="claude-3-haiku",
     session_manager=session_manager,
-    system_prompt="You are a sales agent"
+    system_prompt="You are a sales agent",
 )
 
 # Each agent has separate conversation history
@@ -254,10 +251,7 @@ manager.append_message({"role": "user", "content": "Hello"}, agent)
 manager.append_message({"role": "assistant", "content": "Hi!"}, agent)
 
 # Update metadata (context)
-manager.update_metadata({
-    "user_language": "en",
-    "session_priority": "high"
-})
+manager.update_metadata({"user_language": "en", "session_priority": "high"})
 ```
 
 ### How do I delete a session?
@@ -276,6 +270,7 @@ collection.delete_one({"_id": "session-id-to-delete"})
 
 # Or delete sessions older than 30 days
 from datetime import datetime, timedelta
+
 cutoff = datetime.utcnow() - timedelta(days=30)
 collection.delete_many({"created_at": {"$lt": cutoff}})
 ```
@@ -296,7 +291,7 @@ agent = Agent(
     agent_id="assistant",
     session_manager=session_manager,
     tools=[metadata_tool],  # Agent can now manage metadata
-    system_prompt="You can store user preferences using the metadata tool."
+    system_prompt="You can store user preferences using the metadata tool.",
 )
 
 # Agent can autonomously manage metadata
@@ -341,8 +336,9 @@ from contextlib import asynccontextmanager
 from mongodb_session_manager import (
     initialize_global_factory,
     get_global_factory,
-    close_global_factory
+    close_global_factory,
 )
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -350,13 +346,15 @@ async def lifespan(app: FastAPI):
     factory = initialize_global_factory(
         connection_string="mongodb://localhost:27017/",
         database_name="myapp",
-        maxPoolSize=100  # Pool size for concurrency
+        maxPoolSize=100,  # Pool size for concurrency
     )
     yield
     # Shutdown: Clean up
     close_global_factory()
 
+
 app = FastAPI(lifespan=lifespan)
+
 
 @app.post("/chat")
 async def chat(session_id: str, message: str):
@@ -377,9 +375,9 @@ The default pool size is 100 connections, suitable for most applications. Config
 ```python
 factory = initialize_global_factory(
     connection_string="mongodb://localhost:27017/",
-    maxPoolSize=200,      # Max connections
-    minPoolSize=20,       # Keep 20 connections ready
-    maxIdleTimeMS=30000   # Close idle connections after 30s
+    maxPoolSize=200,  # Max connections
+    minPoolSize=20,  # Keep 20 connections ready
+    maxIdleTimeMS=30000,  # Close idle connections after 30s
 )
 ```
 
@@ -425,12 +423,13 @@ from mongodb_session_manager import initialize_global_factory
 
 app = FastAPI()
 
+
 @app.on_event("startup")
 async def startup():
     initialize_global_factory(
-        connection_string="mongodb://localhost:27017/",
-        database_name="myapp"
+        connection_string="mongodb://localhost:27017/", database_name="myapp"
     )
+
 
 @app.post("/chat")
 async def chat(session_id: str):
@@ -454,16 +453,16 @@ from mongodb_session_manager import initialize_global_factory
 
 app = Flask(__name__)
 
+
 @app.before_first_request
 def setup():
-    initialize_global_factory(
-        connection_string="mongodb://localhost:27017/"
-    )
+    initialize_global_factory(connection_string="mongodb://localhost:27017/")
 
-@app.route('/chat', methods=['POST'])
+
+@app.route("/chat", methods=["POST"])
 def chat():
     factory = get_global_factory()
-    manager = factory.create_session_manager(request.json['session_id'])
+    manager = factory.create_session_manager(request.json["session_id"])
     # ... use manager
 ```
 
@@ -473,11 +472,10 @@ def chat():
 from django.apps import AppConfig
 from mongodb_session_manager import initialize_global_factory
 
+
 class MyAppConfig(AppConfig):
     def ready(self):
-        initialize_global_factory(
-            connection_string="mongodb://localhost:27017/"
-        )
+        initialize_global_factory(connection_string="mongodb://localhost:27017/")
 ```
 
 ### Does it support async operations?
@@ -496,8 +494,7 @@ async def stream_chat(session_manager, agent, prompt):
 
     full_response = "".join(response_chunks)
     session_manager.append_message(
-        {"role": "assistant", "content": full_response},
-        agent
+        {"role": "assistant", "content": full_response}, agent
     )
     session_manager.sync_agent(agent)
 ```
@@ -528,6 +525,7 @@ See `examples/example_stream_async.py` for complete examples.
    ```python
    # Correct formats:
    "mongodb://localhost:27017/"  # No auth
+
    "mongodb://user:pass@localhost:27017/"  # With auth
    "mongodb+srv://user:pass@cluster.mongodb.net/"  # Atlas
    ```
@@ -599,7 +597,7 @@ See `examples/example_stream_async.py` for complete examples.
    ```python
    factory = initialize_global_factory(
        connection_string="mongodb://localhost:27017/",
-       maxPoolSize=200  # Increase from default 100
+       maxPoolSize=200,  # Increase from default 100
    )
    ```
 
@@ -691,11 +689,12 @@ def custom_metadata_hook(original_func, action, session_id, **kwargs):
 
     return result
 
+
 # Use hook
 manager = MongoDBSessionManager(
     session_id="test",
     connection_string="mongodb://localhost:27017/",
-    metadata_hook=custom_metadata_hook
+    metadata_hook=custom_metadata_hook,
 )
 ```
 
@@ -708,20 +707,20 @@ See `examples/example_metadata_hook.py` for comprehensive examples.
 ```python
 from mongodb_session_manager import (
     create_feedback_sns_hook,
-    is_feedback_sns_hook_available
+    is_feedback_sns_hook_available,
 )
 
 if is_feedback_sns_hook_available():
     feedback_hook = create_feedback_sns_hook(
         topic_arn_good="arn:aws:sns:region:account:good",
         topic_arn_bad="arn:aws:sns:region:account:bad",
-        topic_arn_neutral="arn:aws:sns:region:account:neutral"
+        topic_arn_neutral="arn:aws:sns:region:account:neutral",
     )
 
     manager = MongoDBSessionManager(
         session_id="user-session",
         connection_string="mongodb://localhost:27017/",
-        feedback_hook=feedback_hook
+        feedback_hook=feedback_hook,
     )
 
     # Feedback is sent to appropriate SNS topic
@@ -733,19 +732,19 @@ if is_feedback_sns_hook_available():
 ```python
 from mongodb_session_manager import (
     create_metadata_sqs_hook,
-    is_metadata_sqs_hook_available
+    is_metadata_sqs_hook_available,
 )
 
 if is_metadata_sqs_hook_available():
     metadata_hook = create_metadata_sqs_hook(
         queue_url="https://sqs.region.amazonaws.com/account/queue",
-        metadata_fields=["status", "priority"]  # Only sync these
+        metadata_fields=["status", "priority"],  # Only sync these
     )
 
     manager = MongoDBSessionManager(
         session_id="user-session",
         connection_string="mongodb://localhost:27017/",
-        metadata_hook=metadata_hook
+        metadata_hook=metadata_hook,
     )
 
     # Metadata changes are sent to SQS
@@ -764,7 +763,7 @@ session_id = f"tenant-{tenant_id}-session-{user_id}"
 manager = create_mongodb_session_manager(
     session_id=session_id,
     connection_string="mongodb://localhost:27017/",
-    database_name=f"tenant_{tenant_id}"
+    database_name=f"tenant_{tenant_id}",
 )
 
 # Pattern 3: Use separate collections per tenant
@@ -772,7 +771,7 @@ manager = create_mongodb_session_manager(
     session_id=session_id,
     connection_string="mongodb://localhost:27017/",
     database_name="myapp",
-    collection_name=f"sessions_{tenant_id}"
+    collection_name=f"sessions_{tenant_id}",
 )
 ```
 
@@ -829,6 +828,7 @@ manager = create_mongodb_session_manager(
 3. **Application logging**:
    ```python
    import logging
+
    logging.basicConfig(level=logging.DEBUG)
    # MongoDB Session Manager logs to 'mongodb_session_manager' logger
    ```
@@ -838,9 +838,7 @@ manager = create_mongodb_session_manager(
    # Collect metrics from messages
    messages = manager.list_messages(agent_id="assistant")
    total_tokens = sum(
-       msg.get("event_loop_metrics", {})
-          .get("accumulated_usage", {})
-          .get("totalTokens", 0)
+       msg.get("event_loop_metrics", {}).get("accumulated_usage", {}).get("totalTokens", 0)
        for msg in messages
    )
    print(f"Total tokens used: {total_tokens}")

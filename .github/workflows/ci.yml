@@ -6,22 +6,53 @@ on:
   pull_request:
     branches: [main]
 
+# Dónde corren los jobs.
+#
+# La indirección permite cambiar de runner sin abrir un PR:
+#
+#   # pasar a los runners propios (CommonServices), cuando estén registrados
+#   # para este repo y anuncien estas labels:
+#   gh variable set CI_RUNS_ON -b '["self-hosted","linux","arm64","docker"]'
+#
+#   # volver a los hospedados:
+#   gh variable delete CI_RUNS_ON
+#
+# Si la variable no existe, la expresión es falsy y gana el default de aquí.
+#
+# El default son los hospedados a propósito: este repo es público, así que no
+# consumen cuota, y hoy no tiene runners propios registrados
+# (`gh api repos/iguinea/mongodb-session-manager/actions/runners` → 0). Poner
+# `self-hosted` sin runner registrado NO falla: deja los jobs en `queued`
+# durante 24 h hasta que expiran, que es mucho peor que un rojo rápido.
+#
+# Al cambiar a self-hosted, ojo con dos cosas:
+#   - la label de arquitectura es `arm64` o `x64`; `amd64` no existe en GitHub
+#     y no casa con ningún runner
+#   - el job `test` levanta un servicio Docker, así que el runner necesita la
+#     label `docker` y la imagen de Mongo debe tener build arm64
+
+env:
+  MONGODB_CONNECTION_STRING: "mongodb://mongodb:mongodb@localhost:27017/"
+
 jobs:
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.CI_RUNS_ON || '["ubuntu-latest"]') }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .tool-versions
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
 
+      # --all-extras no es opcional: ruff y pytest viven en el grupo `dev`, y
+      # con un `uv sync` pelado el paso siguiente moría con
+      # "error: Failed to spawn: ruff" sin haber lintado una sola línea.
       - name: Install dependencies
-        run: uv sync
+        run: uv sync --all-extras --locked
 
       - name: Lint
         run: uv run ruff check .
@@ -30,7 +61,7 @@ jobs:
         run: uv run ruff format --check .
 
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.CI_RUNS_ON || '["ubuntu-latest"]') }}
     services:
       mongodb:
         image: mongo:7
@@ -39,27 +70,33 @@ jobs:
         env:
           MONGO_INITDB_ROOT_USERNAME: mongodb
           MONGO_INITDB_ROOT_PASSWORD: mongodb
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand({ping:1})'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .tool-versions
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
 
       - name: Install dependencies
-        run: uv sync --all-extras
+        run: uv sync --all-extras --locked
 
+      # Los tests viven en tests/ (unit e integration). El patrón anterior,
+      # `pytest test_*.py`, apuntaba a la raíz y llevaba fallando desde que se
+      # reorganizaron: "file or directory not found", 0 tests ejecutados.
       - name: Run tests
-        env:
-          MONGODB_CONNECTION_STRING: "mongodb://mongodb:mongodb@localhost:27017/"
-        run: uv run pytest test_*.py -v --cov
+        run: uv run pytest tests/ --cov=src/mongodb_session_manager --cov-report=term-missing
 
   build:
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.CI_RUNS_ON || '["ubuntu-latest"]') }}
     needs: [lint, test]
     steps:
       - uses: actions/checkout@v4
@@ -67,7 +104,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .tool-versions
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
@@ -76,10 +113,13 @@ jobs:
         run: uv build
 
       - name: Verify package
-        run: ls -la dist/
+        run: |
+          ls -la dist/
+          test -n "$(find dist -name '*.whl' -print -quit)" || { echo "No se generó ningún wheel"; exit 1; }
+          test -n "$(find dist -name '*.tar.gz' -print -quit)" || { echo "No se generó ningún sdist"; exit 1; }
 
   security:
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.CI_RUNS_ON || '["ubuntu-latest"]') }}
     steps:
       - uses: actions/checkout@v4
 

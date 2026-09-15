@@ -133,13 +133,13 @@ All examples use MongoDB connection strings. Update them as needed:
 
 ```python
 # Default (Docker)
-connection_string="mongodb://mongodb:mongodb@mongodb_session_manager-mongodb:27017/"
+connection_string = "mongodb://mongodb:mongodb@mongodb_session_manager-mongodb:27017/"
 
 # Local MongoDB
-connection_string="mongodb://localhost:27017/"
+connection_string = "mongodb://localhost:27017/"
 
 # MongoDB Atlas
-connection_string="mongodb+srv://user:pass@cluster.mongodb.net/mydb"
+connection_string = "mongodb+srv://user:pass@cluster.mongodb.net/mydb"
 ```
 
 ### Environment Variables
@@ -165,7 +165,7 @@ session_manager = create_mongodb_session_manager(
     session_id="my-session",
     connection_string=os.getenv("MONGODB_URI"),
     database_name=os.getenv("MONGODB_DATABASE"),
-    collection_name=os.getenv("MONGODB_COLLECTION")
+    collection_name=os.getenv("MONGODB_COLLECTION"),
 )
 ```
 

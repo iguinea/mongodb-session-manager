@@ -18,10 +18,12 @@ while only updating specified fields.
 """
 
 import asyncio
-from mongodb_session_manager import create_mongodb_session_manager
-from strands import Agent
 import os
-from datetime import datetime
+from datetime import UTC, datetime
+
+from strands import Agent
+
+from mongodb_session_manager import create_mongodb_session_manager
 
 # Get MongoDB connection from environment or use local
 
@@ -80,7 +82,7 @@ async def _run_demo(session_manager, agent):
     update_fields = {
         "priority": "medium",
         "assigned_to": "agent-bob",
-        "last_updated": datetime.now().isoformat(),
+        "last_updated": datetime.now(UTC).isoformat(),
     }
     session_manager.update_metadata(update_fields)
     _print_metadata_dict("Updated fields:", update_fields)
@@ -114,7 +116,7 @@ async def _run_demo(session_manager, agent):
 
     session_manager.update_metadata(
         {
-            "last_interaction": datetime.now().isoformat(),
+            "last_interaction": datetime.now(UTC).isoformat(),
             "messages_count": 1,
             "agent_responded": True,
         }
@@ -133,7 +135,7 @@ async def _run_demo(session_manager, agent):
 async def main():
     print_section("MongoDB Session Manager - Metadata Update Example")
 
-    session_id = f"metadata-demo-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    session_id = f"metadata-demo-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}"
     session_manager = create_mongodb_session_manager(
         session_id=session_id,
         connection_string=MONGO_CONNECTION,

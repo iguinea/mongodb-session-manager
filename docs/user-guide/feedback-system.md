@@ -70,32 +70,22 @@ from mongodb_session_manager import create_mongodb_session_manager
 session_manager = create_mongodb_session_manager(
     session_id="user-123",
     connection_string="mongodb://localhost:27017/",
-    database_name="chat_db"
+    database_name="chat_db",
 )
 
 # Positive feedback
-session_manager.add_feedback({
-    "rating": "up",
-    "comment": "The response was very helpful!"
-})
+session_manager.add_feedback(
+    {"rating": "up", "comment": "The response was very helpful!"}
+)
 
 # Negative feedback
-session_manager.add_feedback({
-    "rating": "down",
-    "comment": "The answer was incomplete"
-})
+session_manager.add_feedback({"rating": "down", "comment": "The answer was incomplete"})
 
 # Neutral feedback (no rating)
-session_manager.add_feedback({
-    "rating": None,
-    "comment": "Just saving this for later"
-})
+session_manager.add_feedback({"rating": None, "comment": "Just saving this for later"})
 
 # Minimal feedback (rating only)
-session_manager.add_feedback({
-    "rating": "up",
-    "comment": ""
-})
+session_manager.add_feedback({"rating": "up", "comment": ""})
 ```
 
 ### Getting Feedback
@@ -119,9 +109,9 @@ for feedback in feedbacks:
 
 ```python
 {
-    "rating": "up",                       # "up", "down", or None
-    "comment": "Great response!",         # Optional text
-    "created_at": "2024-01-22T15:00:00Z"  # Auto-added timestamp
+    "rating": "up",  # "up", "down", or None
+    "comment": "Great response!",  # Optional text
+    "created_at": "2024-01-22T15:00:00Z",  # Auto-added timestamp
 }
 ```
 
@@ -136,10 +126,12 @@ for feedback in feedbacks:
 ### Example with All Fields
 
 ```python
-session_manager.add_feedback({
-    "rating": "up",
-    "comment": "The code example was perfect and solved my problem immediately!"
-})
+session_manager.add_feedback(
+    {
+        "rating": "up",
+        "comment": "The code example was perfect and solved my problem immediately!",
+    }
+)
 
 # Stored as:
 # {
@@ -182,6 +174,7 @@ import json
 
 logger = logging.getLogger(__name__)
 
+
 def feedback_audit_hook(original_func, action, session_id, **kwargs):
     """Log all feedback operations."""
     feedback = kwargs["feedback"]
@@ -196,6 +189,7 @@ def feedback_audit_hook(original_func, action, session_id, **kwargs):
     logger.info(f"[FEEDBACK AUDIT] Saved successfully")
     return result
 
+
 # Use the hook
 from mongodb_session_manager import MongoDBSessionManager
 
@@ -203,13 +197,10 @@ session_manager = MongoDBSessionManager(
     session_id="user-123",
     connection_string="mongodb://localhost:27017/",
     database_name="my_db",
-    feedback_hook=feedback_audit_hook  # All feedback logged
+    feedback_hook=feedback_audit_hook,  # All feedback logged
 )
 
-session_manager.add_feedback({
-    "rating": "up",
-    "comment": "Great!"
-})
+session_manager.add_feedback({"rating": "up", "comment": "Great!"})
 # Output:
 # [FEEDBACK AUDIT] Session: user-123
 # [FEEDBACK AUDIT] Rating: up
@@ -245,30 +236,33 @@ def feedback_validation_hook(original_func, action, session_id, **kwargs):
 
     # Add validation timestamp
     from datetime import datetime
+
     feedback["_validated_at"] = datetime.now().isoformat()
 
     return original_func(feedback)
+
 
 # Use the hook
 session_manager = MongoDBSessionManager(
     session_id="user-123",
     connection_string="mongodb://localhost:27017/",
     database_name="my_db",
-    feedback_hook=feedback_validation_hook
+    feedback_hook=feedback_validation_hook,
 )
 
 # This will pass
-session_manager.add_feedback({
-    "rating": "down",
-    "comment": "The response was incomplete"
-})
+session_manager.add_feedback(
+    {"rating": "down", "comment": "The response was incomplete"}
+)
 
 # This will fail
 try:
-    session_manager.add_feedback({
-        "rating": "down",
-        "comment": ""  # Empty comment with negative rating
-    })
+    session_manager.add_feedback(
+        {
+            "rating": "down",
+            "comment": "",  # Empty comment with negative rating
+        }
+    )
 except ValueError as e:
     print(f"Validation error: {e}")
 ```
@@ -308,19 +302,19 @@ class FeedbackNotificationHook:
         # send_slack(channel="#support", message=f"Negative feedback: {feedback['comment']}")
         pass
 
+
 # Use the hook
 notification_hook = FeedbackNotificationHook()
 session_manager = MongoDBSessionManager(
     session_id="user-123",
     connection_string="mongodb://localhost:27017/",
     database_name="my_db",
-    feedback_hook=notification_hook
+    feedback_hook=notification_hook,
 )
 
-session_manager.add_feedback({
-    "rating": "down",
-    "comment": "The code had syntax errors"
-})
+session_manager.add_feedback(
+    {"rating": "down", "comment": "The code had syntax errors"}
+)
 # Output:
 # [ALERT] Negative feedback for session user-123
 # [ALERT] Count: 1
@@ -335,6 +329,7 @@ Collect feedback metrics:
 import json
 from datetime import datetime
 
+
 class FeedbackAnalyticsHook:
     """Collect feedback analytics."""
 
@@ -344,7 +339,7 @@ class FeedbackAnalyticsHook:
             "positive": 0,
             "negative": 0,
             "neutral": 0,
-            "avg_comment_length": 0
+            "avg_comment_length": 0,
         }
 
     def __call__(self, original_func, action, session_id, **kwargs):
@@ -365,7 +360,9 @@ class FeedbackAnalyticsHook:
         comment_length = len(feedback.get("comment", ""))
         current_avg = self.metrics["avg_comment_length"]
         total = self.metrics["total"]
-        self.metrics["avg_comment_length"] = ((current_avg * (total - 1)) + comment_length) / total
+        self.metrics["avg_comment_length"] = (
+            (current_avg * (total - 1)) + comment_length
+        ) / total
 
         logger.info(f"[ANALYTICS] Metrics: {json.dumps(self.metrics, indent=2)}")
 
@@ -375,20 +372,21 @@ class FeedbackAnalyticsHook:
         """Get current metrics."""
         return self.metrics.copy()
 
+
 # Use the hook
 analytics_hook = FeedbackAnalyticsHook()
 session_manager = MongoDBSessionManager(
     session_id="user-123",
     connection_string="mongodb://localhost:27017/",
     database_name="my_db",
-    feedback_hook=analytics_hook
+    feedback_hook=analytics_hook,
 )
 
 # Add multiple feedbacks
 feedbacks = [
     {"rating": "up", "comment": "Excellent!"},
     {"rating": "down", "comment": "Could be better"},
-    {"rating": "up", "comment": "Thanks!"}
+    {"rating": "up", "comment": "Thanks!"},
 ]
 
 for fb in feedbacks:
@@ -406,39 +404,39 @@ Chain multiple hooks:
 ```python
 def create_combined_hook(*hooks):
     """Combine multiple hooks."""
+
     def combined_hook(original_func, action, session_id, **kwargs):
         current_func = original_func
 
         for hook in reversed(hooks):
+
             def make_wrapped(h, next_func):
                 def wrapped(feedback):
                     return h(next_func, action, session_id, feedback=feedback)
+
                 return wrapped
+
             current_func = make_wrapped(hook, current_func)
 
         return current_func(kwargs["feedback"])
 
     return combined_hook
 
+
 # Combine validation, audit, and notification
 combined = create_combined_hook(
-    feedback_validation_hook,
-    feedback_audit_hook,
-    FeedbackNotificationHook()
+    feedback_validation_hook, feedback_audit_hook, FeedbackNotificationHook()
 )
 
 session_manager = MongoDBSessionManager(
     session_id="user-123",
     connection_string="mongodb://localhost:27017/",
     database_name="my_db",
-    feedback_hook=combined  # All three hooks active!
+    feedback_hook=combined,  # All three hooks active!
 )
 
 # Feedback goes through validation -> audit -> notification -> storage
-session_manager.add_feedback({
-    "rating": "down",
-    "comment": "The response was unclear"
-})
+session_manager.add_feedback({"rating": "down", "comment": "The response was unclear"})
 ```
 
 ## Use Cases
@@ -447,10 +445,9 @@ session_manager.add_feedback({
 
 ```python
 # Track response quality
-session_manager.add_feedback({
-    "rating": "up",
-    "comment": "The explanation was clear and comprehensive"
-})
+session_manager.add_feedback(
+    {"rating": "up", "comment": "The explanation was clear and comprehensive"}
+)
 
 # Analyze satisfaction
 feedbacks = session_manager.get_feedbacks()
@@ -495,16 +492,10 @@ def alert_hook(original_func, action, session_id, **kwargs):
 from mongodb_session_manager import create_mongodb_session_manager
 
 # Add experiment info to metadata
-session_manager.update_metadata({
-    "experiment": "prompt_v2",
-    "variant": "B"
-})
+session_manager.update_metadata({"experiment": "prompt_v2", "variant": "B"})
 
 # Collect feedback
-session_manager.add_feedback({
-    "rating": "up",
-    "comment": "Much better than before!"
-})
+session_manager.add_feedback({"rating": "up", "comment": "Much better than before!"})
 
 # Analyze by variant
 # Query MongoDB: db.sessions.find({"metadata.variant": "B", "feedbacks.rating": "up"})
@@ -522,9 +513,11 @@ from mongodb_session_manager import get_global_factory
 
 app = FastAPI()
 
+
 class FeedbackRequest(BaseModel):
     rating: Optional[str] = None
     comment: str = ""
+
 
 @app.post("/api/sessions/{session_id}/feedback")
 async def add_feedback(session_id: str, feedback_data: FeedbackRequest):
@@ -535,15 +528,15 @@ async def add_feedback(session_id: str, feedback_data: FeedbackRequest):
         session_manager = factory.create_session_manager(session_id)
 
         # Add feedback
-        session_manager.add_feedback({
-            "rating": feedback_data.rating,
-            "comment": feedback_data.comment
-        })
+        session_manager.add_feedback(
+            {"rating": feedback_data.rating, "comment": feedback_data.comment}
+        )
 
         return {"status": "success", "message": "Feedback recorded"}
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/api/sessions/{session_id}/feedback")
 async def get_feedback(session_id: str):
@@ -557,7 +550,7 @@ async def get_feedback(session_id: str):
         return {
             "session_id": session_id,
             "feedbacks": feedbacks,
-            "total": len(feedbacks)
+            "total": len(feedbacks),
         }
 
     except Exception as e:
@@ -571,6 +564,7 @@ from fastapi import FastAPI, HTTPException
 from mongodb_session_manager import get_global_factory
 
 app = FastAPI()
+
 
 def feedback_validation_hook(original_func, action, session_id, **kwargs):
     """Validate feedback."""
@@ -586,6 +580,7 @@ def feedback_validation_hook(original_func, action, session_id, **kwargs):
 
     return original_func(feedback)
 
+
 @app.post("/api/sessions/{session_id}/feedback")
 async def add_feedback(session_id: str, feedback_data: FeedbackRequest):
     """Add validated feedback."""
@@ -593,13 +588,12 @@ async def add_feedback(session_id: str, feedback_data: FeedbackRequest):
         factory = get_global_factory()
         session_manager = factory.create_session_manager(
             session_id,
-            feedback_hook=feedback_validation_hook  # Add validation
+            feedback_hook=feedback_validation_hook,  # Add validation
         )
 
-        session_manager.add_feedback({
-            "rating": feedback_data.rating,
-            "comment": feedback_data.comment
-        })
+        session_manager.add_feedback(
+            {"rating": feedback_data.rating, "comment": feedback_data.comment}
+        )
 
         return {"status": "success"}
 
@@ -622,21 +616,21 @@ app = FastAPI()
 # Global analytics hook
 analytics_hook = FeedbackAnalyticsHook()
 
+
 @app.post("/api/sessions/{session_id}/feedback")
 async def add_feedback(session_id: str, feedback_data: FeedbackRequest):
     """Add feedback with analytics."""
     factory = get_global_factory()
     session_manager = factory.create_session_manager(
-        session_id,
-        feedback_hook=analytics_hook
+        session_id, feedback_hook=analytics_hook
     )
 
-    session_manager.add_feedback({
-        "rating": feedback_data.rating,
-        "comment": feedback_data.comment
-    })
+    session_manager.add_feedback(
+        {"rating": feedback_data.rating, "comment": feedback_data.comment}
+    )
 
     return {"status": "success"}
+
 
 @app.get("/api/metrics/feedback")
 async def get_feedback_metrics():
@@ -658,11 +652,14 @@ def validate_feedback(original_func, action, session_id, **kwargs):
 
     return original_func(feedback)
 
+
 # Bad - accept any input
-session_manager.add_feedback({
-    "rating": "maybe",  # Invalid!
-    "comment": "Not sure"
-})
+session_manager.add_feedback(
+    {
+        "rating": "maybe",  # Invalid!
+        "comment": "Not sure",
+    }
+)
 ```
 
 ### 2. Require Comments for Negative Feedback
@@ -685,9 +682,11 @@ if len(feedback.get("comment", "")) > MAX_LENGTH:
     raise ValueError(f"Comment too long (max: {MAX_LENGTH})")
 
 # Bad - no length limit
-session_manager.add_feedback({
-    "comment": "x" * 100000  # Too long!
-})
+session_manager.add_feedback(
+    {
+        "comment": "x" * 100000  # Too long!
+    }
+)
 ```
 
 ### 4. Alert on Negative Feedback
@@ -718,11 +717,12 @@ analytics_hook = FeedbackAnalyticsHook()
 session_manager = MongoDBSessionManager(
     feedback_hook=create_combined_hook(
         validation_hook,  # Data quality
-        audit_hook,       # Compliance
-        analytics_hook,   # Metrics
-        notification_hook # Alerts
+        audit_hook,  # Compliance
+        analytics_hook,  # Metrics
+        notification_hook,  # Alerts
     )
 )
+
 
 # Bad - mixed concerns in application code
 def add_feedback_manually(feedback):
@@ -737,16 +737,15 @@ def add_feedback_manually(feedback):
 
 ```python
 # Good - consistent structure
-session_manager.add_feedback({
-    "rating": "up",
-    "comment": "Helpful response"
-})
+session_manager.add_feedback({"rating": "up", "comment": "Helpful response"})
 
 # Bad - inconsistent data
-session_manager.add_feedback({
-    "thumbs": True,  # Non-standard field
-    "text": "good"   # Non-standard field
-})
+session_manager.add_feedback(
+    {
+        "thumbs": True,  # Non-standard field
+        "text": "good",  # Non-standard field
+    }
+)
 ```
 
 ## Next Steps

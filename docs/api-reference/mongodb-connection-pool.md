@@ -35,6 +35,7 @@ The connection pool uses the double-checked locking singleton pattern to ensure 
 _instance: Optional[MongoDBConnectionPool] = None
 _lock: Lock = Lock()  # Thread synchronization
 
+
 def __new__(cls) -> MongoDBConnectionPool:
     """Ensure singleton pattern."""
     if cls._instance is None:
@@ -88,15 +89,15 @@ The pool uses optimized defaults for high-concurrency environments:
 
 ```python
 {
-    "maxPoolSize": 100,           # Maximum connections in the pool
-    "minPoolSize": 10,            # Minimum connections to maintain
-    "maxIdleTimeMS": 30000,       # Close idle connections after 30s
-    "waitQueueTimeoutMS": 5000,   # Timeout waiting for connection (5s)
+    "maxPoolSize": 100,  # Maximum connections in the pool
+    "minPoolSize": 10,  # Minimum connections to maintain
+    "maxIdleTimeMS": 30000,  # Close idle connections after 30s
+    "waitQueueTimeoutMS": 5000,  # Timeout waiting for connection (5s)
     "serverSelectionTimeoutMS": 5000,  # Server selection timeout (5s)
-    "connectTimeoutMS": 10000,    # Initial connection timeout (10s)
-    "socketTimeoutMS": 30000,     # Socket operation timeout (30s)
-    "retryWrites": True,          # Automatic retry for write operations
-    "retryReads": True,           # Automatic retry for read operations
+    "connectTimeoutMS": 10000,  # Initial connection timeout (10s)
+    "socketTimeoutMS": 30000,  # Socket operation timeout (30s)
+    "retryWrites": True,  # Automatic retry for write operations
+    "retryReads": True,  # Automatic retry for read operations
 }
 ```
 
@@ -158,22 +159,19 @@ client = MongoDBConnectionPool.initialize(
 
 # Initialize with custom pool sizes
 client = MongoDBConnectionPool.initialize(
-    connection_string="mongodb://localhost:27017/",
-    maxPoolSize=200,
-    minPoolSize=20
+    connection_string="mongodb://localhost:27017/", maxPoolSize=200, minPoolSize=20
 )
 
 # Initialize with authentication
 client = MongoDBConnectionPool.initialize(
     connection_string="mongodb://user:pass@localhost:27017/",
     authSource="admin",
-    authMechanism="SCRAM-SHA-256"
+    authMechanism="SCRAM-SHA-256",
 )
 
 # Initialize with compression
 client = MongoDBConnectionPool.initialize(
-    connection_string="mongodb://localhost:27017/",
-    compressors=["snappy", "zlib"]
+    connection_string="mongodb://localhost:27017/", compressors=["snappy", "zlib"]
 )
 
 # For production (all options)
@@ -185,7 +183,7 @@ client = MongoDBConnectionPool.initialize(
     retryWrites=True,
     retryReads=True,
     w="majority",
-    journal=True
+    journal=True,
 )
 ```
 
@@ -248,6 +246,7 @@ from fastapi import FastAPI
 
 app = FastAPI()
 
+
 @app.on_event("shutdown")
 async def shutdown_event():
     MongoDBConnectionPool.close()
@@ -273,9 +272,7 @@ Provides visibility into the pool's current state, useful for monitoring and deb
 
 **When Not Initialized**:
 ```python
-{
-    "status": "not_initialized"
-}
+{"status": "not_initialized"}
 ```
 
 **When Connected**:
@@ -284,19 +281,13 @@ Provides visibility into the pool's current state, useful for monitoring and deb
     "status": "connected",
     "connection_string": "mongodb://localhost:27017/",
     "server_version": "7.0.5",
-    "pool_config": {
-        "maxPoolSize": 100,
-        "minPoolSize": 10
-    }
+    "pool_config": {"maxPoolSize": 100, "minPoolSize": 10},
 }
 ```
 
 **When Error**:
 ```python
-{
-    "status": "error",
-    "error": "error message"
-}
+{"status": "error", "error": "error message"}
 ```
 
 #### Example
@@ -313,13 +304,11 @@ elif stats["status"] == "connected":
 elif stats["status"] == "error":
     print(f"Error: {stats['error']}")
 
+
 # Health check endpoint
 def health_check():
     stats = MongoDBConnectionPool.get_pool_stats()
-    return {
-        "mongodb": stats["status"] == "connected",
-        "details": stats
-    }
+    return {"mongodb": stats["status"] == "connected", "details": stats}
 ```
 
 ---
@@ -334,21 +323,22 @@ from mongodb_session_manager import MongoDBConnectionPool
 
 app = FastAPI()
 
+
 @app.on_event("startup")
 async def startup_event():
     """Initialize connection pool on startup"""
     MongoDBConnectionPool.initialize(
-        connection_string="mongodb://localhost:27017/",
-        maxPoolSize=100,
-        minPoolSize=10
+        connection_string="mongodb://localhost:27017/", maxPoolSize=100, minPoolSize=10
     )
     print("Connection pool initialized")
+
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Close connection pool on shutdown"""
     MongoDBConnectionPool.close()
     print("Connection pool closed")
+
 
 # In your endpoints, get the client
 @app.get("/sessions/{session_id}")
@@ -363,15 +353,11 @@ async def get_session(session_id: str):
 ### With Session Manager Factory
 
 ```python
-from mongodb_session_manager import (
-    MongoDBConnectionPool,
-    MongoDBSessionManagerFactory
-)
+from mongodb_session_manager import MongoDBConnectionPool, MongoDBSessionManagerFactory
 
 # Initialize pool first
 MongoDBConnectionPool.initialize(
-    connection_string="mongodb://localhost:27017/",
-    maxPoolSize=100
+    connection_string="mongodb://localhost:27017/", maxPoolSize=100
 )
 
 # Create factory using the pool
@@ -379,7 +365,7 @@ client = MongoDBConnectionPool.get_client()
 factory = MongoDBSessionManagerFactory(
     client=client,  # Reuses the pooled client
     database_name="chat_db",
-    collection_name="sessions"
+    collection_name="sessions",
 )
 
 # Create session managers efficiently
@@ -395,7 +381,7 @@ manager2 = factory.create_session_manager("session-2")
 MongoDBConnectionPool.initialize(
     connection_string="mongodb://localhost:27017/",
     maxPoolSize=10,  # Smaller pool for local dev
-    minPoolSize=1
+    minPoolSize=1,
 )
 ```
 
@@ -409,7 +395,7 @@ MongoDBConnectionPool.initialize(
     retryWrites=True,
     retryReads=True,
     w="majority",  # Ensure durability
-    journal=True
+    journal=True,
 )
 ```
 
@@ -420,7 +406,7 @@ MongoDBConnectionPool.initialize(
     maxPoolSize=1000,  # Very large pool
     minPoolSize=100,
     waitQueueTimeoutMS=10000,  # Longer wait for connections
-    serverSelectionTimeoutMS=10000
+    serverSelectionTimeoutMS=10000,
 )
 ```
 
@@ -431,6 +417,7 @@ from fastapi import FastAPI
 
 app = FastAPI()
 
+
 @app.get("/health/mongodb")
 async def mongodb_health():
     """Health check endpoint for MongoDB connection"""
@@ -440,15 +427,16 @@ async def mongodb_health():
         return {
             "healthy": False,
             "status": stats["status"],
-            "error": stats.get("error")
+            "error": stats.get("error"),
         }, 503
 
     return {
         "healthy": True,
         "status": "connected",
         "server_version": stats["server_version"],
-        "pool_config": stats["pool_config"]
+        "pool_config": stats["pool_config"],
     }
+
 
 @app.get("/health/mongodb/detailed")
 async def mongodb_detailed_health():
@@ -460,7 +448,7 @@ async def mongodb_detailed_health():
         client = MongoDBConnectionPool.get_client()
         if client:
             # Perform a ping
-            client.admin.command('ping')
+            client.admin.command("ping")
             stats["ping_successful"] = True
         else:
             stats["ping_successful"] = False
@@ -494,8 +482,7 @@ The pool can efficiently handle concurrent requests up to `maxPoolSize`:
 ```python
 # Initialize pool for 100 concurrent requests
 MongoDBConnectionPool.initialize(
-    connection_string="mongodb://localhost:27017/",
-    maxPoolSize=100
+    connection_string="mongodb://localhost:27017/", maxPoolSize=100
 )
 
 # All requests can proceed concurrently
@@ -526,6 +513,7 @@ from mongodb_session_manager import MongoDBConnectionPool
 # Initialize once
 MongoDBConnectionPool.initialize("mongodb://localhost:27017/")
 
+
 def worker(worker_id):
     # Each thread safely gets the same client
     client = MongoDBConnectionPool.get_client()
@@ -534,6 +522,7 @@ def worker(worker_id):
 
     # Perform operations
     collection.insert_one({"worker": worker_id})
+
 
 # Safe concurrent access
 with ThreadPoolExecutor(max_workers=50) as executor:
@@ -625,7 +614,7 @@ MongoDBConnectionPool.initialize(
     connection_string="mongodb://localhost:27017/",
     waitQueueTimeoutMS=10000,  # Increased from 5000
     serverSelectionTimeoutMS=10000,  # Increased from 5000
-    connectTimeoutMS=20000  # Increased from 10000
+    connectTimeoutMS=20000,  # Increased from 10000
 )
 ```
 
@@ -637,7 +626,7 @@ If all connections are busy, increase pool size:
 MongoDBConnectionPool.initialize(
     connection_string="mongodb://localhost:27017/",
     maxPoolSize=200,  # Increased from 100
-    minPoolSize=20    # Increased from 10
+    minPoolSize=20,  # Increased from 10
 )
 ```
 
@@ -648,8 +637,8 @@ If experiencing high memory usage, decrease pool size:
 ```python
 MongoDBConnectionPool.initialize(
     connection_string="mongodb://localhost:27017/",
-    maxPoolSize=50,   # Decreased from 100
-    maxIdleTimeMS=15000  # Close idle connections faster
+    maxPoolSize=50,  # Decreased from 100
+    maxIdleTimeMS=15000,  # Close idle connections faster
 )
 ```
 

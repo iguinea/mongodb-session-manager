@@ -1,23 +1,25 @@
 """MongoDB Session Manager for Strands Agents."""
 
-from .mongodb_session_manager import (
-    MongoDBSessionManager,
-    create_mongodb_session_manager,
-    GUARDRAIL_STOP_REASONS,
-)
-from .mongodb_session_repository import MongoDBSessionRepository
 from .mongodb_connection_pool import MongoDBConnectionPool
 from .mongodb_session_factory import (
     MongoDBSessionManagerFactory,
-    initialize_global_factory,
-    get_global_factory,
     close_global_factory,
+    get_global_factory,
+    initialize_global_factory,
 )
+from .mongodb_session_manager import (
+    GUARDRAIL_STOP_REASONS,
+    MongoDBSessionManager,
+    create_mongodb_session_manager,
+)
+from .mongodb_session_repository import MongoDBSessionRepository
 
 # Hook imports - wrapped in try/except to handle optional dependencies
 try:
     from .hooks.feedback_sns_hook import (
         FeedbackSNSHook,
+    )
+    from .hooks.feedback_sns_hook import (
         create_feedback_hook as create_feedback_sns_hook,
     )
 
@@ -30,6 +32,8 @@ except ImportError:
 try:
     from .hooks.metadata_sqs_hook import (
         MetadataSQSHook,
+    )
+    from .hooks.metadata_sqs_hook import (
         create_metadata_hook as create_metadata_sqs_hook,
     )
 
@@ -42,6 +46,8 @@ except ImportError:
 try:
     from .hooks.metadata_websocket_hook import (
         MetadataWebSocketHook,
+    )
+    from .hooks.metadata_websocket_hook import (
         create_metadata_hook as create_metadata_websocket_hook,
     )
 
@@ -52,7 +58,7 @@ except ImportError:
     create_metadata_websocket_hook = None
 
 
-__all__ = [
+__all__ = [  # noqa: RUF022  agrupado por categorías a propósito; ordenarlo alfabéticamente pierde los grupos
     # Core classes
     "MongoDBSessionManager",
     "MongoDBSessionRepository",
@@ -118,6 +124,6 @@ __all__.extend(
     ]
 )
 
-__version__ = "0.9.1"
+__version__ = "0.10.0"
 __author__ = "Iñaki Guinea Beristain"
 __author_email__ = "iguinea@gmail.com"

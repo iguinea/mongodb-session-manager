@@ -104,27 +104,27 @@ Security Considerations:
     - Implement message validation at the consumer level
 """
 
+import asyncio
 import json
 import logging
-import asyncio
 from datetime import UTC, datetime
-from typing import Dict, Any, List, Optional
+from typing import Any
 
 from .utils_async import dispatch_async
+
+logger = logging.getLogger(__name__)
 
 try:
     from .utils_sqs import send_message
 except ImportError:
-    logging.warning("utils_sqs not available. Please ensure boto3 is installed.")
+    logger.warning("utils_sqs not available. Please ensure boto3 is installed.")
     send_message = None
-
-logger = logging.getLogger(__name__)
 
 
 class MetadataSQSHook:
     """Hook to send metadata changes to SQS for SSE back-propagation"""
 
-    def __init__(self, queue_url: str, metadata_fields: List[str]):
+    def __init__(self, queue_url: str, metadata_fields: list[str]):
         """
         Initialize the metadata SQS hook
 
@@ -142,7 +142,7 @@ class MetadataSQSHook:
         logger.info(f"Initialized MetadataSQSHook with queue: {queue_url}")
 
     async def on_metadata_change(
-        self, session_id: str, metadata: Dict[str, Any], operation: str
+        self, session_id: str, metadata: dict[str, Any], operation: str
     ) -> None:
         """
         Hook called when metadata changes (set, update, delete)
@@ -204,13 +204,12 @@ class MetadataSQSHook:
         except Exception as e:
             # Log error but don't raise to avoid breaking the main operation
             # The metadata update should succeed even if the hook fails
-            logger.error(
-                f"Error sending metadata to SQS for session {session_id}: {e}",
-                exc_info=True,
+            logger.exception(
+                f"Error sending metadata to SQS for session {session_id}: {e}"
             )
 
 
-def create_metadata_hook(queue_url: str, metadata_fields: Optional[List[str]] = None):
+def create_metadata_hook(queue_url: str, metadata_fields: list[str] | None = None):
     """
     Create a single metadata hook function for mongodb-session-manager
 

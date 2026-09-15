@@ -42,7 +42,7 @@ An **agent** is an AI assistant that participates in a session. Multiple agents 
 agent = Agent(
     model="claude-3-sonnet",
     agent_id="support-agent",  # Unique within session
-    session_manager=session_manager
+    session_manager=session_manager,
 )
 ```
 
@@ -87,7 +87,7 @@ session_manager = MongoDBSessionManager(
     session_id="conversation-001",
     connection_string="mongodb://localhost:27017/",
     database_name="my_app",
-    collection_name="sessions"
+    collection_name="sessions",
 )
 ```
 
@@ -117,7 +117,7 @@ graph LR
 session_manager = MongoDBSessionManager(
     session_id="new-session-001",
     connection_string="mongodb://localhost:27017/",
-    database_name="mydb"
+    database_name="mydb",
 )
 ```
 
@@ -136,19 +136,13 @@ graph LR
 
 ```python
 # User message
-session_manager.append_message(
-    {"role": "user", "content": "Hello"},
-    agent
-)
+session_manager.append_message({"role": "user", "content": "Hello"}, agent)
 
 # Agent processes and responds
 response = agent("Hello")
 
 # Assistant message with metrics
-session_manager.append_message(
-    {"role": "assistant", "content": response},
-    agent
-)
+session_manager.append_message({"role": "assistant", "content": response}, agent)
 
 # Capture event loop metrics
 session_manager.sync_agent(agent)
@@ -161,13 +155,13 @@ session_manager.sync_agent(agent)
 session_manager = MongoDBSessionManager(
     session_id="new-session-001",  # Same ID!
     connection_string="mongodb://localhost:27017/",
-    database_name="mydb"
+    database_name="mydb",
 )
 
 # Same agent_id restores conversation history
 agent = Agent(
     agent_id="assistant",  # Same ID!
-    session_manager=session_manager
+    session_manager=session_manager,
 )
 
 # Agent has access to previous messages
@@ -186,7 +180,7 @@ MongoDB Session Manager supports two connection patterns:
 session_manager = MongoDBSessionManager(
     session_id="session-001",
     connection_string="mongodb://localhost:27017/",
-    database_name="mydb"
+    database_name="mydb",
 )
 
 # Manager will close the connection when done
@@ -205,7 +199,7 @@ client = MongoClient("mongodb://localhost:27017/")
 session_manager = MongoDBSessionManager(
     session_id="session-001",
     client=client,  # Borrowed connection
-    database_name="mydb"
+    database_name="mydb",
 )
 
 # Manager won't close borrowed connection
@@ -228,10 +222,7 @@ client.close()
 The session manager automatically persists:
 
 ```python
-agent = Agent(
-    model="claude-3-sonnet",
-    session_manager=session_manager
-)
+agent = Agent(model="claude-3-sonnet", session_manager=session_manager)
 
 # This automatically stores the message in MongoDB
 response = agent("Tell me about MongoDB")
@@ -254,10 +245,7 @@ You can also manually manage persistence:
 
 ```python
 # Explicitly append messages
-session_manager.append_message(
-    {"role": "user", "content": "Hello"},
-    agent
-)
+session_manager.append_message({"role": "user", "content": "Hello"}, agent)
 
 # Explicitly sync agent state
 session_manager.sync_agent(agent)
@@ -266,10 +254,7 @@ session_manager.sync_agent(agent)
 session_manager.update_metadata({"status": "active"})
 
 # Add feedback
-session_manager.add_feedback({
-    "rating": "up",
-    "comment": "Helpful!"
-})
+session_manager.add_feedback({"rating": "up", "comment": "Helpful!"})
 ```
 
 ## MongoDB Document Structure
@@ -366,12 +351,9 @@ Metrics are stored in the `event_loop_metrics` field of assistant messages:
 Metadata is custom data you attach to sessions for tracking, filtering, or business logic:
 
 ```python
-session_manager.update_metadata({
-    "user_id": "alice",
-    "department": "support",
-    "priority": "high",
-    "language": "en"
-})
+session_manager.update_metadata(
+    {"user_id": "alice", "department": "support", "priority": "high", "language": "en"}
+)
 ```
 
 ### Partial Updates
@@ -380,15 +362,10 @@ Metadata updates are **partial** - they preserve existing fields:
 
 ```python
 # Initial metadata
-session_manager.update_metadata({
-    "user_id": "alice",
-    "topic": "billing"
-})
+session_manager.update_metadata({"user_id": "alice", "topic": "billing"})
 
 # Update only priority (user_id and topic remain)
-session_manager.update_metadata({
-    "priority": "urgent"
-})
+session_manager.update_metadata({"priority": "urgent"})
 
 # Result: {"user_id": "alice", "topic": "billing", "priority": "urgent"}
 ```
@@ -414,22 +391,13 @@ Track user satisfaction with ratings and comments:
 
 ```python
 # Positive feedback
-session_manager.add_feedback({
-    "rating": "up",
-    "comment": "Very helpful response!"
-})
+session_manager.add_feedback({"rating": "up", "comment": "Very helpful response!"})
 
 # Negative feedback
-session_manager.add_feedback({
-    "rating": "down",
-    "comment": "The answer was incomplete"
-})
+session_manager.add_feedback({"rating": "down", "comment": "The answer was incomplete"})
 
 # Neutral feedback
-session_manager.add_feedback({
-    "rating": None,
-    "comment": "Just testing"
-})
+session_manager.add_feedback({"rating": None, "comment": "Just testing"})
 ```
 
 ### Feedback Storage
@@ -467,11 +435,12 @@ def audit_hook(original_func, action, session_id, **kwargs):
     else:
         return original_func()
 
+
 # Apply hook
 session_manager = MongoDBSessionManager(
     session_id="session-001",
     connection_string="mongodb://localhost:27017/",
-    metadata_hook=audit_hook
+    metadata_hook=audit_hook,
 )
 ```
 
@@ -495,8 +464,7 @@ Creating new MongoDB connections is expensive (10-50ms per connection):
 # Bad: Creates new connection every time
 for request in requests:
     manager = MongoDBSessionManager(
-        session_id=request.session_id,
-        connection_string="mongodb://localhost:27017/"
+        session_id=request.session_id, connection_string="mongodb://localhost:27017/"
     )
     # Handle request...
     manager.close()  # Close connection
@@ -511,8 +479,7 @@ from mongodb_session_manager import MongoDBConnectionPool
 
 # Initialize pool once
 pool = MongoDBConnectionPool.initialize(
-    connection_string="mongodb://localhost:27017/",
-    maxPoolSize=100
+    connection_string="mongodb://localhost:27017/", maxPoolSize=100
 )
 
 # Get client from pool (fast!)
@@ -523,7 +490,7 @@ for request in requests:
     manager = MongoDBSessionManager(
         session_id=request.session_id,
         client=client,  # Reuse connection
-        database_name="mydb"
+        database_name="mydb",
     )
     # Handle request...
 ```
@@ -546,7 +513,7 @@ from mongodb_session_manager import MongoDBSessionManagerFactory
 factory = MongoDBSessionManagerFactory(
     connection_string="mongodb://localhost:27017/",
     database_name="mydb",
-    maxPoolSize=100
+    maxPoolSize=100,
 )
 
 # Create managers efficiently (reuses connection)
@@ -565,20 +532,21 @@ For application-wide use (like FastAPI):
 from mongodb_session_manager import (
     initialize_global_factory,
     get_global_factory,
-    close_global_factory
+    close_global_factory,
 )
 
 # App startup
 factory = initialize_global_factory(
-    connection_string="mongodb://localhost:27017/",
-    database_name="mydb"
+    connection_string="mongodb://localhost:27017/", database_name="mydb"
 )
+
 
 # Anywhere in your app
 def handle_request(session_id):
     factory = get_global_factory()
     manager = factory.create_session_manager(session_id)
     # Use manager...
+
 
 # App shutdown
 close_global_factory()

@@ -129,25 +129,25 @@ Comparison with SQS Hook:
     - **Use both**: WebSocket for UI + SQS for backend processing is a common pattern
 """
 
+import asyncio
 import json
 import logging
-import asyncio
 from datetime import UTC, datetime
-from typing import Dict, Any, List, Optional
+from typing import Any
 
 from .utils_async import dispatch_async
+
+logger = logging.getLogger(__name__)
 
 try:
     import boto3
     from botocore.exceptions import ClientError
 except ImportError:
-    logging.warning(
+    logger.warning(
         "boto3 not available. WebSocket hook requires boto3 to be installed."
     )
     boto3 = None
     ClientError = None
-
-logger = logging.getLogger(__name__)
 
 
 class MetadataWebSocketHook:
@@ -156,7 +156,7 @@ class MetadataWebSocketHook:
     def __init__(
         self,
         api_gateway_endpoint: str,
-        metadata_fields: Optional[List[str]] = None,
+        metadata_fields: list[str] | None = None,
         region: str = "us-east-1",
     ):
         """
@@ -194,7 +194,7 @@ class MetadataWebSocketHook:
         )
 
     async def on_metadata_change(
-        self, session_id: str, metadata: Dict[str, Any], operation: str
+        self, session_id: str, metadata: dict[str, Any], operation: str
     ) -> None:
         """
         Hook called when metadata changes (set, update, delete)
@@ -272,10 +272,9 @@ class MetadataWebSocketHook:
                 )
             else:
                 # Other ClientError - log as error
-                logger.error(
+                logger.exception(
                     f"AWS ClientError sending metadata to WebSocket for session {session_id}: "
-                    f"{error_code} - {e}",
-                    exc_info=True,
+                    f"{error_code} - {e}"
                 )
 
         except ImportError as e:
@@ -284,13 +283,12 @@ class MetadataWebSocketHook:
         except Exception as e:
             # Log error but don't raise to avoid breaking the main operation
             # The metadata update should succeed even if the hook fails
-            logger.error(
-                f"Error sending metadata to WebSocket for session {session_id}: {e}",
-                exc_info=True,
+            logger.exception(
+                f"Error sending metadata to WebSocket for session {session_id}: {e}"
             )
 
 
-def _build_delete_metadata(original_func, keys: List) -> Dict[str, Any]:
+def _build_delete_metadata(original_func, keys: list) -> dict[str, Any]:
     """Build metadata dict for delete operations, preserving connection_id."""
     try:
         current_metadata = original_func.__self__.get_metadata()
@@ -304,7 +302,7 @@ def _build_delete_metadata(original_func, keys: List) -> Dict[str, Any]:
 
 def create_metadata_hook(
     api_gateway_endpoint: str,
-    metadata_fields: Optional[List[str]] = None,
+    metadata_fields: list[str] | None = None,
     region: str = "eu-west-1",
 ):
     """

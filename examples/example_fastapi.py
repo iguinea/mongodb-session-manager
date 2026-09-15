@@ -16,23 +16,22 @@ for high-performance stateless API endpoints.
 """
 
 import logging
+import sys
 from contextlib import asynccontextmanager
-from typing import Dict, Any
+from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from pydantic import BaseModel
 from strands import Agent
 
-import sys
-from pathlib import Path
-
 # Add parent directory to path to access src module
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from mongodb_session_manager import (
-    initialize_global_factory,
-    close_global_factory,
     MongoDBConnectionPool,
+    close_global_factory,
+    initialize_global_factory,
 )
 
 # Configure logging
@@ -43,13 +42,13 @@ logger = logging.getLogger(__name__)
 # Request/Response models
 class ChatRequest(BaseModel):
     prompt: str
-    agent_config: Dict[str, Any] = {}
+    agent_config: dict[str, Any] = {}
 
 
 class ChatResponse(BaseModel):
     response: str
     session_id: str
-    metrics: Dict[str, Any] = {}
+    metrics: dict[str, Any] = {}
 
 
 # Lifespan context manager for FastAPI
@@ -146,7 +145,7 @@ async def chat(
 
     except Exception as e:
         logger.error(f"Error processing chat request: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.get("/health")
@@ -176,7 +175,7 @@ async def get_metrics(request: Request):
         return {"connection_pool": pool_stats}
     except Exception as e:
         logger.error(f"Error getting metrics: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 # Example of how to run the application

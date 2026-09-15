@@ -67,26 +67,25 @@ from mongodb_session_manager import create_mongodb_session_manager
 session_manager = create_mongodb_session_manager(
     session_id="metadata-basics",
     connection_string="mongodb://localhost:27017/",
-    database_name="examples"
+    database_name="examples",
 )
 
 # === UPDATE METADATA ===
 # Set initial metadata
-session_manager.update_metadata({
-    "user_id": "user-123",
-    "user_name": "Alice",
-    "language": "en",
-    "theme": "dark"
-})
+session_manager.update_metadata(
+    {"user_id": "user-123", "user_name": "Alice", "language": "en", "theme": "dark"}
+)
 
 print("Initial metadata set")
 
 # Partial update - only changes specified fields
-session_manager.update_metadata({
-    "language": "es",  # Changed
-    "tier": "premium"  # Added
-    # user_id, user_name, theme remain unchanged
-})
+session_manager.update_metadata(
+    {
+        "language": "es",  # Changed
+        "tier": "premium",  # Added
+        # user_id, user_name, theme remain unchanged
+    }
+)
 
 print("Metadata partially updated")
 
@@ -158,11 +157,12 @@ import asyncio
 from mongodb_session_manager import create_mongodb_session_manager
 from strands import Agent
 
+
 async def main():
     session_manager = create_mongodb_session_manager(
         session_id="onboarding-session",
         connection_string="mongodb://localhost:27017/",
-        database_name="examples"
+        database_name="examples",
     )
 
     agent = Agent(
@@ -178,7 +178,7 @@ Your goal is to collect user information progressively:
 4. Finally, goals
 
 Be friendly and conversational. Don't ask for everything at once.
-After collecting each piece of info, acknowledge it and move to the next."""
+After collecting each piece of info, acknowledge it and move to the next.""",
     )
 
     # Simulate onboarding flow
@@ -187,11 +187,11 @@ After collecting each piece of info, acknowledge it and move to the next."""
         "My name is Alice Johnson.",
         "My email is alice@example.com",
         "I prefer dark mode and email notifications.",
-        "I want to learn about AI and automation."
+        "I want to learn about AI and automation.",
     ]
 
     for user_message in conversations:
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"User: {user_message}")
 
         # Agent responds
@@ -234,9 +234,9 @@ After collecting each piece of info, acknowledge it and move to the next."""
         print(f"[Current profile: {dict(current_metadata)}]")
 
     # Final profile
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("ONBOARDING COMPLETE")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     final_metadata = session_manager.get_metadata().get("metadata", {})
     print("\nUser Profile:")
@@ -244,6 +244,7 @@ After collecting each piece of info, acknowledge it and move to the next."""
         print(f"  {key}: {value}")
 
     session_manager.close()
+
 
 if __name__ == "__main__":
     asyncio.run(main())
@@ -300,12 +301,13 @@ from datetime import datetime
 from mongodb_session_manager import create_mongodb_session_manager
 from strands import Agent
 
+
 async def main():
     # Create or resume session
     session_manager = create_mongodb_session_manager(
         session_id="user-alice-context",
         connection_string="mongodb://localhost:27017/",
-        database_name="examples"
+        database_name="examples",
     )
 
     # Get existing metadata or initialize
@@ -314,23 +316,21 @@ async def main():
     if not existing_metadata:
         # First time user
         print("New user detected - initializing profile")
-        session_manager.update_metadata({
-            "first_seen": datetime.now().isoformat(),
-            "visit_count": 1,
-            "last_topic": None,
-            "preferences": {
-                "language": "en",
-                "expertise_level": "beginner"
+        session_manager.update_metadata(
+            {
+                "first_seen": datetime.now().isoformat(),
+                "visit_count": 1,
+                "last_topic": None,
+                "preferences": {"language": "en", "expertise_level": "beginner"},
             }
-        })
+        )
     else:
         # Returning user
         print(f"Welcome back! Last visit: {existing_metadata.get('last_seen')}")
         visit_count = existing_metadata.get("visit_count", 0) + 1
-        session_manager.update_metadata({
-            "visit_count": visit_count,
-            "last_seen": datetime.now().isoformat()
-        })
+        session_manager.update_metadata(
+            {"visit_count": visit_count, "last_seen": datetime.now().isoformat()}
+        )
 
     # Create agent that uses context
     metadata = session_manager.get_metadata().get("metadata", {})
@@ -344,14 +344,14 @@ async def main():
 
 User context:
 - Expertise level: {expertise}
-- Visits: {metadata.get('visit_count', 1)}
-- Last topic: {metadata.get('last_topic', 'None')}
+- Visits: {metadata.get("visit_count", 1)}
+- Last topic: {metadata.get("last_topic", "None")}
 
 Adjust your explanations based on expertise level:
 - beginner: Detailed, simple explanations
 - intermediate: Balanced technical depth
 - expert: Concise, technical explanations
-"""
+""",
     )
 
     # Conversation
@@ -360,20 +360,25 @@ Adjust your explanations based on expertise level:
     print(f"Agent: {response}")
 
     # Update context
-    session_manager.update_metadata({
-        "last_topic": "machine_learning",
-        "topics_discussed": metadata.get("topics_discussed", []) + ["machine_learning"]
-    })
+    session_manager.update_metadata(
+        {
+            "last_topic": "machine_learning",
+            "topics_discussed": metadata.get("topics_discussed", [])
+            + ["machine_learning"],
+        }
+    )
 
     # User progresses
     print("\n[User completes beginner course]")
-    session_manager.update_metadata({
-        "preferences": {
-            "language": "en",
-            "expertise_level": "intermediate"  # Upgraded!
-        },
-        "courses_completed": ["ml_basics"]
-    })
+    session_manager.update_metadata(
+        {
+            "preferences": {
+                "language": "en",
+                "expertise_level": "intermediate",  # Upgraded!
+            },
+            "courses_completed": ["ml_basics"],
+        }
+    )
 
     # Next session - agent adapts
     print("\n--- Next Session ---\n")
@@ -390,11 +395,11 @@ Adjust your explanations based on expertise level:
 
 User context:
 - Expertise level: {expertise}
-- Visits: {metadata.get('visit_count', 1)}
-- Topics discussed: {metadata.get('topics_discussed', [])}
-- Courses completed: {metadata.get('courses_completed', [])}
+- Visits: {metadata.get("visit_count", 1)}
+- Topics discussed: {metadata.get("topics_discussed", [])}
+- Courses completed: {metadata.get("courses_completed", [])}
 
-Adjust explanations based on expertise level."""
+Adjust explanations based on expertise level.""",
     )
 
     response = await agent.invoke_async("Now explain neural networks")
@@ -402,6 +407,7 @@ Adjust explanations based on expertise level."""
     print(f"Agent: {response}")
 
     session_manager.close()
+
 
 if __name__ == "__main__":
     asyncio.run(main())
@@ -428,6 +434,7 @@ from mongodb_session_manager import create_mongodb_session_manager
 from datetime import datetime
 from enum import Enum
 
+
 class SessionStatus(Enum):
     INITIATED = "initiated"
     IN_PROGRESS = "in_progress"
@@ -436,56 +443,59 @@ class SessionStatus(Enum):
     COMPLETED = "completed"
     ERROR = "error"
 
+
 def update_status(session_manager, status: SessionStatus, details: str = None):
     """Update session status with timestamp."""
-    update = {
-        "status": status.value,
-        "status_updated_at": datetime.now().isoformat()
-    }
+    update = {"status": status.value, "status_updated_at": datetime.now().isoformat()}
     if details:
         update["status_details"] = details
 
     session_manager.update_metadata(update)
     print(f"[Status: {status.value}] {details or ''}")
 
+
 # Create session
 session_manager = create_mongodb_session_manager(
     session_id="workflow-session",
     connection_string="mongodb://localhost:27017/",
-    database_name="examples"
+    database_name="examples",
 )
 
 # Workflow simulation
 update_status(session_manager, SessionStatus.INITIATED, "User started order process")
 
 # Collecting information
-update_status(session_manager, SessionStatus.WAITING_INPUT, "Waiting for shipping address")
+update_status(
+    session_manager, SessionStatus.WAITING_INPUT, "Waiting for shipping address"
+)
 
 # User provides input
-session_manager.update_metadata({
-    "shipping_address": "123 Main St, City, 12345",
-    "shipping_method": "express"
-})
+session_manager.update_metadata(
+    {"shipping_address": "123 Main St, City, 12345", "shipping_method": "express"}
+)
 
 update_status(session_manager, SessionStatus.PROCESSING, "Processing order")
 
 # Processing steps
 steps = ["Validate address", "Calculate shipping", "Process payment", "Create order"]
 for i, step in enumerate(steps, 1):
-    session_manager.update_metadata({
-        f"step_{i}_completed": True,
-        f"step_{i}_timestamp": datetime.now().isoformat()
-    })
+    session_manager.update_metadata(
+        {f"step_{i}_completed": True, f"step_{i}_timestamp": datetime.now().isoformat()}
+    )
     print(f"  ✓ {step}")
 
-update_status(session_manager, SessionStatus.COMPLETED, "Order #12345 created successfully")
+update_status(
+    session_manager, SessionStatus.COMPLETED, "Order #12345 created successfully"
+)
 
 # Check final metadata
 metadata = session_manager.get_metadata().get("metadata", {})
 print("\nFinal Session Metadata:")
 print(f"  Status: {metadata.get('status')}")
 print(f"  Shipping: {metadata.get('shipping_method')}")
-print(f"  Steps completed: {sum(1 for k in metadata.keys() if 'step_' in k and 'completed' in k)}")
+print(
+    f"  Steps completed: {sum(1 for k in metadata.keys() if 'step_' in k and 'completed' in k)}"
+)
 
 session_manager.close()
 ```
@@ -508,12 +518,13 @@ import asyncio
 from mongodb_session_manager import create_mongodb_session_manager
 from strands import Agent
 
+
 async def main():
     # Create session manager
     session_manager = create_mongodb_session_manager(
         session_id="agent-metadata-demo",
         connection_string="mongodb://localhost:27017/",
-        database_name="examples"
+        database_name="examples",
     )
 
     # Get the metadata tool
@@ -539,7 +550,7 @@ Use metadata to track:
 - Session state
 - Important information
 
-Always confirm when you update metadata."""
+Always confirm when you update metadata.""",
     )
 
     # Agent sets up metadata
@@ -553,9 +564,7 @@ Always confirm when you update metadata."""
 
     # Agent retrieves metadata
     print("=== Agent Checking Metadata ===\n")
-    response = await agent.invoke_async(
-        "What metadata do we have stored?"
-    )
+    response = await agent.invoke_async("What metadata do we have stored?")
     print(f"Agent: {response}\n")
 
     # Agent updates metadata
@@ -587,6 +596,7 @@ Always confirm when you update metadata."""
         print(f"  {key}: {value}")
 
     session_manager.close()
+
 
 if __name__ == "__main__":
     asyncio.run(main())
@@ -650,6 +660,7 @@ from mongodb_session_manager import MongoDBSessionManager
 
 logger = logging.getLogger(__name__)
 
+
 def metadata_validation_hook(original_func, action: str, session_id: str, **kwargs):
     """
     Hook that validates metadata before operations.
@@ -671,8 +682,7 @@ def metadata_validation_hook(original_func, action: str, session_id: str, **kwar
         for field in REQUIRED_FIELDS:
             if field not in metadata:
                 metadata[field] = (
-                    "system" if field == "updated_by"
-                    else datetime.now().isoformat()
+                    "system" if field == "updated_by" else datetime.now().isoformat()
                 )
 
         # Validate value lengths
@@ -690,10 +700,7 @@ def metadata_validation_hook(original_func, action: str, session_id: str, **kwar
 
     elif action == "delete" and "keys" in kwargs:
         # Prevent deletion of protected fields
-        protected_deletions = [
-            key for key in kwargs["keys"]
-            if key in PROTECTED_FIELDS
-        ]
+        protected_deletions = [key for key in kwargs["keys"] if key in PROTECTED_FIELDS]
         if protected_deletions:
             raise ValueError(f"Cannot delete protected fields: {protected_deletions}")
 
@@ -708,14 +715,11 @@ session_manager = MongoDBSessionManager(
     session_id="validated-session",
     connection_string="mongodb://localhost:27017/",
     database_name="examples",
-    metadata_hook=metadata_validation_hook
+    metadata_hook=metadata_validation_hook,
 )
 
 # This will auto-add required fields
-session_manager.update_metadata({
-    "user_name": "Alice",
-    "department": "Engineering"
-})
+session_manager.update_metadata({"user_name": "Alice", "department": "Engineering"})
 
 # Check what was stored
 metadata = session_manager.get_metadata().get("metadata", {})
@@ -732,9 +736,7 @@ for key, value in metadata.items():
 
 # This will fail - protected field
 try:
-    session_manager.update_metadata({
-        "_id": "cannot-change-this"
-    })
+    session_manager.update_metadata({"_id": "cannot-change-this"})
 except ValueError as e:
     print(f"\n✓ Validation caught error: {e}")
 
@@ -761,6 +763,7 @@ from typing import Callable, Dict, Any
 from mongodb_session_manager import MongoDBSessionManager
 
 logger = logging.getLogger(__name__)
+
 
 class MetadataCacheHook:
     """Hook that implements caching for metadata operations."""
@@ -806,7 +809,7 @@ session_manager = MongoDBSessionManager(
     session_id="cached-session",
     connection_string="mongodb://localhost:27017/",
     database_name="examples",
-    metadata_hook=cache_hook
+    metadata_hook=cache_hook,
 )
 
 # First call - cache miss
@@ -858,13 +861,16 @@ from mongodb_session_manager import MongoDBSessionManager
 
 logger = logging.getLogger(__name__)
 
+
 class ExternalSyncHook:
     """Hook to sync metadata to external systems."""
 
     def __init__(self, webhook_url: str):
         self.webhook_url = webhook_url
 
-    async def sync_to_external(self, session_id: str, metadata: Dict[str, Any], operation: str):
+    async def sync_to_external(
+        self, session_id: str, metadata: Dict[str, Any], operation: str
+    ):
         """Sync metadata to external system (simulated)."""
         # In production, this would make HTTP request to webhook
         logger.info(f"[SYNC] Sending {operation} to {self.webhook_url}")
@@ -888,10 +894,12 @@ class ExternalSyncHook:
             except RuntimeError:
                 # No running loop - create thread
                 import threading
+
                 def run():
                     asyncio.run(
                         self.sync_to_external(session_id, kwargs["metadata"], action)
                     )
+
                 threading.Thread(target=run, daemon=True).start()
 
         elif action == "delete":
@@ -906,10 +914,12 @@ class ExternalSyncHook:
                 )
             except RuntimeError:
                 import threading
+
                 def run():
                     asyncio.run(
                         self.sync_to_external(session_id, deleted_metadata, action)
                     )
+
                 threading.Thread(target=run, daemon=True).start()
 
         else:  # get
@@ -925,14 +935,11 @@ session_manager = MongoDBSessionManager(
     session_id="synced-session",
     connection_string="mongodb://localhost:27017/",
     database_name="examples",
-    metadata_hook=sync_hook
+    metadata_hook=sync_hook,
 )
 
 # All updates are synced
-session_manager.update_metadata({
-    "status": "processing",
-    "priority": "high"
-})
+session_manager.update_metadata({"status": "processing", "priority": "high"})
 
 # Deletions are synced too
 session_manager.delete_metadata(["priority"])
@@ -962,6 +969,7 @@ from mongodb_session_manager import MongoDBSessionManager
 
 logger = logging.getLogger(__name__)
 
+
 # Hook 1: Audit
 def audit_hook(original_func, action: str, session_id: str, **kwargs):
     """Audit all metadata operations."""
@@ -983,6 +991,7 @@ def audit_hook(original_func, action: str, session_id: str, **kwargs):
 
     return result
 
+
 # Hook 2: Validation
 def validation_hook(original_func, action: str, session_id: str, **kwargs):
     """Validate metadata before storage."""
@@ -1003,19 +1012,23 @@ def validation_hook(original_func, action: str, session_id: str, **kwargs):
     else:
         return original_func()
 
+
 # Combine hooks
 def create_combined_hook(*hooks):
     """Chain multiple hooks together."""
+
     def combined_hook(original_func, action: str, session_id: str, **kwargs):
         # Build chain
         current_func = original_func
         for hook in reversed(hooks):
+
             def make_wrapped(hook, next_func):
                 def wrapped(*args, **kw):
                     if args:
                         return next_func(*args, **kw)
                     else:
                         return hook(next_func, action, session_id, **kw)
+
                 return wrapped
 
             current_func = make_wrapped(hook, current_func)
@@ -1030,24 +1043,19 @@ def create_combined_hook(*hooks):
 
     return combined_hook
 
+
 # Usage
-combined_hook = create_combined_hook(
-    audit_hook,
-    validation_hook
-)
+combined_hook = create_combined_hook(audit_hook, validation_hook)
 
 session_manager = MongoDBSessionManager(
     session_id="combined-hooks-session",
     connection_string="mongodb://localhost:27017/",
     database_name="examples",
-    metadata_hook=combined_hook
+    metadata_hook=combined_hook,
 )
 
 # Operations go through both hooks
-session_manager.update_metadata({
-    "user_action": "login",
-    "ip_address": "192.168.1.1"
-})
+session_manager.update_metadata({"user_action": "login", "ip_address": "192.168.1.1"})
 
 # Check result - validation added fields, audit logged everything
 metadata = session_manager.get_metadata().get("metadata", {})
@@ -1106,6 +1114,7 @@ session_manager.update_metadata({"key": "value"})
 # Wrong signature:
 def my_hook(func, session_id):  # Missing action and kwargs
     pass
+
 
 # Correct signature:
 def my_hook(original_func, action: str, session_id: str, **kwargs):

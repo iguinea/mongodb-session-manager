@@ -92,7 +92,7 @@ manager = create_mongodb_session_manager(
     session_id="test",
     connection_string="mongodb://...",
     database_name="my_db",
-    application_name="my-bot"  # Optional: categorize sessions
+    application_name="my-bot",  # Optional: categorize sessions
 )
 
 # Read application_name (immutable, read-only)
@@ -107,7 +107,7 @@ from mongodb_session_manager import initialize_global_factory, get_global_factor
 factory = initialize_global_factory(
     connection_string="mongodb://...",
     application_name="my-fastapi-app",  # Default for all sessions
-    maxPoolSize=100
+    maxPoolSize=100,
 )
 
 # Per request - uses factory default application_name
@@ -116,7 +116,7 @@ manager = get_global_factory().create_session_manager(session_id)
 # Or override per session
 manager = get_global_factory().create_session_manager(
     session_id,
-    application_name="special-app"  # Override factory default
+    application_name="special-app",  # Override factory default
 )
 ```
 
@@ -133,10 +133,11 @@ def my_hook(original_func, action, session_id, **kwargs):
     # Intercept metadata/feedback operations
     return original_func(kwargs.get("metadata") or kwargs.get("feedback"))
 
+
 session_manager = MongoDBSessionManager(
     session_id="...",
-    metadata_hook=my_hook,    # For metadata operations
-    feedback_hook=my_hook     # For feedback operations
+    metadata_hook=my_hook,  # For metadata operations
+    feedback_hook=my_hook,  # For feedback operations
 )
 ```
 
@@ -148,12 +149,12 @@ hook = create_feedback_sns_hook(
     topic_arn_good="arn:aws:sns:...:feedback-good",
     topic_arn_bad="arn:aws:sns:...:feedback-bad",
     topic_arn_neutral="arn:aws:sns:...:feedback-neutral",
-    subject_prefix_bad="[URGENT] "  # Template support
+    subject_prefix_bad="[URGENT] ",  # Template support
 )
 
 session_manager = MongoDBSessionManager(
     session_id="...",
-    feedback_hook=hook  # Pass hook to session manager
+    feedback_hook=hook,  # Pass hook to session manager
 )
 ```
 
@@ -161,14 +162,17 @@ session_manager = MongoDBSessionManager(
 ### Prompt Metadata
 ```python
 # After sync_agent(), stamp prompt lineage on the agent
-manager.set_prompt_metadata("agent-id", {
-    "prompt_id": "prompt-123",
-    "prompt_name": "Customer Support V2",
-    "prompt_version": "1.2.0",
-    "deployment_id": "deploy-abc",
-    "deployment_name": "production",
-    "temperature": 0.7,  # optional
-})
+manager.set_prompt_metadata(
+    "agent-id",
+    {
+        "prompt_id": "prompt-123",
+        "prompt_name": "Customer Support V2",
+        "prompt_version": "1.2.0",
+        "deployment_id": "deploy-abc",
+        "deployment_name": "production",
+        "temperature": 0.7,  # optional
+    },
+)
 # Retrieve: manager.get_agent_config("agent-id")["prompt_metadata"]
 ```
 
@@ -180,7 +184,7 @@ When releasing, update version in **three places**:
 2. `pyproject.toml` (`version`)
 3. `CHANGELOG.md` (add release entry)
 
-Current version: **0.9.1**
+Current version: **0.10.0**
 
 ## Workflow Rules
 

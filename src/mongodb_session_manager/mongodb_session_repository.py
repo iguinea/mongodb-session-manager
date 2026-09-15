@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import logging
 import secrets
+import threading
+import weakref
 from datetime import UTC, datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pymongo import MongoClient
 from pymongo.collection import Collection
@@ -32,6 +34,26 @@ _MESSAGE_EXCLUDED_FIELDS = frozenset(
 
 # Fields stored on agent documents for auditing that SessionAgent.__init__() does not accept.
 _AGENT_CONFIG_FIELDS = frozenset(["model", "system_prompt", "prompt_metadata"])
+
+# Collections whose indexes have already been ensured, keyed by MongoClient.
+#
+# pymongo does not cache create_index: every call is a round-trip to the server
+# even when the index already exists. Since a session manager is typically
+# created per request, that meant 4+ round-trips per instantiation.
+#
+# Keyed by client (not by database/collection name) so two clients pointing at
+# different clusters that happen to share names each get their indexes. The
+# WeakKeyDictionary drops the entry when the client is closed and collected.
+_INDEX_REGISTRY: weakref.WeakKeyDictionary[Any, set[tuple]] = (
+    weakref.WeakKeyDictionary()
+)
+_INDEX_REGISTRY_LOCK = threading.Lock()
+
+
+def _reset_index_registry() -> None:
+    """Clear the index registry. Intended for tests."""
+    with _INDEX_REGISTRY_LOCK:
+        _INDEX_REGISTRY.clear()
 
 
 class MongoDBSessionRepository(SessionRepository):
@@ -158,12 +180,12 @@ class MongoDBSessionRepository(SessionRepository):
 
     def __init__(
         self,
-        connection_string: Optional[str] = None,
+        connection_string: str | None = None,
         database_name: str = "database_name",
         collection_name: str = "collection_name",
-        client: Optional[MongoClient] = None,
-        metadata_fields: Optional[List[str]] = None,
-        application_name: Optional[str] = None,
+        client: MongoClient | None = None,
+        metadata_fields: list[str] | None = None,
+        application_name: str | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialize MongoDB Session Repository.
@@ -202,7 +224,23 @@ class MongoDBSessionRepository(SessionRepository):
         )
 
     def _ensure_indexes(self) -> None:
-        """Ensure necessary indexes exist on the collection."""
+        """Ensure necessary indexes exist on the collection.
+
+        Idempotent per client: the indexes are only sent to the server the first
+        time this collection is seen through a given MongoClient. See
+        _INDEX_REGISTRY for why.
+        """
+        registry_key = (
+            self.database.name,
+            self.collection.name,
+            tuple(self.metadata_fields or ()),
+        )
+        with _INDEX_REGISTRY_LOCK:
+            ensured = _INDEX_REGISTRY.get(self.client)
+            if ensured is not None and registry_key in ensured:
+                logger.debug("MongoDB indexes already ensured for this client")
+                return
+
         try:
             # Index on session timestamps
             self.collection.create_index("created_at")
@@ -219,7 +257,17 @@ class MongoDBSessionRepository(SessionRepository):
 
             logger.info("MongoDB indexes created successfully")
         except PyMongoError as e:
+            # Not recorded in the registry: a later manager should retry.
             logger.warning(f"Failed to create indexes: {e}")
+            return
+
+        try:
+            with _INDEX_REGISTRY_LOCK:
+                _INDEX_REGISTRY.setdefault(self.client, set()).add(registry_key)
+        except TypeError:
+            # Client does not support weak references (exotic test doubles).
+            # Losing the cache only costs round-trips, so carry on.
+            logger.debug("MongoDB client does not support weak references")
 
     @staticmethod
     def _parse_iso_datetime(dt_str: str) -> datetime:
@@ -227,12 +275,12 @@ class MongoDBSessionRepository(SessionRepository):
         return datetime.fromisoformat(dt_str.replace("Z", TIMEZONE_UTC_SUFFIX))
 
     @staticmethod
-    def _agent_exists(doc: Optional[Dict], agent_id: str) -> bool:
+    def _agent_exists(doc: dict | None, agent_id: str) -> bool:
         """Check if an agent exists in a session document."""
         return bool(doc and "agents" in doc and agent_id in doc["agents"])
 
     @staticmethod
-    def _filter_message_data(msg_data: Dict) -> Dict:
+    def _filter_message_data(msg_data: dict) -> dict:
         """Filter out fields that SessionMessage.__init__() does not accept."""
         return {k: v for k, v in msg_data.items() if k not in _MESSAGE_EXCLUDED_FIELDS}
 
@@ -274,7 +322,7 @@ class MongoDBSessionRepository(SessionRepository):
 
         return session
 
-    def read_session(self, session_id: str, **kwargs: Any) -> Optional[Session]:
+    def read_session(self, session_id: str, **kwargs: Any) -> Session | None:
         """Read a Session from MongoDB."""
         try:
             doc = self.collection.find_one({"_id": session_id})
@@ -337,7 +385,7 @@ class MongoDBSessionRepository(SessionRepository):
 
     def read_agent(
         self, session_id: str, agent_id: str, **kwargs: Any
-    ) -> Optional[SessionAgent]:
+    ) -> SessionAgent | None:
         """Read an Agent from a Session."""
         try:
             doc = self.collection.find_one(
@@ -372,24 +420,17 @@ class MongoDBSessionRepository(SessionRepository):
         agent_data["updated_at"] = self._parse_iso_datetime(session_agent.updated_at)
 
         try:
-            # Preserve original created_at timestamp
-            existing = self.collection.find_one(
-                {"_id": session_id}, {f"agents.{session_agent.agent_id}.created_at": 1}
-            )
-
-            created_at = now
-            if self._agent_exists(existing, session_agent.agent_id):
-                created_at = existing["agents"][session_agent.agent_id].get(
-                    "created_at", created_at
-                )
-
+            # created_at is deliberately absent from the $set: it was written by
+            # create_agent and an update that does not name it leaves it alone.
+            # Reading it back first would be a read-after-write, which on a
+            # secondaryPreferred cluster can return a stale document and end up
+            # overwriting the original timestamp with now.
             result = self.collection.update_one(
                 {"_id": session_id},
                 {
                     "$set": {
                         f"agents.{session_agent.agent_id}.agent_data": agent_data,
                         f"agents.{session_agent.agent_id}.updated_at": now,
-                        f"agents.{session_agent.agent_id}.created_at": created_at,
                         "updated_at": now,
                     }
                 },
@@ -444,7 +485,7 @@ class MongoDBSessionRepository(SessionRepository):
 
     def read_message(
         self, session_id: str, agent_id: str, message_id: int, **kwargs: Any
-    ) -> Optional[SessionMessage]:
+    ) -> SessionMessage | None:
         """Read a Message from an Agent."""
         try:
             doc = self.collection.find_one(
@@ -532,7 +573,7 @@ class MongoDBSessionRepository(SessionRepository):
         self,
         session_id: str,
         agent_id: str,
-        limit: Optional[int] = None,
+        limit: int | None = None,
         offset: int = 0,
         **kwargs: Any,
     ) -> list[SessionMessage]:
@@ -583,7 +624,7 @@ class MongoDBSessionRepository(SessionRepository):
             logger.info("Skipping close - using shared MongoDB client")
 
     # CUSTOM METHODS
-    def update_metadata(self, session_id: str, metadata: Dict[str, Any]) -> None:
+    def update_metadata(self, session_id: str, metadata: dict[str, Any]) -> None:
         """Update the metadata for the session."""
         try:
             # Build $set operation with dot notation to preserve existing values
@@ -599,11 +640,11 @@ class MongoDBSessionRepository(SessionRepository):
             logger.error(f"Failed to update metadata for session {session_id}: {e}")
             raise
 
-    def get_metadata(self, session_id: str) -> Dict[str, Any]:
+    def get_metadata(self, session_id: str) -> dict[str, Any]:
         """Get the metadata for the session."""
         return self.collection.find_one({"_id": session_id}, {"metadata": 1})
 
-    def delete_metadata(self, session_id: str, metadata_keys: List[str]) -> None:
+    def delete_metadata(self, session_id: str, metadata_keys: list[str]) -> None:
         """Delete metadata keys for the session."""
         try:
             # Build $unset operation with dot notation
@@ -621,7 +662,7 @@ class MongoDBSessionRepository(SessionRepository):
             )
             raise
 
-    def add_feedback(self, session_id: str, feedback: Dict[str, Any]) -> None:
+    def add_feedback(self, session_id: str, feedback: dict[str, Any]) -> None:
         """Add feedback to the session."""
         try:
             now = datetime.now(UTC)
@@ -639,7 +680,7 @@ class MongoDBSessionRepository(SessionRepository):
             logger.error(f"Failed to add feedback to session {session_id}: {e}")
             raise
 
-    def get_feedbacks(self, session_id: str) -> List[Dict[str, Any]]:
+    def get_feedbacks(self, session_id: str) -> list[dict[str, Any]]:
         """Get all feedbacks for the session."""
         try:
             doc = self.collection.find_one({"_id": session_id}, {"feedbacks": 1})
@@ -653,7 +694,7 @@ class MongoDBSessionRepository(SessionRepository):
             logger.error(f"Failed to get feedbacks for session {session_id}: {e}")
             raise
 
-    def get_session_viewer_password(self, session_id: str) -> Optional[str]:
+    def get_session_viewer_password(self, session_id: str) -> str | None:
         """Get the session viewer password for the session.
 
         Args:
@@ -687,7 +728,7 @@ class MongoDBSessionRepository(SessionRepository):
             logger.error(f"Failed to get viewer password for session {session_id}: {e}")
             raise
 
-    def get_application_name(self, session_id: str) -> Optional[str]:
+    def get_application_name(self, session_id: str) -> str | None:
         """Get the application_name for the session (read-only).
 
         The application_name is immutable and set at session creation time.

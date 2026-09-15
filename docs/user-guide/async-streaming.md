@@ -56,6 +56,7 @@ import asyncio
 from strands import Agent
 from mongodb_session_manager import create_mongodb_session_manager
 
+
 async def stream_response():
     """Stream AI agent response token-by-token."""
 
@@ -63,24 +64,19 @@ async def stream_response():
     session_manager = create_mongodb_session_manager(
         session_id="user-123",
         connection_string="mongodb://localhost:27017/",
-        database_name="chat_db"
+        database_name="chat_db",
     )
 
     # Create agent with session
     agent = Agent(
-        agent_id="assistant",
-        model="claude-3-sonnet",
-        session_manager=session_manager
+        agent_id="assistant", model="claude-3-sonnet", session_manager=session_manager
     )
 
     # User message
     prompt = "Explain async programming in Python"
 
     # Append user message
-    session_manager.append_message(
-        {"role": "user", "content": prompt},
-        agent
-    )
+    session_manager.append_message({"role": "user", "content": prompt}, agent)
 
     # Stream response
     response_chunks = []
@@ -100,8 +96,7 @@ async def stream_response():
 
     # Append assistant message
     session_manager.append_message(
-        {"role": "assistant", "content": full_response},
-        agent
+        {"role": "assistant", "content": full_response}, agent
     )
 
     # Sync agent state and metrics
@@ -109,6 +104,7 @@ async def stream_response():
 
     # Clean up
     session_manager.close()
+
 
 # Run
 asyncio.run(stream_response())
@@ -122,7 +118,7 @@ The `agent.stream_async()` generator yields events:
 {
     "type": "content_block_delta",
     "data": "token text",  # Token/chunk of text
-    "index": 0
+    "index": 0,
 }
 
 # Other event types:
@@ -161,6 +157,7 @@ import asyncio
 from strands import Agent
 from mongodb_session_manager import create_mongodb_session_manager
 
+
 async def chat_with_streaming(session_id: str, prompt: str):
     """Chat with streaming and full session persistence."""
 
@@ -168,7 +165,7 @@ async def chat_with_streaming(session_id: str, prompt: str):
     session_manager = create_mongodb_session_manager(
         session_id=session_id,
         connection_string="mongodb://localhost:27017/",
-        database_name="chat_db"
+        database_name="chat_db",
     )
 
     # Create agent
@@ -176,14 +173,11 @@ async def chat_with_streaming(session_id: str, prompt: str):
         agent_id="assistant",
         model="claude-3-sonnet",
         session_manager=session_manager,
-        system_prompt="You are a helpful assistant."
+        system_prompt="You are a helpful assistant.",
     )
 
     # Store user message
-    session_manager.append_message(
-        {"role": "user", "content": prompt},
-        agent
-    )
+    session_manager.append_message({"role": "user", "content": prompt}, agent)
 
     # Stream response
     response_chunks = []
@@ -200,8 +194,7 @@ async def chat_with_streaming(session_id: str, prompt: str):
 
     # Store assistant message
     session_manager.append_message(
-        {"role": "assistant", "content": full_response},
-        agent
+        {"role": "assistant", "content": full_response}, agent
     )
 
     # Sync metrics
@@ -210,10 +203,12 @@ async def chat_with_streaming(session_id: str, prompt: str):
     # Conversation is now fully persisted!
     session_manager.close()
 
+
 # Usage
 async def main():
     async for chunk in chat_with_streaming("user-123", "Hello!"):
         print(chunk, end="", flush=True)
+
 
 asyncio.run(main())
 ```
@@ -228,14 +223,14 @@ async def resume_and_continue():
     session_manager = create_mongodb_session_manager(
         session_id="user-123",  # Same session ID
         connection_string="mongodb://localhost:27017/",
-        database_name="chat_db"
+        database_name="chat_db",
     )
 
     # Create agent - automatically loads history
     agent = Agent(
         agent_id="assistant",  # Same agent ID
         model="claude-3-sonnet",
-        session_manager=session_manager
+        session_manager=session_manager,
     )
 
     # Agent has full conversation context!
@@ -257,13 +252,11 @@ async def stream_with_metrics():
     session_manager = create_mongodb_session_manager(
         session_id="user-123",
         connection_string="mongodb://localhost:27017/",
-        database_name="chat_db"
+        database_name="chat_db",
     )
 
     agent = Agent(
-        agent_id="assistant",
-        model="claude-3-sonnet",
-        session_manager=session_manager
+        agent_id="assistant", model="claude-3-sonnet", session_manager=session_manager
     )
 
     # User message
@@ -279,8 +272,7 @@ async def stream_with_metrics():
     # Save response
     full_response = "".join(response_chunks)
     session_manager.append_message(
-        {"role": "assistant", "content": full_response},
-        agent
+        {"role": "assistant", "content": full_response}, agent
     )
 
     # Sync captures metrics from agent.event_loop_metrics
@@ -306,7 +298,7 @@ from mongodb_session_manager import MongoDBSessionRepository
 repo = MongoDBSessionRepository(
     connection_string="mongodb://localhost:27017/",
     database_name="chat_db",
-    collection_name="sessions"
+    collection_name="sessions",
 )
 
 # Get session
@@ -336,6 +328,7 @@ from mongodb_session_manager import get_global_factory
 
 app = FastAPI()
 
+
 @app.post("/chat/stream")
 async def chat_stream(session_id: str, message: str):
     """Stream chat response with session persistence."""
@@ -349,14 +342,11 @@ async def chat_stream(session_id: str, message: str):
         agent = Agent(
             agent_id="assistant",
             model="claude-3-sonnet",
-            session_manager=session_manager
+            session_manager=session_manager,
         )
 
         # Store user message
-        session_manager.append_message(
-            {"role": "user", "content": message},
-            agent
-        )
+        session_manager.append_message({"role": "user", "content": message}, agent)
 
         # Stream response
         response_chunks = []
@@ -370,8 +360,7 @@ async def chat_stream(session_id: str, message: str):
         # Save complete response
         full_response = "".join(response_chunks)
         session_manager.append_message(
-            {"role": "assistant", "content": full_response},
-            agent
+            {"role": "assistant", "content": full_response}, agent
         )
 
         # Sync metrics
@@ -389,6 +378,7 @@ import json
 
 app = FastAPI()
 
+
 @app.post("/chat/sse")
 async def chat_sse(session_id: str, message: str):
     """Stream chat response as Server-Sent Events."""
@@ -400,14 +390,11 @@ async def chat_sse(session_id: str, message: str):
         agent = Agent(
             agent_id="assistant",
             model="claude-3-sonnet",
-            session_manager=session_manager
+            session_manager=session_manager,
         )
 
         # Store user message
-        session_manager.append_message(
-            {"role": "user", "content": message},
-            agent
-        )
+        session_manager.append_message({"role": "user", "content": message}, agent)
 
         # Stream response
         response_chunks = []
@@ -424,8 +411,7 @@ async def chat_sse(session_id: str, message: str):
         # Complete response
         full_response = "".join(response_chunks)
         session_manager.append_message(
-            {"role": "assistant", "content": full_response},
-            agent
+            {"role": "assistant", "content": full_response}, agent
         )
         session_manager.sync_agent(agent)
 
@@ -435,10 +421,7 @@ async def chat_sse(session_id: str, message: str):
     return StreamingResponse(
         generate_sse(),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive"
-        }
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
     )
 ```
 
@@ -454,8 +437,9 @@ from strands import Agent
 from mongodb_session_manager import (
     initialize_global_factory,
     get_global_factory,
-    close_global_factory
+    close_global_factory,
 )
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -463,12 +447,14 @@ async def lifespan(app: FastAPI):
     initialize_global_factory(
         connection_string="mongodb://localhost:27017/",
         database_name="chat_db",
-        maxPoolSize=100
+        maxPoolSize=100,
     )
     yield
     close_global_factory()
 
+
 app = FastAPI(lifespan=lifespan)
+
 
 @app.post("/chat")
 async def chat(request: Request, data: dict, session_id: str):
@@ -483,7 +469,7 @@ async def chat(request: Request, data: dict, session_id: str):
         agent = Agent(
             agent_id="assistant",
             model="claude-3-sonnet",
-            session_manager=session_manager
+            session_manager=session_manager,
         )
 
         # Get prompt
@@ -518,21 +504,18 @@ async def stream_with_error_handling(session_id: str, prompt: str):
         session_manager = create_mongodb_session_manager(
             session_id=session_id,
             connection_string="mongodb://localhost:27017/",
-            database_name="chat_db"
+            database_name="chat_db",
         )
 
         # Create agent
         agent = Agent(
             agent_id="assistant",
             model="claude-3-sonnet",
-            session_manager=session_manager
+            session_manager=session_manager,
         )
 
         # Store user message
-        session_manager.append_message(
-            {"role": "user", "content": prompt},
-            agent
-        )
+        session_manager.append_message({"role": "user", "content": prompt}, agent)
 
         # Stream response
         response_chunks = []
@@ -553,8 +536,7 @@ async def stream_with_error_handling(session_id: str, prompt: str):
         # Save response (even if incomplete)
         full_response = "".join(response_chunks)
         session_manager.append_message(
-            {"role": "assistant", "content": full_response},
-            agent
+            {"role": "assistant", "content": full_response}, agent
         )
 
         # Sync metrics
@@ -576,6 +558,7 @@ async def stream_with_error_handling(session_id: str, prompt: str):
 
 ```python
 import asyncio
+
 
 async def stream_with_timeout(session_id: str, prompt: str, timeout: int = 30):
     """Stream with timeout."""
@@ -611,7 +594,9 @@ session_manager.append_message({"role": "assistant", "content": full_response}, 
 # Bad - don't save individual chunks
 async for event in agent.stream_async(prompt):
     if "data" in event:
-        session_manager.append_message({"role": "assistant", "content": event["data"]}, agent)  # Wrong!
+        session_manager.append_message(
+            {"role": "assistant", "content": event["data"]}, agent
+        )  # Wrong!
 ```
 
 ### 2. Sync Metrics After Streaming
@@ -656,7 +641,7 @@ session_manager = factory.create_session_manager(session_id)
 # Bad - new connection per request
 session_manager = MongoDBSessionManager(
     session_id=session_id,
-    connection_string="..."  # New connection!
+    connection_string="...",  # New connection!
 )
 ```
 
@@ -694,6 +679,7 @@ async def stream_with_timeout():
         async for chunk in chat_with_streaming(...):
             yield chunk
 
+
 # Bad - no timeout
 async def stream_no_timeout():
     async for chunk in chat_with_streaming(...):
@@ -709,6 +695,7 @@ try:
         yield chunk
 finally:
     session_manager.close()
+
 
 # Alternative - use async context manager pattern
 class SessionContext:

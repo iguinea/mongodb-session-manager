@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.10.0] - 2026-09-15
+
+### Changed
+- **Half the MongoDB operations per turn**: a turn with a supervisor and a sub-agent went from 42 operations to 21 (21→15 updates, 13→6 finds, 8→0 `createIndexes`). On DocumentDB every write costs 40-55 ms regardless of its size, so this is about the *number* of round-trips, not the bytes
+- **Indexes are ensured once per client, not per session manager**: `_ensure_indexes()` ran on every `create_session_manager()`, and pymongo does not cache `create_index` — each call was a round-trip even when the index already existed. Now tracked in a `WeakKeyDictionary` keyed by `MongoClient`, so two clients against different clusters that share database and collection names each get their indexes
+- **Agent config is only written when it changes**: `_capture_agent_config()` rewrote the entire system prompt on every `sync_agent()`. Cached per `agent_id`, since one manager can serve several agents in a session
+- **Metrics and agent config travel in a single `update_one`**: both target the same document and used to be two separate writes
+
+### Fixed
+- **Metrics could be attributed to the wrong message** (silently): `_get_last_message_id()` queried the database milliseconds after `create_message()` pushed the message. On a `secondaryPreferred` cluster a lagging replica returned the previous `message_id`, so the metrics landed on message N-1 — or the filter matched nothing and the update was a no-op, unnoticed because `matched_count` was never checked. The value is now read from `_latest_agent_message`, which the parent class already tracks in memory, with a fallback to the query for restored sessions
+- **`update_agent()` could falsify an agent's `created_at`**: it read the timestamp back to rewrite it, another read-after-write. A stale read would replace the original with `now`. The field is now preserved by omission — a `$set` that does not name it leaves it alone
+- Sync updates that match no document are now logged instead of disappearing
+
+### Fixed (CI)
+- **The `test` job never ran a single test**: it invoked `pytest test_*.py`, a path that stopped existing when tests moved to `tests/`. It failed with "file or directory not found" and, because `build` needed it, nothing was ever built either
+- **The `lint` job never linted a single line**: `uv sync` does not install the `dev` group, so ruff was missing and the step died with "Failed to spawn: ruff". Now `uv sync --all-extras`, and ruff is an explicit dev dependency
+- **Explicit `[tool.ruff]` ruleset**: there was none, so the lint depended on whatever defaults the installed ruff version happened to carry — a new version added rules and broke CI without anyone touching the code. The ruleset is now pinned in `pyproject.toml`, with every exclusion justified in place
+- **`uv.lock` is versioned now**: it was in `.gitignore`, so CI resolved dependencies afresh on every run and was never reproducible. It installed `strands-agents` 1.55.1 while local development used 1.30.0 — the same commit produced different environments. CI now runs `uv sync --locked`, which also fails loudly if someone edits `pyproject.toml` without regenerating the lock
+- Cleared the 345 accumulated lint errors and formatted the 36 unformatted files
+- `runs-on` now reads from the `CI_RUNS_ON` repository variable, so switching between hosted and self-hosted runners no longer needs a PR
+- The MongoDB service in CI waits for a healthcheck before the tests start
+- `build` verifies that a wheel *and* an sdist were actually produced, instead of just listing the directory
+
+### Fixed (also caught by the lint pass)
+- `dispatch_async()` did not keep a reference to the task it created. The event loop only holds weak references, so a hook could be garbage collected mid-flight and never run
+- `send_message()` and `publish_message()` lost the original exception when re-raising, making failures harder to trace
+- `publish_message()` declared `message: str | dict = None`, an implicit Optional
+
+### Notes
+- No public API or document schema changes
+- The root `updated_at` keeps being refreshed on the last write of every turn — two external consumers derive "End" and "Duration" from it. Now pinned by a regression test
+- `claude-review` fails for a reason outside this repository: the `CLAUDE_CODE_OAUTH_TOKEN` secret has expired (`API Error: 401`). It needs to be regenerated; no code change fixes it
+- Performance analysis of this release in `artifacts/analisis-rendimiento.md`; follow-up work is tracked in #56 (master issue), #64, #65 and #66
+
 ## [2026-03-23] PR #46 - Chore: release v0.9.1 (@iguinea)
 
 - Chore: release v0.9.1 — temperature in prompt_metadata
@@ -514,13 +548,14 @@ The response was incomplete
 ```python
 # Create session (password auto-generated)
 session_manager = create_mongodb_session_manager(
-    session_id="user-session",
-    connection_string="mongodb://localhost:27017/"
+    session_id="user-session", connection_string="mongodb://localhost:27017/"
 )
 
 # Retrieve password for Session Viewer link
 password = session_manager.get_session_viewer_password()
-print(f"Session Viewer URL: http://localhost:8883?session_id=user-session&password={password}")
+print(
+    f"Session Viewer URL: http://localhost:8883?session_id=user-session&password={password}"
+)
 ```
 
 ## [0.2.5] - 2025-10-29
@@ -1070,7 +1105,7 @@ feedback_hook = create_feedback_sns_hook(
 feedback_hook = create_feedback_sns_hook(
     topic_arn_good="arn:aws:sns:eu-west-1:123456789:feedback-good",
     topic_arn_bad="arn:aws:sns:eu-west-1:123456789:feedback-bad",
-    topic_arn_neutral="arn:aws:sns:eu-west-1:123456789:feedback-neutral"
+    topic_arn_neutral="arn:aws:sns:eu-west-1:123456789:feedback-neutral",
 )
 ```
 

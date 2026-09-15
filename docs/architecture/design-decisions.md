@@ -276,9 +276,9 @@ class MongoDBConnectionPool:
 ```python
 # Thread-safe initialization
 def __new__(cls):
-    if cls._instance is None:           # First check (no lock)
-        with cls._lock:                 # Acquire lock
-            if cls._instance is None:   # Second check (with lock)
+    if cls._instance is None:  # First check (no lock)
+        with cls._lock:  # Acquire lock
+            if cls._instance is None:  # Second check (with lock)
                 cls._instance = super().__new__(cls)
     return cls._instance
 ```
@@ -291,11 +291,11 @@ def __new__(cls):
 **Connection Pool Configuration**:
 ```python
 {
-    "maxPoolSize": 100,      # Maximum connections
-    "minPoolSize": 10,       # Keep 10 warm
+    "maxPoolSize": 100,  # Maximum connections
+    "minPoolSize": 10,  # Keep 10 warm
     "maxIdleTimeMS": 30000,  # Close idle after 30s
-    "retryWrites": True,     # Automatic retry
-    "retryReads": True
+    "retryWrites": True,  # Automatic retry
+    "retryReads": True,
 }
 ```
 
@@ -323,8 +323,8 @@ FastAPI applications need to create many session managers (one per request) whil
 manager = MongoDBSessionManager(
     session_id=session_id,
     connection_string=mongodb_uri,  # Repeated everywhere
-    database_name="mydb",           # Repeated everywhere
-    collection_name="sessions"      # Repeated everywhere
+    database_name="mydb",  # Repeated everywhere
+    collection_name="sessions",  # Repeated everywhere
 )
 ```
 
@@ -344,11 +344,9 @@ manager = MongoDBSessionManager(
 def get_mongo_client():
     return MongoClient(mongodb_uri)
 
+
 @app.post("/chat")
-async def chat(
-    session_id: str,
-    client: MongoClient = Depends(get_mongo_client)
-):
+async def chat(session_id: str, client: MongoClient = Depends(get_mongo_client)):
     manager = MongoDBSessionManager(session_id=session_id, client=client)
 ```
 
@@ -366,9 +364,7 @@ async def chat(
 ```python
 # Global factory initialization
 factory = initialize_global_factory(
-    connection_string=mongodb_uri,
-    database_name="mydb",
-    maxPoolSize=100
+    connection_string=mongodb_uri, database_name="mydb", maxPoolSize=100
 )
 
 # In endpoints
@@ -430,6 +426,7 @@ manager = get_global_factory().create_session_manager("session-123")
 # Pattern 2: Local factory (testing, isolation)
 factory = MongoDBSessionManagerFactory(connection_string="mongodb://...")
 manager = factory.create_session_manager("session-123")
+
 
 # Pattern 3: Per-request factory (maximum flexibility)
 @app.post("/chat")
@@ -499,7 +496,7 @@ class MongoDBSessionRepository:
             self._owns_client = False  # Borrowed
         elif connection_string is not None:
             self.client = MongoClient(connection_string)
-            self._owns_client = True   # Owned
+            self._owns_client = True  # Owned
         else:
             raise ValueError("Provide client or connection_string")
 
@@ -565,6 +562,7 @@ else:
     self._owns_client = True
     logger.info("Created new MongoDB client")
 
+
 # In close()
 def close(self):
     if self._owns_client:
@@ -603,7 +601,7 @@ Sessions have user-defined metadata that evolves over time:
 def update_metadata(self, session_id, metadata):
     self.collection.update_one(
         {"_id": session_id},
-        {"$set": {"metadata": metadata}}  # Replaces entire object
+        {"$set": {"metadata": metadata}},  # Replaces entire object
     )
 ```
 
@@ -623,10 +621,7 @@ def update_metadata(self, session_id, metadata):
 def update_metadata(self, session_id, metadata):
     current = self.get_metadata(session_id)
     merged = {**current, **metadata}
-    self.collection.update_one(
-        {"_id": session_id},
-        {"$set": {"metadata": merged}}
-    )
+    self.collection.update_one({"_id": session_id}, {"$set": {"metadata": merged}})
 ```
 
 **Pros**:
@@ -641,14 +636,8 @@ def update_metadata(self, session_id, metadata):
 #### Alternative 3: Partial Update with Dot Notation (Chosen)
 ```python
 def update_metadata(self, session_id, metadata):
-    set_operations = {
-        f"metadata.{key}": value
-        for key, value in metadata.items()
-    }
-    self.collection.update_one(
-        {"_id": session_id},
-        {"$set": set_operations}
-    )
+    set_operations = {f"metadata.{key}": value for key, value in metadata.items()}
+    self.collection.update_one({"_id": session_id}, {"$set": set_operations})
 ```
 
 **Pros**:
@@ -677,40 +666,28 @@ def update_metadata(self, session_id, metadata):
 # Initial state in MongoDB
 {
     "_id": "session-123",
-    "metadata": {
-        "user_id": "alice",
-        "language": "en",
-        "theme": "dark"
-    }
+    "metadata": {"user_id": "alice", "language": "en", "theme": "dark"},
 }
 
 # Update call
-session_manager.update_metadata({
-    "priority": "high",
-    "status": "active"
-})
+session_manager.update_metadata({"priority": "high", "status": "active"})
 
 # MongoDB operation
 db.sessions.update_one(
     {"_id": "session-123"},
-    {
-        "$set": {
-            "metadata.priority": "high",
-            "metadata.status": "active"
-        }
-    }
+    {"$set": {"metadata.priority": "high", "metadata.status": "active"}},
 )
 
 # Final state
 {
     "_id": "session-123",
     "metadata": {
-        "user_id": "alice",      # Preserved
-        "language": "en",         # Preserved
-        "theme": "dark",          # Preserved
-        "priority": "high",       # Added
-        "status": "active"        # Added
-    }
+        "user_id": "alice",  # Preserved
+        "language": "en",  # Preserved
+        "theme": "dark",  # Preserved
+        "priority": "high",  # Added
+        "status": "active",  # Added
+    },
 }
 ```
 
@@ -719,14 +696,8 @@ db.sessions.update_one(
 Complementary operation using `$unset`:
 ```python
 def delete_metadata(self, session_id, metadata_keys):
-    unset_operations = {
-        f"metadata.{key}": ""
-        for key in metadata_keys
-    }
-    self.collection.update_one(
-        {"_id": session_id},
-        {"$unset": unset_operations}
-    )
+    unset_operations = {f"metadata.{key}": "" for key in metadata_keys}
+    self.collection.update_one({"_id": session_id}, {"$unset": unset_operations})
 ```
 
 **Code Reference**:
@@ -777,6 +748,7 @@ class MongoDBSessionManager:
         # ... update logic ...
         self.events.emit("after_update", metadata)
 
+
 # Usage
 manager.events.on("before_update", audit_handler)
 manager.events.on("after_update", notification_handler)
@@ -812,11 +784,9 @@ def metadata_hook(original_func, action, session_id, **kwargs):
 
     return result
 
+
 # Application
-manager = MongoDBSessionManager(
-    session_id="session-123",
-    metadata_hook=metadata_hook
-)
+manager = MongoDBSessionManager(session_id="session-123", metadata_hook=metadata_hook)
 ```
 
 **Pros**:
@@ -865,20 +835,26 @@ def hook_function(
 def _apply_metadata_hook(self, hook: Callable) -> None:
     # Wrap update_metadata
     original_update = self.update_metadata
+
     def wrapped_update(metadata: Dict[str, Any]) -> None:
         return hook(original_update, "update", self.session_id, metadata=metadata)
+
     self.update_metadata = wrapped_update
 
     # Wrap get_metadata
     original_get = self.get_metadata
+
     def wrapped_get() -> Dict[str, Any]:
         return hook(original_get, "get", self.session_id)
+
     self.get_metadata = wrapped_get
 
     # Wrap delete_metadata
     original_delete = self.delete_metadata
+
     def wrapped_delete(metadata_keys: List[str]) -> None:
         return hook(original_delete, "delete", self.session_id, keys=metadata_keys)
+
     self.delete_metadata = wrapped_delete
 ```
 
@@ -902,6 +878,8 @@ def _apply_metadata_hook(self, hook: Callable) -> None:
 3. **Caching**:
    ```python
    cache = {}
+
+
    def cache_hook(original_func, action, session_id, **kwargs):
        if action == "get":
            if session_id in cache:
@@ -962,7 +940,7 @@ MongoDB operations can update timestamps unintentionally:
 {
     "agent_id": "agent-A",
     "created_at": "2024-01-15T09:00:00Z",
-    "updated_at": "2024-01-15T09:00:00Z"
+    "updated_at": "2024-01-15T09:00:00Z",
 }
 
 # Update agent (e.g., change system prompt)
@@ -977,15 +955,17 @@ MongoDB operations can update timestamps unintentionally:
 ```python
 # Client provides both timestamps
 session_agent.created_at = "2024-01-15T09:00:00Z"  # From client
-session_agent.updated_at = datetime.now(UTC)       # Now
+session_agent.updated_at = datetime.now(UTC)  # Now
 
 # Update operation
 db.update_one(
     {"_id": session_id},
-    {"$set": {
-        f"agents.{agent_id}.created_at": session_agent.created_at,
-        f"agents.{agent_id}.updated_at": session_agent.updated_at
-    }}
+    {
+        "$set": {
+            f"agents.{agent_id}.created_at": session_agent.created_at,
+            f"agents.{agent_id}.updated_at": session_agent.updated_at,
+        }
+    },
 )
 ```
 
@@ -1007,10 +987,12 @@ created_at = current["agents"][agent_id]["created_at"]
 # Update with preserved timestamp
 db.update_one(
     {"_id": session_id},
-    {"$set": {
-        f"agents.{agent_id}.created_at": created_at,  # Preserved
-        f"agents.{agent_id}.updated_at": datetime.now(UTC)
-    }}
+    {
+        "$set": {
+            f"agents.{agent_id}.created_at": created_at,  # Preserved
+            f"agents.{agent_id}.updated_at": datetime.now(UTC),
+        }
+    },
 )
 ```
 
@@ -1027,8 +1009,7 @@ db.update_one(
 ```python
 # On update, read existing created_at first
 existing = self.collection.find_one(
-    {"_id": session_id},
-    {f"agents.{agent_id}.created_at": 1}
+    {"_id": session_id}, {f"agents.{agent_id}.created_at": 1}
 )
 
 # Preserve if exists, or use current time
@@ -1039,10 +1020,12 @@ if existing and "agents" in existing and agent_id in existing["agents"]:
 # Update with preserved timestamp
 self.collection.update_one(
     {"_id": session_id},
-    {"$set": {
-        f"agents.{agent_id}.created_at": created_at,  # Preserved or new
-        f"agents.{agent_id}.updated_at": datetime.now(UTC)
-    }}
+    {
+        "$set": {
+            f"agents.{agent_id}.created_at": created_at,  # Preserved or new
+            f"agents.{agent_id}.updated_at": datetime.now(UTC),
+        }
+    },
 )
 ```
 
@@ -1079,14 +1062,16 @@ def update_agent(self, session_id, session_agent, **kwargs):
 
     # Fetch existing created_at (small projection)
     existing = self.collection.find_one(
-        {"_id": session_id},
-        {f"agents.{session_agent.agent_id}.created_at": 1}
+        {"_id": session_id}, {f"agents.{session_agent.agent_id}.created_at": 1}
     )
 
     # Preserve original or use current
     created_at = datetime.now(UTC)
-    if (existing and "agents" in existing and
-        session_agent.agent_id in existing["agents"]):
+    if (
+        existing
+        and "agents" in existing
+        and session_agent.agent_id in existing["agents"]
+    ):
         created_at = existing["agents"][session_agent.agent_id].get(
             "created_at", created_at
         )
@@ -1094,12 +1079,14 @@ def update_agent(self, session_id, session_agent, **kwargs):
     # Update with preservation
     result = self.collection.update_one(
         {"_id": session_id},
-        {"$set": {
-            f"agents.{session_agent.agent_id}.agent_data": agent_data,
-            f"agents.{session_agent.agent_id}.created_at": created_at,  # Preserved
-            f"agents.{session_agent.agent_id}.updated_at": datetime.now(UTC),
-            "updated_at": datetime.now(UTC)  # Session also updated
-        }}
+        {
+            "$set": {
+                f"agents.{session_agent.agent_id}.agent_data": agent_data,
+                f"agents.{session_agent.agent_id}.created_at": created_at,  # Preserved
+                f"agents.{session_agent.agent_id}.updated_at": datetime.now(UTC),
+                "updated_at": datetime.now(UTC),  # Session also updated
+            }
+        },
     )
 ```
 
@@ -1137,7 +1124,7 @@ agent.event_loop_metrics.accumulated_metrics = {"latencyMs": 250}
 agent.event_loop_metrics.accumulated_usage = {
     "inputTokens": 10,
     "outputTokens": 20,
-    "totalTokens": 30
+    "totalTokens": 30,
 }
 ```
 
@@ -1234,7 +1221,7 @@ def sync_agent(self, agent: Agent, **kwargs: Any) -> None:
         # Fetch last message
         doc = self.session_repository.collection.find_one(
             {"_id": self.session_id},
-            {f"agents.{agent.agent_id}.messages": {"$slice": -1}}
+            {f"agents.{agent.agent_id}.messages": {"$slice": -1}},
         )
 
         if doc and "agents" in doc and agent.agent_id in doc["agents"]:
@@ -1283,9 +1270,7 @@ def read_message(self, session_id, agent_id, message_id, **kwargs):
 
     # Filter out metrics fields that SessionMessage doesn't accept
     metrics_fields = ["event_loop_metrics"]
-    filtered_msg_data = {
-        k: v for k, v in msg_data.items() if k not in metrics_fields
-    }
+    filtered_msg_data = {k: v for k, v in msg_data.items() if k not in metrics_fields}
     return SessionMessage(**filtered_msg_data)
 ```
 
@@ -1331,9 +1316,7 @@ def create_session(self, session: Session, **kwargs):
 async def on_feedback_add(self, session_id, feedback):
     try:
         await asyncio.to_thread(
-            publish_message,
-            topic_arn=self.topic_arn,
-            message=message
+            publish_message, topic_arn=self.topic_arn, message=message
         )
     except Exception as e:
         # Log error but don't raise
@@ -1346,9 +1329,9 @@ async def on_feedback_add(self, session_id, feedback):
 #### 3. Comprehensive Logging
 
 ```python
-logger.info(f"Created session: {session_id}")          # Success
-logger.warning(f"Session not found: {session_id}")     # Expected errors
-logger.error(f"Failed to create session: {e}")         # Unexpected errors
+logger.info(f"Created session: {session_id}")  # Success
+logger.warning(f"Session not found: {session_id}")  # Expected errors
+logger.error(f"Failed to create session: {e}")  # Unexpected errors
 logger.debug(f"Message structure: {msg_data.keys()}")  # Debugging
 ```
 
@@ -1366,6 +1349,7 @@ def read_session(self, session_id):
     doc = self.collection.find_one({"_id": session_id})
     if not doc:
         raise Exception("Not found")  # Too generic
+
 
 # Good: Specific handling
 def read_session(self, session_id):
@@ -1483,17 +1467,13 @@ def feedback_hook_wrapper(original_func, action, session_id, **kwargs):
         try:
             loop = asyncio.get_running_loop()
             # We're in async context - create task
-            loop.create_task(
-                sns_hook.on_feedback_add(session_id, kwargs["feedback"])
-            )
+            loop.create_task(sns_hook.on_feedback_add(session_id, kwargs["feedback"]))
         except RuntimeError:
             # No running loop - create thread with new loop
             import threading
 
             def run_hook():
-                asyncio.run(
-                    sns_hook.on_feedback_add(session_id, kwargs["feedback"])
-                )
+                asyncio.run(sns_hook.on_feedback_add(session_id, kwargs["feedback"]))
 
             thread = threading.Thread(target=run_hook, daemon=True)
             thread.start()

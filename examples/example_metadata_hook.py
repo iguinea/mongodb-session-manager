@@ -22,12 +22,14 @@ validation, caching, or synchronization.
 import asyncio
 import json
 import logging
-import time
-from datetime import datetime
-from typing import Callable
-from mongodb_session_manager import MongoDBSessionManager
-from strands import Agent
 import os
+import time
+from collections.abc import Callable
+from datetime import UTC, datetime
+
+from strands import Agent
+
+from mongodb_session_manager import MongoDBSessionManager
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -85,14 +87,14 @@ def metadata_audit_hook(
         return result
 
     except Exception as e:
-        logger.error(f"[METADATA AUDIT] Error in {action}: {str(e)}")
+        logger.error(f"[METADATA AUDIT] Error in {action}: {e!s}")
         raise
 
 
 # Example 2: Validation Hook - Validates metadata before operations
 PROTECTED_FIELDS = {"_id", "session_id", "created_at", "internal_status"}
 REQUIRED_FIELDS = {
-    "last_updated": lambda: datetime.now().isoformat(),
+    "last_updated": lambda: datetime.now(UTC).isoformat(),
     "updated_by": lambda: "system",
 }
 MAX_VALUE_LENGTH = 1000
@@ -132,7 +134,7 @@ def metadata_validation_hook(
         _validate_no_protected_fields(metadata.keys())
         _ensure_required_fields(metadata)
         _validate_value_lengths(metadata)
-        metadata["_validated_at"] = datetime.now().isoformat()
+        metadata["_validated_at"] = datetime.now(UTC).isoformat()
 
         logger.info(f"[VALIDATION] Metadata validated for session {session_id}")
         return original_func(metadata)

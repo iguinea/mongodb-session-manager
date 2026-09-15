@@ -18,10 +18,12 @@ manage session metadata during conversations.
 """
 
 import asyncio
-from mongodb_session_manager import create_mongodb_session_manager
-from strands import Agent
 import os
-from datetime import datetime
+from datetime import UTC, datetime
+
+from strands import Agent
+
+from mongodb_session_manager import create_mongodb_session_manager
 
 # Get MongoDB connection from environment or use local
 MONGO_CONNECTION = os.getenv(
@@ -41,7 +43,7 @@ async def main():
     print_section("MongoDB Session Manager - Metadata Tool Example")
 
     # Create session manager
-    session_id = f"metadata-tool-demo-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    session_id = f"metadata-tool-demo-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}"
 
     session_manager = create_mongodb_session_manager(
         session_id=session_id,
@@ -60,13 +62,13 @@ async def main():
         session_manager=session_manager,
         tools=[metadata_tool],
         system_prompt="""You are a helpful assistant with access to session metadata management.
-        
+
         You can use the manage_metadata tool to:
         - Get current metadata: manage_metadata("get")
         - Get specific keys: manage_metadata("get", keys=["key1", "key2"])
         - Set/update metadata: manage_metadata("set", {"key": "value"})
         - Delete metadata keys: manage_metadata("delete", keys=["key1", "key2"])
-        
+
         Use metadata to track conversation context, user preferences, and session state.""",
     )
 
