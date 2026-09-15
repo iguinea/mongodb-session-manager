@@ -800,6 +800,38 @@ class TestAgentConfigFields:
         assert result is not None
         assert result.agent_id == "a1"
 
+    def test_read_agent_hands_over_persisted_config(
+        self, mock_repository, mock_mongo_collection
+    ):
+        """read_agent guarda model y system_prompt para el session manager.
+
+        SessionAgent no los admite, pero el manager los necesita para no
+        reescribir una configuración ya persistida (issue #65). Se entregan
+        una sola vez y solo para la sesión de la que se leyeron.
+        """
+        mock_mongo_collection.find_one.return_value = {
+            "agents": {
+                "a1": {
+                    "agent_data": {
+                        "agent_id": "a1",
+                        "state": {},
+                        "conversation_manager_state": {},
+                        "model": "claude-3",
+                        "system_prompt": "You are helpful",
+                    }
+                }
+            }
+        }
+
+        mock_repository.read_agent("s1", "a1")
+
+        assert mock_repository.pop_read_agent_config("s2", "a1") is None
+        assert mock_repository.pop_read_agent_config("s1", "a1") == {
+            "model": "claude-3",
+            "system_prompt": "You are helpful",
+        }
+        assert mock_repository.pop_read_agent_config("s1", "a1") is None
+
 
 class TestGetApplicationName:
     def test_returns_application_name(self, mock_repository, mock_mongo_collection):

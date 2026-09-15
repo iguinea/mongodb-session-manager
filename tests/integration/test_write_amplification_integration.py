@@ -44,15 +44,19 @@ _METRICS = {"latencyMs": 900}
 
 
 class CommandCounter(monitoring.CommandListener):
-    """Registra los comandos enviados al servidor."""
+    """Registra los comandos enviados al servidor y los campos de cada $set."""
 
     def __init__(self) -> None:
         self.commands: list[str] = []
+        self.set_fields: list[str] = []
         self.enabled = False
 
     def started(self, event: Any) -> None:
         if self.enabled and event.command_name not in _IGNORED_COMMANDS:
             self.commands.append(event.command_name)
+            if event.command_name == "update":
+                for update in event.command.get("updates", []):
+                    self.set_fields.extend(update["u"].get("$set", {}))
 
     def succeeded(self, event: Any) -> None:
         # Solo interesa cuántos comandos se envían, no su resultado: los
@@ -179,21 +183,20 @@ class TestTurnOperationBudget:
         """Un turno con supervisor y sub-agente cabe en el presupuesto.
 
         Contra v0.9.1 el mismo escenario producía 42 operaciones: 21 updates,
-        13 finds y 8 createIndexes. Ahora son 21: 15 updates, 6 finds y 0
-        createIndexes.
+        13 finds y 8 createIndexes. Con #54 bajó a 21 (15 updates, 6 finds y 0
+        createIndexes) y con #65 a 19.
 
-        El presupuesto de 15 se desglosa así (6 mensajes en total: 4 del
-        supervisor, 2 del sub-agente):
+        El presupuesto de 13 se desglosa así, medido con este mismo listener
+        (6 mensajes en total: 4 del supervisor, 2 del sub-agente):
           6  create_message ($push, uno por mensaje)
-          8  sync fusionado (métricas + config en un solo update_one)
-          1  update_agent del primer sync de cada manager
+          3  update_agent: el primer sync de cada manager, más el del
+             supervisor tras ejecutar la tool (Strands sube la versión de
+             interrupt_state)
+          4  métricas del último mensaje
 
-        No confundir con el objetivo de ≤12 de la issue: ese es para el turno
-        real completo, que además incluye los ahorros del lado del consumidor
-        (quitar el sync doble de `sync_and_track` en los sub-agentes y mover el
-        TTFT del supervisor a un hook). Esta librería sola no puede bajar de
-        aquí sin fusionar `create_message` con `update_agent`, que se descartó
-        por depender de una invariante del SDK que no controlamos.
+        La configuración no viaja: cada manager la conoce desde read_agent()
+        (#65). Antes eran 2 escrituras más, de ~14 KB cada una. El presupuesto
+        de cada hito se sigue en la issue maestra #56.
         """
         client, counter = counting_client
         factory = MongoDBSessionManagerFactory(
@@ -213,9 +216,18 @@ class TestTurnOperationBudget:
         counter.enabled = False
 
         counts = counter.counts()
-        assert counts["update"] <= 15, f"{counts['update']} updates: {counts}"
+        assert counts["update"] <= 13, f"{counts['update']} updates: {counts}"
         assert counts["createIndexes"] == 0, "los índices ya estaban asegurados"
         assert counts["find"] <= 6, f"{counts['find']} finds: {counts}"
+        rewritten = [
+            field
+            for field in counter.set_fields
+            if field.endswith(".agent_data.system_prompt")
+        ]
+        assert not rewritten, (
+            "el turno caliente reescribió un system_prompt que no cambió; "
+            f"¿read_agent() dejó de traer la configuración? {rewritten}"
+        )
 
     def test_root_updated_at_advances_with_the_turn(
         self, counting_client, unique_session_id, cleanup_session
