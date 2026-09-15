@@ -55,9 +55,14 @@ class CommandCounter(monitoring.CommandListener):
             self.commands.append(event.command_name)
 
     def succeeded(self, event: Any) -> None:
+        # Solo interesa cuántos comandos se envían, no su resultado: los
+        # comandos se cuentan en started(). La interfaz CommandListener obliga
+        # a implementar los tres métodos.
         pass
 
     def failed(self, event: Any) -> None:
+        # Un comando fallido también viajó por el cable y ya está contado en
+        # started(); si además hace fallar el test, lo dirá el assert.
         pass
 
     def counts(self) -> Counter:
