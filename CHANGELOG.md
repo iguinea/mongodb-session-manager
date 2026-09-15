@@ -1,5 +1,14 @@
 # Changelog
 
+## [2026-09-15] PR #55 - Fix: reducir escrituras por turno (42→21 ops) y corregir read-after-write sobre secundarios (#54) (@iguinea)
+
+- Docs: plan de reduccion de escrituras por turno (#54)
+- Fix: reducir escrituras por turno y corregir read-after-write (#54)
+- Test: explicar los metodos vacios del CommandListener (#54)
+- Chore: arreglar el CI, fijar el ruleset de ruff y limpiar el lint (#54)
+- Fix: versionar uv.lock para que el CI sea reproducible (#54)
+- Docs: versionar el informe de rendimiento y enlazar el seguimiento (#54)
+
 ## [0.10.0] - 2026-09-15
 
 ### Changed
