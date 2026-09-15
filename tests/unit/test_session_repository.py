@@ -344,20 +344,19 @@ class TestAgentOperations:
     def test_update_agent_preserves_created_at(
         self, mock_repository, mock_mongo_collection, sample_session_agent
     ):
-        original_created = datetime(2024, 1, 1, tzinfo=UTC)
-        mock_mongo_collection.find_one.return_value = {
-            "agents": {
-                sample_session_agent.agent_id: {
-                    "created_at": original_created,
-                }
-            }
-        }
+        """El created_at del agente sobrevive a un update_agent.
+
+        Se preserva por omisión: un $set que no lo nombra no lo toca. Antes se
+        leía para reescribirlo, lo que además de costar un find era un
+        read-after-write capaz de falsear el valor sobre un secundario
+        atrasado (issue #54).
+        """
         mock_repository.update_agent("s1", sample_session_agent)
 
-        update_call = mock_mongo_collection.update_one.call_args
-        set_data = update_call[0][1]["$set"]
+        set_data = mock_mongo_collection.update_one.call_args[0][1]["$set"]
         key = f"agents.{sample_session_agent.agent_id}.created_at"
-        assert set_data[key] == original_created
+        assert key not in set_data
+        assert mock_mongo_collection.find_one.call_count == 0
 
     def test_update_agent_raises_when_session_missing(
         self, mock_repository, mock_mongo_collection, sample_session_agent

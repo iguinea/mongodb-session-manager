@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 import secrets
+import threading
+import weakref
 from datetime import UTC, datetime
 from typing import Any, Dict, List, Optional
 
@@ -32,6 +34,26 @@ _MESSAGE_EXCLUDED_FIELDS = frozenset(
 
 # Fields stored on agent documents for auditing that SessionAgent.__init__() does not accept.
 _AGENT_CONFIG_FIELDS = frozenset(["model", "system_prompt", "prompt_metadata"])
+
+# Collections whose indexes have already been ensured, keyed by MongoClient.
+#
+# pymongo does not cache create_index: every call is a round-trip to the server
+# even when the index already exists. Since a session manager is typically
+# created per request, that meant 4+ round-trips per instantiation.
+#
+# Keyed by client (not by database/collection name) so two clients pointing at
+# different clusters that happen to share names each get their indexes. The
+# WeakKeyDictionary drops the entry when the client is closed and collected.
+_INDEX_REGISTRY: weakref.WeakKeyDictionary[Any, set[tuple]] = (
+    weakref.WeakKeyDictionary()
+)
+_INDEX_REGISTRY_LOCK = threading.Lock()
+
+
+def _reset_index_registry() -> None:
+    """Clear the index registry. Intended for tests."""
+    with _INDEX_REGISTRY_LOCK:
+        _INDEX_REGISTRY.clear()
 
 
 class MongoDBSessionRepository(SessionRepository):
@@ -202,7 +224,23 @@ class MongoDBSessionRepository(SessionRepository):
         )
 
     def _ensure_indexes(self) -> None:
-        """Ensure necessary indexes exist on the collection."""
+        """Ensure necessary indexes exist on the collection.
+
+        Idempotent per client: the indexes are only sent to the server the first
+        time this collection is seen through a given MongoClient. See
+        _INDEX_REGISTRY for why.
+        """
+        registry_key = (
+            self.database.name,
+            self.collection.name,
+            tuple(self.metadata_fields or ()),
+        )
+        with _INDEX_REGISTRY_LOCK:
+            ensured = _INDEX_REGISTRY.get(self.client)
+            if ensured is not None and registry_key in ensured:
+                logger.debug("MongoDB indexes already ensured for this client")
+                return
+
         try:
             # Index on session timestamps
             self.collection.create_index("created_at")
@@ -219,7 +257,17 @@ class MongoDBSessionRepository(SessionRepository):
 
             logger.info("MongoDB indexes created successfully")
         except PyMongoError as e:
+            # Not recorded in the registry: a later manager should retry.
             logger.warning(f"Failed to create indexes: {e}")
+            return
+
+        try:
+            with _INDEX_REGISTRY_LOCK:
+                _INDEX_REGISTRY.setdefault(self.client, set()).add(registry_key)
+        except TypeError:
+            # Client does not support weak references (exotic test doubles).
+            # Losing the cache only costs round-trips, so carry on.
+            logger.debug("MongoDB client does not support weak references")
 
     @staticmethod
     def _parse_iso_datetime(dt_str: str) -> datetime:
@@ -372,24 +420,17 @@ class MongoDBSessionRepository(SessionRepository):
         agent_data["updated_at"] = self._parse_iso_datetime(session_agent.updated_at)
 
         try:
-            # Preserve original created_at timestamp
-            existing = self.collection.find_one(
-                {"_id": session_id}, {f"agents.{session_agent.agent_id}.created_at": 1}
-            )
-
-            created_at = now
-            if self._agent_exists(existing, session_agent.agent_id):
-                created_at = existing["agents"][session_agent.agent_id].get(
-                    "created_at", created_at
-                )
-
+            # created_at is deliberately absent from the $set: it was written by
+            # create_agent and an update that does not name it leaves it alone.
+            # Reading it back first would be a read-after-write, which on a
+            # secondaryPreferred cluster can return a stale document and end up
+            # overwriting the original timestamp with now.
             result = self.collection.update_one(
                 {"_id": session_id},
                 {
                     "$set": {
                         f"agents.{session_agent.agent_id}.agent_data": agent_data,
                         f"agents.{session_agent.agent_id}.updated_at": now,
-                        f"agents.{session_agent.agent_id}.created_at": created_at,
                         "updated_at": now,
                     }
                 },

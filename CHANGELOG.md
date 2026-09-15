@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.10.0] - 2026-09-15
+
+### Changed
+- **Half the MongoDB operations per turn**: a turn with a supervisor and a sub-agent went from 42 operations to 21 (21→15 updates, 13→6 finds, 8→0 `createIndexes`). On DocumentDB every write costs 40-55 ms regardless of its size, so this is about the *number* of round-trips, not the bytes
+- **Indexes are ensured once per client, not per session manager**: `_ensure_indexes()` ran on every `create_session_manager()`, and pymongo does not cache `create_index` — each call was a round-trip even when the index already existed. Now tracked in a `WeakKeyDictionary` keyed by `MongoClient`, so two clients against different clusters that share database and collection names each get their indexes
+- **Agent config is only written when it changes**: `_capture_agent_config()` rewrote the entire system prompt on every `sync_agent()`. Cached per `agent_id`, since one manager can serve several agents in a session
+- **Metrics and agent config travel in a single `update_one`**: both target the same document and used to be two separate writes
+
+### Fixed
+- **Metrics could be attributed to the wrong message** (silently): `_get_last_message_id()` queried the database milliseconds after `create_message()` pushed the message. On a `secondaryPreferred` cluster a lagging replica returned the previous `message_id`, so the metrics landed on message N-1 — or the filter matched nothing and the update was a no-op, unnoticed because `matched_count` was never checked. The value is now read from `_latest_agent_message`, which the parent class already tracks in memory, with a fallback to the query for restored sessions
+- **`update_agent()` could falsify an agent's `created_at`**: it read the timestamp back to rewrite it, another read-after-write. A stale read would replace the original with `now`. The field is now preserved by omission — a `$set` that does not name it leaves it alone
+- Sync updates that match no document are now logged instead of disappearing
+
+### Notes
+- No public API or document schema changes
+- The root `updated_at` keeps being refreshed on the last write of every turn — two external consumers derive "End" and "Duration" from it. Now pinned by a regression test
+
 ## [2026-03-23] PR #46 - Chore: release v0.9.1 (@iguinea)
 
 - Chore: release v0.9.1 — temperature in prompt_metadata

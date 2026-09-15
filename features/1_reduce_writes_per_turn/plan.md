@@ -1,6 +1,6 @@
 # Plan: reducir escrituras a MongoDB/DocumentDB por turno
 
-**Estado:** propuesta, pendiente de revisión
+**Estado:** implementado en v0.10.0 (issue #54). Ver §11 para el resultado medido.
 **Origen:** traza OTEL del runtime `mrg_assistant_whatsapp_runtime` (dev, eu-west-1),
 sesión de `genai-mrg-assistant-ov` sobre DocumentDB, colección `ov.whatsapp`, con
 mongodb-session-manager v0.9.1.
@@ -156,9 +156,16 @@ Identificado por el equipo consumidor en su propio repo, se arregla allí:
 **Objetivo:** bajar de 28 a ≤12 updates por turno sin cambiar la API pública ni el
 esquema del documento.
 
+**Corrección tras implementar:** ese objetivo de 12 es del **turno real completo**, que
+incluye los ahorros del lado del consumidor (quitar el sync doble de `sync_and_track`
+en los sub-agentes y mover el TTFT del supervisor a un hook, ~8 updates). Esta librería
+por sí sola llega a **15** en el escenario aislado equivalente, partiendo de 21. Mezclar
+ambas cifras llevó a fijar un criterio que ninguna implementación honesta podía cumplir
+sin la Fase 3, que está descartada. Los dos números son correctos; miden cosas distintas.
+
 | Criterio | Verificación |
 |----------|--------------|
-| ≤12 updates por turno (supervisor + sub-agente, 1 tool call) | Test de regresión con `CommandListener` |
+| ≤15 updates por turno de la librería sola (supervisor + sub-agente, 1 tool call) | Test de regresión con `CommandListener` |
 | 0 `createIndexes` a partir del segundo manager del proceso | Test de regresión |
 | 0 `find` en `_update_last_message_metrics` cuando el mensaje está en memoria (camino caliente) | Test de regresión; el fallback con `find` se testea aparte |
 | 0 `find` en `update_agent` | Test de regresión |
@@ -496,7 +503,25 @@ Si en el futuro se lanza (requiere credenciales de lectura contra DocumentDB dev
 cruce con los errores del runtime en la ventana temporal sigue siendo obligatorio antes
 de atribuir nada a replicación.
 
-## 10. Pendiente antes de implementar
+## 10. Resultado medido
+
+Mismo banco de pruebas, mismo escenario (supervisor + sub-agente, 1 tool call), contra
+MongoDB local. Turno estable (la sesión ya existe):
+
+| | v0.9.1 | v0.10.0 |
+|---|---|---|
+| `update` | 21 | 15 |
+| `find` | 13 | 6 |
+| `createIndexes` | 8 | 0 |
+| **total** | **42** | **21** |
+
+**50 % menos operaciones.** Las 15 escrituras restantes son 6 `create_message`, 8 syncs
+fusionados y 1 `update_agent`; bajar de ahí exige la Fase 3, descartada.
+
+Validación pendiente: traza nueva en dev, que es el único sitio donde se puede medir el
+eje que importa (latencia por escritura en DocumentDB).
+
+## 11. Pendiente antes de implementar
 
 - [ ] Revisión de este plan
 - [ ] Issue en GitHub (workflow-issue-driven, Phase 0)

@@ -640,12 +640,14 @@ db.sessions.find({"metadata.priority": "high"}).explain("executionStats")
 
 ### Automatic Index Creation
 
-**On Repository Initialization**:
+**Once per client, on the first repository that sees a collection** (since v0.10.0):
 ```python
 def _ensure_indexes(self):
-    # These indexes are created automatically
+    # Skipped entirely if this client already ensured this collection
     self.collection.create_index("created_at")
     self.collection.create_index("updated_at")
+    self.collection.create_index("session_id")
+    self.collection.create_index("application_name")
 
     # Optional metadata indexes
     if self.metadata_fields:
@@ -653,12 +655,47 @@ def _ensure_indexes(self):
             self.collection.create_index(f"metadata.{field}")
 ```
 
+**Why it is tracked**: pymongo does not cache `create_index` — every call is a
+round-trip to the server even when the index already exists. With a session
+manager created per request (the recommended factory pattern), that meant 4+
+round-trips per instantiation: 8 per turn in an application with a supervisor
+and a sub-agent.
+
+The registry is a `WeakKeyDictionary` keyed by `MongoClient`, not by collection
+name, so two clients pointing at different clusters that happen to share
+database and collection names each get their own indexes. Entries disappear
+when the client is closed and garbage collected. A failed `create_index` is not
+recorded, so the next manager retries.
+
 **Performance Impact**:
-- First initialization: 100-500ms (depends on collection size)
-- Subsequent initializations: <10ms (indexes already exist)
+- First initialization per client: 100-500ms (depends on collection size)
+- Subsequent managers: 0 round-trips
 - No impact on empty collections
 
-**Code Reference**: `/workspace/src/mongodb_session_manager/mongodb_session_repository.py` (lines 181-195)
+**Code Reference**: `src/mongodb_session_manager/mongodb_session_repository.py` (`_ensure_indexes`, `_INDEX_REGISTRY`)
+
+### Writes per Turn
+
+On DocumentDB every `update` costs 40-55 ms regardless of its size, so what
+drives latency is the **number** of round-trips, not the payload.
+
+A turn is driven by messages, not by streaming: the Strands SDK registers both
+`append_message` and `sync_agent` on the same `MessageAddedEvent`, plus a final
+`sync_agent` on `AfterInvocationEvent`. The same turn emitting 1 chunk or 200
+chunks produces exactly the same writes.
+
+Measured on a turn with a supervisor and a sub-agent (one tool call):
+
+| | v0.9.1 | v0.10.0 |
+|---|---|---|
+| `update` | 21 | 15 |
+| `find` | 13 | 6 |
+| `createIndexes` | 8 | 0 |
+| **total** | **42** | **21** |
+
+The remaining 15 writes break down as 6 `create_message` (one per message),
+8 fused syncs (metrics + agent config in a single `update_one`) and 1
+`update_agent`.
 
 ### Index Cardinality
 

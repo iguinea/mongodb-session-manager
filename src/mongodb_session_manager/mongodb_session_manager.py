@@ -191,6 +191,11 @@ class MongoDBSessionManager(RepositorySessionManager):
             **parent_kwargs,
         )
 
+        # Last (model, system_prompt) persisted per agent, to skip rewriting an
+        # unchanged agent config on every sync. Keyed by agent_id because a
+        # single manager can serve several agents in the same session.
+        self._agent_config_cache: Dict[str, tuple] = {}
+
         # Apply metadata hook if provided
         if metadata_hook:
             self._apply_metadata_hook(metadata_hook)
@@ -364,37 +369,116 @@ class MongoDBSessionManager(RepositorySessionManager):
         """
         super().sync_agent(agent, **kwargs)
 
+        # Metrics and agent config land on the same session document, so they
+        # are combined into a single update_one. On DocumentDB every write costs
+        # 40-55 ms regardless of its size, so the number of round-trips is what
+        # drives latency, not the number of bytes.
+        metrics_ops, message_id = self._build_metrics_update(agent)
+        config_ops, config_cache_entry = self._build_agent_config_update(agent)
+
+        self._apply_sync_update(
+            agent,
+            {**metrics_ops, **config_ops},
+            message_id if metrics_ops else None,
+            config_cache_entry if config_ops else None,
+        )
+
+    def _build_metrics_update(self, agent: Agent) -> tuple:
+        """Build the $set operations carrying event loop metrics.
+
+        Returns:
+            Tuple of (set operations, message_id they target). Both are empty
+            when there are no metrics yet or the last message is unknown.
+        """
         metrics_summary = agent.event_loop_metrics.get_summary()
         accumulated_metrics = metrics_summary.get("accumulated_metrics", {})
 
-        if accumulated_metrics.get("latencyMs", 0) > 0:
-            accumulated_usage = metrics_summary.get("accumulated_usage", {})
-            usage_data = {
-                "inputTokens": accumulated_usage.get("inputTokens", 0),
-                "outputTokens": accumulated_usage.get("outputTokens", 0),
-                "totalTokens": accumulated_usage.get("totalTokens", 0),
-                "cacheReadInputTokens": accumulated_usage.get(
-                    "cacheReadInputTokens", 0
-                ),
-                "cacheWriteInputTokens": accumulated_usage.get(
-                    "cacheWriteInputTokens", 0
-                ),
-            }
-            metrics_data = {
-                "latencyMs": accumulated_metrics.get("latencyMs", 0),
-                "timeToFirstByteMs": accumulated_metrics.get("timeToFirstByteMs", 0),
-            }
-            cycle_data = {
-                "cycle_count": metrics_summary.get("total_cycles", 0),
-                "total_duration": metrics_summary.get("total_duration", 0.0),
-                "average_cycle_time": metrics_summary.get("average_cycle_time", 0.0),
-            }
-            tool_usage = self._extract_tool_usage(metrics_summary.get("tool_usage", {}))
-            self._update_last_message_metrics(
-                agent, usage_data, metrics_data, cycle_data, tool_usage
-            )
+        if accumulated_metrics.get("latencyMs", 0) <= 0:
+            return {}, None
 
-        self._capture_agent_config(agent)
+        accumulated_usage = metrics_summary.get("accumulated_usage", {})
+        usage_data = {
+            "inputTokens": accumulated_usage.get("inputTokens", 0),
+            "outputTokens": accumulated_usage.get("outputTokens", 0),
+            "totalTokens": accumulated_usage.get("totalTokens", 0),
+            "cacheReadInputTokens": accumulated_usage.get("cacheReadInputTokens", 0),
+            "cacheWriteInputTokens": accumulated_usage.get("cacheWriteInputTokens", 0),
+        }
+        metrics_data = {
+            "latencyMs": accumulated_metrics.get("latencyMs", 0),
+            "timeToFirstByteMs": accumulated_metrics.get("timeToFirstByteMs", 0),
+        }
+        cycle_data = {
+            "cycle_count": metrics_summary.get("total_cycles", 0),
+            "total_duration": metrics_summary.get("total_duration", 0.0),
+            "average_cycle_time": metrics_summary.get("average_cycle_time", 0.0),
+        }
+        tool_usage = self._extract_tool_usage(metrics_summary.get("tool_usage", {}))
+
+        return self._metrics_set_operations(
+            agent, usage_data, metrics_data, cycle_data, tool_usage
+        )
+
+    def _metrics_set_operations(
+        self,
+        agent: Agent,
+        usage_data: Dict,
+        metrics_data: Dict,
+        cycle_data: Dict,
+        tool_usage: Dict,
+    ) -> tuple:
+        """Build the $set operations for the metrics of the last message."""
+        last_message_id = self._get_last_message_id(agent)
+        if last_message_id is None:
+            return {}, None
+
+        prefix = f"agents.{agent.agent_id}.messages.$.event_loop_metrics"
+        return {
+            f"{prefix}.accumulated_metrics": metrics_data,
+            f"{prefix}.accumulated_usage": usage_data,
+            f"{prefix}.cycle_metrics": cycle_data,
+            f"{prefix}.tool_usage": tool_usage,
+        }, last_message_id
+
+    def _apply_sync_update(
+        self,
+        agent: Agent,
+        set_operations: Dict,
+        message_id: Optional[int],
+        config_cache_entry: Optional[tuple],
+    ) -> None:
+        """Apply the agent's sync write, if there is anything to write.
+
+        Args:
+            agent: Agent being synced.
+            set_operations: Combined $set operations.
+            message_id: Message the positional operator should match, if the
+                operations target a message.
+            config_cache_entry: Agent config to remember as persisted, recorded
+                only once the write is known to have matched.
+        """
+        if not set_operations:
+            return
+
+        query: Dict[str, Any] = {"_id": self.session_id}
+        if message_id is not None:
+            query[f"agents.{agent.agent_id}.messages.message_id"] = message_id
+
+        result = self.session_repository.collection.update_one(
+            query, {"$set": set_operations}
+        )
+
+        if result.matched_count == 0:
+            # Silent no-op otherwise: the agent config would also be lost, since
+            # both halves travel in the same update.
+            logger.warning(
+                f"Sync update matched no document for agent {agent.agent_id} "
+                f"in session {self.session_id} (message_id={message_id})"
+            )
+            return
+
+        if config_cache_entry is not None:
+            self._agent_config_cache[agent.agent_id] = config_cache_entry
 
     def _extract_tool_usage(self, tool_usage_raw: Dict) -> Dict:
         """Extract simplified tool usage metrics for storage."""
@@ -412,7 +496,20 @@ class MongoDBSessionManager(RepositorySessionManager):
         return tool_usage
 
     def _get_last_message_id(self, agent: Agent) -> Optional[int]:
-        """Get the message_id of the last message for an agent."""
+        """Get the message_id of the last message for an agent.
+
+        Prefers the value the parent class already tracks in memory. Besides
+        saving a query, this avoids a read-after-write: the lookup used to run
+        milliseconds after create_message pushed the message, and on a
+        secondaryPreferred cluster a lagging replica would return the previous
+        message_id, silently attributing the metrics to the wrong message.
+        """
+        latest_message = getattr(self, "_latest_agent_message", {}).get(agent.agent_id)
+        if latest_message is not None:
+            return latest_message.message_id
+
+        # No message tracked yet (e.g. a restored session that has not appended
+        # anything in this process): fall back to reading it.
         doc = self.session_repository.collection.find_one(
             {"_id": self.session_id},
             {f"agents.{agent.agent_id}.messages": {"$slice": -1}},
@@ -431,43 +528,49 @@ class MongoDBSessionManager(RepositorySessionManager):
         tool_usage: Dict,
     ) -> None:
         """Update the last message in a session with event loop metrics."""
-        last_message_id = self._get_last_message_id(agent)
-        if last_message_id is None:
-            return
-        prefix = f"agents.{agent.agent_id}.messages.$.event_loop_metrics"
-        update_data = {
-            f"{prefix}.accumulated_metrics": metrics_data,
-            f"{prefix}.accumulated_usage": usage_data,
-            f"{prefix}.cycle_metrics": cycle_data,
-            f"{prefix}.tool_usage": tool_usage,
-        }
-        self.session_repository.collection.update_one(
-            {
-                "_id": self.session_id,
-                f"agents.{agent.agent_id}.messages.message_id": last_message_id,
-            },
-            {"$set": update_data},
+        set_operations, last_message_id = self._metrics_set_operations(
+            agent, usage_data, metrics_data, cycle_data, tool_usage
         )
+        self._apply_sync_update(agent, set_operations, last_message_id, None)
+
+    def _build_agent_config_update(self, agent: Agent) -> tuple:
+        """Build the $set operations for the agent configuration.
+
+        Returns empty operations when the configuration matches what was last
+        persisted for this agent. The system prompt does not change within a
+        turn, so rewriting it on every sync was the single largest source of
+        write traffic.
+
+        Returns:
+            Tuple of (set operations, value to cache once persisted).
+        """
+        model_id = self._extract_model_id(agent)
+        system_prompt = getattr(agent, "system_prompt", None)
+
+        cache_entry = (model_id, system_prompt)
+        if self._agent_config_cache.get(agent.agent_id) == cache_entry:
+            return {}, None
+
+        set_operations = {}
+        if model_id:
+            set_operations[f"agents.{agent.agent_id}.agent_data.model"] = model_id
+        if system_prompt:
+            set_operations[f"agents.{agent.agent_id}.agent_data.system_prompt"] = (
+                system_prompt
+            )
+
+        if not set_operations:
+            return {}, None
+
+        logger.debug(
+            f"Captured agent configuration for {agent.agent_id}: model={model_id or 'N/A'}"
+        )
+        return set_operations, cache_entry
 
     def _capture_agent_config(self, agent: Agent) -> None:
         """Capture and store agent configuration (model and system_prompt)."""
-        agent_config_update = {}
-        model_id = self._extract_model_id(agent)
-        if model_id:
-            agent_config_update[f"agents.{agent.agent_id}.agent_data.model"] = model_id
-        if hasattr(agent, "system_prompt") and agent.system_prompt:
-            agent_config_update[f"agents.{agent.agent_id}.agent_data.system_prompt"] = (
-                agent.system_prompt
-            )
-
-        if agent_config_update:
-            self.session_repository.collection.update_one(
-                {"_id": self.session_id},
-                {"$set": agent_config_update},
-            )
-            logger.debug(
-                f"Captured agent configuration for {agent.agent_id}: model={model_id or 'N/A'}"
-            )
+        set_operations, cache_entry = self._build_agent_config_update(agent)
+        self._apply_sync_update(agent, set_operations, None, cache_entry)
 
     def _extract_model_id(self, agent: Agent) -> Optional[str]:
         """Extract model identifier string from agent."""
