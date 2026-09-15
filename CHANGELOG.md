@@ -32,6 +32,7 @@
 - No public API or document schema changes
 - The root `updated_at` keeps being refreshed on the last write of every turn — two external consumers derive "End" and "Duration" from it. Now pinned by a regression test
 - `claude-review` fails for a reason outside this repository: the `CLAUDE_CODE_OAUTH_TOKEN` secret has expired (`API Error: 401`). It needs to be regenerated; no code change fixes it
+- Performance analysis of this release in `artifacts/analisis-rendimiento.md`; follow-up work is tracked in #56 (master issue), #64, #65 and #66
 
 ## [2026-03-23] PR #46 - Chore: release v0.9.1 (@iguinea)
 

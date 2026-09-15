@@ -33,3 +33,7 @@ logs
 # CLAUDE.md
 CLAUDE.local.md
 site/
+
+# Informes de análisis en artifacts/: se versionan el .md y el snapshot JSON.
+# La app HTML (7,9 MB de runtime Vite generado por Codex) no.
+artifacts/performance-report-html/

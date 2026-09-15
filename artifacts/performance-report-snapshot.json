@@ -1,0 +1,277 @@
+{
+  "surface": "report",
+  "title": "El siguiente salto de rendimiento está en leer menos y sincronizar menos",
+  "generatedAt": "2026-09-15T15:49:07Z",
+  "buildStatus": "complete",
+  "status": "reviewed",
+  "queries": {
+    "validation_checks": {
+      "rows": [
+        {
+          "check": "Pruebas unitarias",
+          "result": "passed",
+          "tests": 270,
+          "elapsedSeconds": 0.88
+        },
+        {
+          "check": "Pruebas de integración",
+          "result": "passed",
+          "tests": 37,
+          "elapsedSeconds": 1.07
+        }
+      ],
+      "source": {
+        "label": "Ejecuciones locales revisadas el 15 de septiembre de 2026",
+        "files": [
+          "tests/unit/",
+          "tests/integration/"
+        ],
+        "filters": [
+          "Python 3.12.13",
+          "MongoDB local accesible mediante localhost:8550",
+          "Sin AWS ni llamadas a modelos externos"
+        ],
+        "evidenceFlow": [
+          {
+            "title": "Suite unitaria",
+            "detail": "pytest ejecutado sobre tests/unit con bytecode y caché de pytest deshabilitados; 270 pruebas superadas."
+          },
+          {
+            "title": "Suite de integración",
+            "detail": "pytest ejecutado sobre tests/integration contra la instancia local de MongoDB; 37 pruebas superadas."
+          }
+        ],
+        "metricDefinitions": [
+          {
+            "label": "Pruebas superadas",
+            "definition": "Número de casos recopilados por pytest que terminaron correctamente en la ejecución indicada.",
+            "componentIds": [
+              "report-validation"
+            ],
+            "sourceLineage": [
+              {
+                "files": [
+                  "tests/unit/",
+                  "tests/integration/"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "turn_operations": {
+      "rows": [
+        {
+          "scenario": "Segundo turno: supervisor + subagente + una herramienta",
+          "elapsedMs": 17.21,
+          "totalCommands": 21,
+          "updates": 15,
+          "finds": 6,
+          "createIndexes": 0
+        }
+      ],
+      "methods": [
+        {
+          "language": "text",
+          "code": "Ejecutar un turno de calentamiento. Vaciar el contador. Activar CommandListener. Medir un segundo turno completo con time.perf_counter y contar comandos find, update y createIndexes."
+        }
+      ],
+      "source": {
+        "label": "Turno sintético instrumentado con PyMongo CommandListener",
+        "files": [
+          "tests/integration/test_write_amplification_integration.py"
+        ],
+        "filters": [
+          "Sesión existente y conexión caliente",
+          "Supervisor con un subagente y una llamada a herramienta",
+          "MongoDB local; el tiempo no debe extrapolarse directamente a DocumentDB"
+        ],
+        "evidenceFlow": [
+          {
+            "title": "Escenario",
+            "detail": "El modelo de prueba reproduce un supervisor que solicita datos a una herramienta respaldada por un subagente."
+          },
+          {
+            "title": "Instrumentación",
+            "detail": "CommandListener registra los comandos enviados por el cliente PyMongo después del calentamiento."
+          },
+          {
+            "title": "Limpieza",
+            "detail": "La sesión temporal se elimina al terminar la medición."
+          }
+        ],
+        "metricDefinitions": [
+          {
+            "label": "Comandos MongoDB",
+            "definition": "Comandos find, update y createIndexes observados por CommandListener durante el segundo turno medido.",
+            "componentIds": [
+              "report-executive-summary",
+              "report-turn-budget"
+            ],
+            "sourceLineage": [
+              {
+                "files": [
+                  "tests/integration/test_write_amplification_integration.py"
+                ]
+              }
+            ]
+          },
+          {
+            "label": "Tiempo local del turno",
+            "definition": "Tiempo de pared del segundo turno completo medido con una conexión local caliente; incluye el runtime sintético de Strands además de las operaciones MongoDB.",
+            "componentIds": [
+              "report-executive-summary",
+              "report-turn-budget"
+            ],
+            "sourceLineage": [
+              {
+                "files": [
+                  "tests/integration/test_write_amplification_integration.py"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "history_scaling": {
+      "rows": [
+        {
+          "messages": 10,
+          "documentKb": 6.5,
+          "page10ResponseCurrentKb": 6.3,
+          "page10ResponseSliceKb": 6.5,
+          "readSessionCurrentMs": 0.292,
+          "readSessionProjectedMs": 0.322,
+          "page10CurrentMs": 0.358,
+          "page10SliceMs": 0.363,
+          "countCurrentMs": 0.384,
+          "countServerMs": 0.307
+        },
+        {
+          "messages": 100,
+          "documentKb": 62.7,
+          "page10ResponseCurrentKb": 62.5,
+          "page10ResponseSliceKb": 6.5,
+          "readSessionCurrentMs": 0.559,
+          "readSessionProjectedMs": 0.317,
+          "page10CurrentMs": 0.536,
+          "page10SliceMs": 0.355,
+          "countCurrentMs": 0.543,
+          "countServerMs": 0.373
+        },
+        {
+          "messages": 1000,
+          "documentKb": 625.2,
+          "page10ResponseCurrentKb": 625.0,
+          "page10ResponseSliceKb": 6.5,
+          "readSessionCurrentMs": 2.684,
+          "readSessionProjectedMs": 0.329,
+          "page10CurrentMs": 2.614,
+          "page10SliceMs": 0.547,
+          "countCurrentMs": 4.197,
+          "countServerMs": 0.867
+        },
+        {
+          "messages": 5000,
+          "documentKb": 3129.1,
+          "page10ResponseCurrentKb": 3128.9,
+          "page10ResponseSliceKb": 6.5,
+          "readSessionCurrentMs": 13.592,
+          "readSessionProjectedMs": 0.465,
+          "page10CurrentMs": 14.522,
+          "page10SliceMs": 1.35,
+          "countCurrentMs": 13.283,
+          "countServerMs": 1.179
+        }
+      ],
+      "methods": [
+        {
+          "language": "text",
+          "code": "Crear un único documento temporal con un agente y N mensajes. Comparar find_one completo con proyección escalar; página actual que descarga, ordena y recorta con proyección $slice; y conteo descargando el array con proyección $size en servidor. Medir medianas con time.perf_counter."
+        },
+        {
+          "language": "text",
+          "code": "Calcular bytes de respuesta codificando el BSON devuelto. Eliminar el documento temporal después de todas las mediciones."
+        }
+      ],
+      "source": {
+        "label": "Benchmark sintético revisado de escalabilidad del historial",
+        "files": [
+          "src/mongodb_session_manager/mongodb_session_repository.py",
+          "src/mongodb_session_manager/mongodb_session_manager.py"
+        ],
+        "filters": [
+          "10, 100, 1.000 y 5.000 mensajes",
+          "Aproximadamente 512 caracteres de texto por mensaje",
+          "Mediana de 20 repeticiones; 8 repeticiones para 5.000 mensajes",
+          "MongoDB local y caliente"
+        ],
+        "evidenceFlow": [
+          {
+            "title": "Datos sintéticos controlados",
+            "detail": "Cada tamaño usa la misma forma de mensaje y modifica únicamente la longitud del historial."
+          },
+          {
+            "title": "Comparación directa",
+            "detail": "Las variantes actual y optimizada se ejecutan sobre el mismo documento caliente para aislar el efecto de la proyección."
+          },
+          {
+            "title": "Limitación",
+            "detail": "Los tiempos locales muestran escalabilidad relativa; no estiman la latencia de una red remota ni de DocumentDB."
+          }
+        ],
+        "metricDefinitions": [
+          {
+            "label": "Página actual",
+            "definition": "find_one que devuelve todo agents.a1.messages, seguido de ordenación cronológica y recorte a diez mensajes en Python.",
+            "componentIds": [
+              "report-executive-summary",
+              "report-history-scaling",
+              "report-history-table"
+            ],
+            "sourceLineage": [
+              {
+                "files": [
+                  "src/mongodb_session_manager/mongodb_session_repository.py"
+                ]
+              }
+            ]
+          },
+          {
+            "label": "Página con $slice",
+            "definition": "find_one con una proyección $slice que limita en MongoDB el array devuelto a diez mensajes.",
+            "componentIds": [
+              "report-executive-summary",
+              "report-history-scaling",
+              "report-history-table"
+            ],
+            "sourceLineage": [
+              {
+                "files": [
+                  "src/mongodb_session_manager/mongodb_session_repository.py"
+                ]
+              }
+            ]
+          },
+          {
+            "label": "Tamaño de respuesta",
+            "definition": "Tamaño BSON del documento devuelto por la consulta de página, expresado en kilobytes.",
+            "componentIds": [
+              "report-history-scaling",
+              "report-history-table"
+            ],
+            "sourceLineage": [
+              {
+                "files": [
+                  "src/mongodb_session_manager/mongodb_session_repository.py"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

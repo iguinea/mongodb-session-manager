@@ -523,8 +523,9 @@ eje que importa (latencia por escritura en DocumentDB).
 
 ## 11. Pendiente antes de implementar
 
-- [ ] Revisión de este plan
-- [ ] Issue en GitHub (workflow-issue-driven, Phase 0)
+- [x] Revisión de este plan — hecha; 4 correcciones incorporadas (§2.6, caché por agente,
+      registro por cliente, `matched_count`)
+- [x] Issue en GitHub — #54, implementada en el PR #55
 - [x] Confirmar que ningún consumidor depende de la granularidad de
       `agents.<id>.updated_at` — confirmado por el equipo de genai-mrg-assistant-ov
       sobre su repo; invariante del `updated_at` raíz verificada en §6
@@ -532,5 +533,17 @@ eje que importa (latencia por escritura en DocumentDB).
       timeline ordena por `agents.<id>.updated_at` — **no**; verificado en código
       (commit `ab66c36`), ordena por `created_at` del mensaje. Ver §6
 - [x] ~~Decidir si la Fase 2.6 necesita flag~~ — descartada en revisión (ver Fase 2.6)
-- [ ] Al implementar 1.1: confirmar que `MagicMock` admite weakref, o añadir fixture de
-      reset del registro de índices
+- [x] `MagicMock` admite weakref; además hay fixture de reset del registro
+      (`clean_index_registry` en `tests/unit/test_write_amplification.py`)
+
+## 12. Seguimiento
+
+El informe `artifacts/analisis-rendimiento.md` (15/09/2026) parte del estado de este plan
+y mide 21 comandos por turno. El trabajo posterior se coordina en la issue maestra #56:
+
+- #65 — hidratar la caché de configuración desde `read_agent()` (−2 escrituras)
+- #66 — métricas obsoletas en `MessageAdded` y atribución corrida un ciclo (−2 escrituras)
+- #64 — `update_message()` posicional (seguridad; ventana de carrera en la redacción)
+- #57 / #58 — lecturas de restauración y paginación en servidor (6 → ≤4 `find`)
+
+Presupuesto objetivo del turno de referencia tras #65 + #66: 11 `update`.
