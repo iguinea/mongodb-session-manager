@@ -331,12 +331,12 @@ class TestAgentOperations:
 
         # Left out of the SessionAgent, but handed over to the session manager
         # (issue #65): once, and only for the session they were read from.
-        assert mock_repository._pop_read_agent_config("s2", "a1") is None
-        assert mock_repository._pop_read_agent_config("s1", "a1") == {
+        assert mock_repository.pop_read_agent_config("s2", "a1") is None
+        assert mock_repository.pop_read_agent_config("s1", "a1") == {
             "model": "claude-3",
             "system_prompt": "You are helpful",
         }
-        assert mock_repository._pop_read_agent_config("s1", "a1") is None
+        assert mock_repository.pop_read_agent_config("s1", "a1") is None
 
     def test_update_agent(
         self, mock_repository, mock_mongo_collection, sample_session_agent
@@ -928,3 +928,401 @@ class TestGetApplicationName:
     ):
         mock_mongo_collection.find_one.return_value = None
         assert mock_repository.get_application_name("missing") is None
+
+
+# ---------------------------------------------------------------------------
+# Write primitives (#80)
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateMessageFields:
+    """El primitivo posicional que comparten los tres escritores de mensajes.
+
+    Antes de #80, el filtro `{"_id", "agents.<id>.messages.message_id"}` y el
+    prefijo `agents.<id>.messages.$.` se construían a mano en tres sitios:
+    `update_message()`, y los dos accesos directos a la colección del session
+    manager. Aquí viven una sola vez.
+    """
+
+    def test_prefixes_relative_keys_with_the_positional_path(
+        self, mock_repository, mock_mongo_collection
+    ):
+        """El llamante nombra campos del mensaje; el prefijo lo pone el repositorio."""
+        mock_repository.update_message_fields(
+            "s1", "a1", 3, {"event_loop_metrics.cycle_metrics": {"cycle_count": 2}}
+        )
+
+        set_data = mock_mongo_collection.update_one.call_args[0][1]["$set"]
+        assert set_data["agents.a1.messages.$.event_loop_metrics.cycle_metrics"] == {
+            "cycle_count": 2
+        }
+
+    def test_matches_the_message_by_message_id(
+        self, mock_repository, mock_mongo_collection
+    ):
+        mock_repository.update_message_fields("s1", "a1", 7, {"guardrail_event": {}})
+
+        query = mock_mongo_collection.update_one.call_args[0][0]
+        assert query["_id"] == "s1"
+        assert query["agents.a1.messages.message_id"] == 7
+
+    def test_agent_fields_travel_in_the_same_write(
+        self, mock_repository, mock_mongo_collection
+    ):
+        """Métricas y configuración del agente comparten round-trip.
+
+        Es la optimización que sostiene el presupuesto de escrituras por turno:
+        en DocumentDB cada escritura cuesta 40-55 ms sin importar su tamaño.
+        """
+        mock_repository.update_message_fields(
+            "s1",
+            "a1",
+            3,
+            {"event_loop_metrics.accumulated_usage": {"totalTokens": 10}},
+            agent_set_operations={"agent_data.model": "claude-opus-5"},
+        )
+
+        assert mock_mongo_collection.update_one.call_count == 1
+        set_data = mock_mongo_collection.update_one.call_args[0][1]["$set"]
+        assert set_data["agents.a1.agent_data.model"] == "claude-opus-5"
+        assert "agents.a1.messages.$.event_loop_metrics.accumulated_usage" in set_data
+
+    def test_returns_true_when_a_document_matched(self, mock_repository):
+        assert mock_repository.update_message_fields("s1", "a1", 1, {"x": 1}) is True
+
+    def test_returns_false_when_nothing_matched(
+        self, mock_repository, mock_mongo_collection
+    ):
+        """No lanza: cada llamante decide qué hacer con un no-match.
+
+        `update_message()` lo convierte en ValueError, el sync lo loguea y el
+        guardarraíl lo ignora. `matched_count` no sale del repositorio.
+        """
+        mock_mongo_collection.update_one.return_value = MagicMock(
+            matched_count=0, modified_count=0
+        )
+        assert mock_repository.update_message_fields("s1", "a1", 1, {"x": 1}) is False
+
+    def test_touch_timestamps_refreshes_the_three_levels(
+        self, mock_repository, mock_mongo_collection
+    ):
+        """Una redacción sí es un cambio visible de la sesión.
+
+        El flag vive solo en el primitivo privado: ningún llamante externo tiene
+        por qué decidir si una escritura mueve el reloj de la sesión.
+        """
+        mock_repository._update_message_document(
+            "s1", "a1", 1, {"message": {}}, touch_timestamps=True
+        )
+
+        set_data = mock_mongo_collection.update_one.call_args[0][1]["$set"]
+        assert set_data["agents.a1.messages.$.updated_at"] == set_data["updated_at"]
+        assert set_data["agents.a1.updated_at"] == set_data["updated_at"]
+
+    def test_without_touch_timestamps_no_updated_at_is_written(
+        self, mock_repository, mock_mongo_collection
+    ):
+        """Anotar métricas o un guardrail_event no mueve el reloj de la sesión.
+
+        El `updated_at` raíz mide actividad conversacional; las anotaciones que
+        el manager hace sobre el turno recién cerrado no lo son.
+        """
+        mock_repository.update_message_fields("s1", "a1", 1, {"guardrail_event": {}})
+
+        set_data = mock_mongo_collection.update_one.call_args[0][1]["$set"]
+        assert "updated_at" not in set_data
+        assert "agents.a1.updated_at" not in set_data
+
+    def test_does_not_read_before_writing(self, mock_repository, mock_mongo_collection):
+        mock_repository.update_message_fields("s1", "a1", 1, {"x": 1})
+        assert mock_mongo_collection.find_one.call_count == 0
+
+    def test_no_write_when_there_is_nothing_to_set(
+        self, mock_repository, mock_mongo_collection
+    ):
+        assert mock_repository.update_message_fields("s1", "a1", 1, {}) is False
+        assert mock_mongo_collection.update_one.call_count == 0
+
+
+class TestUpdateAgentFields:
+    """El hermano no posicional: escribe bajo el agente, sin tocar sus mensajes."""
+
+    def test_prefixes_keys_with_the_agent_path(
+        self, mock_repository, mock_mongo_collection
+    ):
+        mock_repository.update_agent_fields(
+            "s1", "a1", {"agent_data.system_prompt": "hola"}
+        )
+
+        set_data = mock_mongo_collection.update_one.call_args[0][1]["$set"]
+        assert set_data["agents.a1.agent_data.system_prompt"] == "hola"
+
+    def test_filter_has_no_positional_clause(
+        self, mock_repository, mock_mongo_collection
+    ):
+        """Sin métricas no hay mensaje al que apuntar: el filtro es solo la sesión.
+
+        Colar aquí una cláusula posicional dejaría la configuración sin escribir
+        en el primer sync de un agente que todavía no tiene mensajes.
+        """
+        mock_repository.update_agent_fields("s1", "a1", {"agent_data.model": "m"})
+
+        query = mock_mongo_collection.update_one.call_args[0][0]
+        assert query == {"_id": "s1"}
+
+    def test_returns_false_when_the_session_is_missing(
+        self, mock_repository, mock_mongo_collection
+    ):
+        mock_mongo_collection.update_one.return_value = MagicMock(
+            matched_count=0, modified_count=0
+        )
+        assert (
+            mock_repository.update_agent_fields("s1", "a1", {"agent_data.model": "m"})
+            is False
+        )
+
+    def test_no_write_when_there_is_nothing_to_set(
+        self, mock_repository, mock_mongo_collection
+    ):
+        assert mock_repository.update_agent_fields("s1", "a1", {}) is False
+        assert mock_mongo_collection.update_one.call_count == 0
+
+
+class TestRecordGuardrailEvent:
+    """La intervención de un guardarraíl se anota en el mensaje y en la sesión.
+
+    Antes de #80 el session manager construía los dos eventos a mano y decidía
+    allí qué campos llevaba cada uno. La regla —el trace completo se queda en el
+    mensaje— vive ahora en un solo sitio.
+    """
+
+    @staticmethod
+    def _event(**extra):
+        return {
+            "action": "BLOCKED",
+            "timestamp": datetime.now(UTC),
+            **extra,
+        }
+
+    def test_writes_the_event_on_the_message(
+        self, mock_repository, mock_mongo_collection
+    ):
+        event = self._event()
+        mock_repository.record_guardrail_event("s1", "a1", 5, event)
+
+        set_data = mock_mongo_collection.update_one.call_args[0][1]["$set"]
+        assert set_data["agents.a1.messages.$.guardrail_event"] == event
+
+    def test_message_and_session_event_share_one_write(
+        self, mock_repository, mock_mongo_collection
+    ):
+        """Una sola escritura: el $set del mensaje y el $push de la sesión juntos."""
+        mock_repository.record_guardrail_event("s1", "a1", 5, self._event())
+
+        assert mock_mongo_collection.update_one.call_count == 1
+        update = mock_mongo_collection.update_one.call_args[0][1]
+        assert "$set" in update
+        assert "$push" in update
+
+    def test_session_event_identifies_the_message(
+        self, mock_repository, mock_mongo_collection
+    ):
+        mock_repository.record_guardrail_event("s1", "a1", 5, self._event())
+
+        pushed = mock_mongo_collection.update_one.call_args[0][1]["$push"][
+            "guardrail_events"
+        ]
+        assert pushed["message_id"] == 5
+        assert pushed["agent_id"] == "a1"
+        assert pushed["action"] == "BLOCKED"
+        assert "timestamp" in pushed
+
+    def test_session_event_excludes_the_full_trace(
+        self, mock_repository, mock_mongo_collection
+    ):
+        """El trace es voluminoso: se guarda en el mensaje, no en el array de sesión.
+
+        El array crece con cada intervención y se lee entero para auditar; meter
+        ahí el GuardrailTrace completo lo haría impracticable.
+        """
+        event = self._event(trace={"inputAssessment": {"huge": "payload"}})
+        mock_repository.record_guardrail_event("s1", "a1", 5, event)
+
+        update = mock_mongo_collection.update_one.call_args[0][1]
+        assert update["$set"]["agents.a1.messages.$.guardrail_event"]["trace"] == {
+            "inputAssessment": {"huge": "payload"}
+        }
+        assert "trace" not in update["$push"]["guardrail_events"]
+
+    def test_session_event_keeps_the_queryable_summary(
+        self, mock_repository, mock_mongo_collection
+    ):
+        """Lo que sí es consultable acompaña al evento de sesión."""
+        event = self._event(
+            stop_reason="guardrail_intervened",
+            policies_triggered={"contentPolicy": ["HATE/HIGH"]},
+        )
+        mock_repository.record_guardrail_event("s1", "a1", 5, event)
+
+        pushed = mock_mongo_collection.update_one.call_args[0][1]["$push"][
+            "guardrail_events"
+        ]
+        assert pushed["stop_reason"] == "guardrail_intervened"
+        assert pushed["policies_triggered"] == {"contentPolicy": ["HATE/HIGH"]}
+
+    def test_does_not_move_the_session_clock(
+        self, mock_repository, mock_mongo_collection
+    ):
+        """Anotar un turno ya cerrado no es actividad conversacional."""
+        mock_repository.record_guardrail_event("s1", "a1", 5, self._event())
+
+        set_data = mock_mongo_collection.update_one.call_args[0][1]["$set"]
+        assert "updated_at" not in set_data
+
+    def test_returns_false_when_nothing_matched(
+        self, mock_repository, mock_mongo_collection
+    ):
+        mock_mongo_collection.update_one.return_value = MagicMock(
+            matched_count=0, modified_count=0
+        )
+        assert (
+            mock_repository.record_guardrail_event("s1", "a1", 5, self._event())
+            is False
+        )
+
+
+# ---------------------------------------------------------------------------
+# Domain reads (#80)
+# ---------------------------------------------------------------------------
+
+
+class TestAgentConfigReads:
+    """Lecturas que el session manager hacía contra la colección a pelo."""
+
+    def test_get_agent_config_returns_the_stored_fields(
+        self, mock_repository, mock_mongo_collection
+    ):
+        mock_mongo_collection.find_one.return_value = {
+            "agents": {
+                "a1": {
+                    "agent_data": {
+                        "model": "claude-opus-5",
+                        "system_prompt": "eres util",
+                        "prompt_metadata": {"prompt_id": "p-1"},
+                    }
+                }
+            }
+        }
+
+        config = mock_repository.get_agent_config("s1", "a1")
+
+        assert config == {
+            "agent_id": "a1",
+            "model": "claude-opus-5",
+            "system_prompt": "eres util",
+            "prompt_metadata": {"prompt_id": "p-1"},
+        }
+
+    def test_get_agent_config_returns_none_when_the_agent_is_unknown(
+        self, mock_repository, mock_mongo_collection
+    ):
+        mock_mongo_collection.find_one.return_value = {"agents": {}}
+        assert mock_repository.get_agent_config("s1", "missing") is None
+
+    def test_get_agent_config_returns_none_when_the_session_is_unknown(
+        self, mock_repository, mock_mongo_collection
+    ):
+        mock_mongo_collection.find_one.return_value = None
+        assert mock_repository.get_agent_config("missing", "a1") is None
+
+    def test_get_agent_config_does_not_project_the_messages(
+        self, mock_repository, mock_mongo_collection
+    ):
+        """Proyectar el agente entero traería su historial completo."""
+        mock_mongo_collection.find_one.return_value = {"agents": {}}
+        mock_repository.get_agent_config("s1", "a1")
+
+        projection = mock_mongo_collection.find_one.call_args[0][1]
+        assert projection == {"agents.a1.agent_data": 1}
+
+    def test_missing_fields_come_back_as_none(
+        self, mock_repository, mock_mongo_collection
+    ):
+        mock_mongo_collection.find_one.return_value = {
+            "agents": {"a1": {"agent_data": {}}}
+        }
+
+        config = mock_repository.get_agent_config("s1", "a1")
+
+        assert config["model"] is None
+        assert config["system_prompt"] is None
+        assert config["prompt_metadata"] is None
+
+    def test_list_agent_configs_returns_one_entry_per_agent(
+        self, mock_repository, mock_mongo_collection
+    ):
+        mock_mongo_collection.find_one.return_value = {
+            "agents": {
+                "a1": {"agent_data": {"model": "m1"}},
+                "a2": {"agent_data": {"model": "m2"}},
+            }
+        }
+
+        configs = mock_repository.list_agent_configs("s1")
+
+        assert {c["agent_id"] for c in configs} == {"a1", "a2"}
+        assert {c["model"] for c in configs} == {"m1", "m2"}
+
+    def test_list_agent_configs_returns_empty_when_there_are_no_agents(
+        self, mock_repository, mock_mongo_collection
+    ):
+        mock_mongo_collection.find_one.return_value = None
+        assert mock_repository.list_agent_configs("s1") == []
+
+
+class TestMessageReads:
+    def test_count_messages_counts_the_array(
+        self, mock_repository, mock_mongo_collection
+    ):
+        mock_mongo_collection.find_one.return_value = {
+            "agents": {"a1": {"messages": [{"message_id": 0}, {"message_id": 1}]}}
+        }
+        assert mock_repository.count_messages("s1", "a1") == 2
+
+    def test_count_messages_returns_zero_for_an_unknown_agent(
+        self, mock_repository, mock_mongo_collection
+    ):
+        mock_mongo_collection.find_one.return_value = {"agents": {}}
+        assert mock_repository.count_messages("s1", "missing") == 0
+
+    def test_get_last_message_id_returns_the_last_one(
+        self, mock_repository, mock_mongo_collection
+    ):
+        mock_mongo_collection.find_one.return_value = {
+            "agents": {"a1": {"messages": [{"message_id": 7}]}}
+        }
+        assert mock_repository.get_last_message_id("s1", "a1") == 7
+
+    def test_get_last_message_id_slices_the_array_server_side(
+        self, mock_repository, mock_mongo_collection
+    ):
+        """Solo el último mensaje viaja por la red, no el historial entero."""
+        mock_mongo_collection.find_one.return_value = {"agents": {}}
+        mock_repository.get_last_message_id("s1", "a1")
+
+        projection = mock_mongo_collection.find_one.call_args[0][1]
+        assert projection == {"agents.a1.messages": {"$slice": -1}}
+
+    def test_get_last_message_id_returns_none_without_messages(
+        self, mock_repository, mock_mongo_collection
+    ):
+        mock_mongo_collection.find_one.return_value = {
+            "agents": {"a1": {"messages": []}}
+        }
+        assert mock_repository.get_last_message_id("s1", "a1") is None
+
+    def test_get_last_message_id_returns_none_for_an_unknown_agent(
+        self, mock_repository, mock_mongo_collection
+    ):
+        mock_mongo_collection.find_one.return_value = {"agents": {}}
+        assert mock_repository.get_last_message_id("s1", "missing") is None

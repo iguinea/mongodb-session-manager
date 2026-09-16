@@ -6,6 +6,7 @@ import logging
 import secrets
 import threading
 import weakref
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 
@@ -215,7 +216,7 @@ class MongoDBSessionRepository(SessionRepository):
         self.database: Database = self.client[database_name]
         self.collection: Collection = self.database[collection_name]
         self.metadata_fields = metadata_fields
-        # Config found by the last read_agent(); see _pop_read_agent_config().
+        # Config found by the last read_agent(); see pop_read_agent_config().
         self._last_read_agent_config: dict[tuple[str, str], dict[str, Any]] = {}
         # Create indexes for timestamp ordering (only once per collection)
         self._ensure_indexes()
@@ -285,6 +286,11 @@ class MongoDBSessionRepository(SessionRepository):
     def _filter_message_data(msg_data: dict) -> dict:
         """Filter out fields that SessionMessage.__init__() does not accept."""
         return {k: v for k, v in msg_data.items() if k not in _MESSAGE_EXCLUDED_FIELDS}
+
+    @staticmethod
+    def _filter_agent_data(agent_data: Mapping[str, Any]) -> dict:
+        """Filter out fields that SessionAgent.__init__() does not accept."""
+        return {k: v for k, v in agent_data.items() if k not in _AGENT_CONFIG_FIELDS}
 
     def create_session(self, session: Session, **kwargs: Any) -> Session:
         """Create a new Session in MongoDB.
@@ -403,11 +409,7 @@ class MongoDBSessionRepository(SessionRepository):
 
             agent_data = doc["agents"][agent_id]["agent_data"]
 
-            filtered_agent_data = {
-                k: v for k, v in agent_data.items() if k not in _AGENT_CONFIG_FIELDS
-            }
-
-            session_agent = SessionAgent(**filtered_agent_data)
+            session_agent = SessionAgent(**self._filter_agent_data(agent_data))
             self._last_read_agent_config = {
                 (session_id, agent_id): {
                     "model": agent_data.get("model"),
@@ -421,10 +423,14 @@ class MongoDBSessionRepository(SessionRepository):
             logger.error(f"Failed to read agent {agent_id}: {e}")
             raise
 
-    def _pop_read_agent_config(
+    def pop_read_agent_config(
         self, session_id: str, agent_id: str
     ) -> dict[str, Any] | None:
         """Return, and forget, the agent config found by read_agent().
+
+        Public because the session manager calls it: a method reached from
+        another class is part of the interface whatever the underscore says,
+        and any repository passed as session_repository= has to provide it.
 
         read_agent() already fetches model and system_prompt but cannot return
         them inside a SessionAgent. The session manager takes them from here to
@@ -575,6 +581,152 @@ class MongoDBSessionRepository(SessionRepository):
             f"of session {session_id}"
         )
 
+    def _update_message_document(
+        self,
+        session_id: str,
+        agent_id: str,
+        message_id: int,
+        message_fields: Mapping[str, Any],
+        *,
+        agent_fields: Mapping[str, Any] | None = None,
+        push: Mapping[str, Any] | None = None,
+        touch_timestamps: bool = False,
+    ) -> bool:
+        """Write fields onto one message, located server-side by message_id.
+
+        This is the only place in the project that builds the positional
+        selector. Everything that writes on a message goes through here:
+        update_message(), the turn metrics and the guardrail event. Keeping it
+        in one place is what makes the message identity of issue #78 a local
+        change instead of a hunt across three call sites.
+
+        Args:
+            message_fields: Keys relative to the message document
+                ("guardrail_event", "event_loop_metrics.cycle_metrics"). The
+                positional prefix is this method's business, not the caller's.
+            agent_fields: Keys relative to the agent document, to land in the
+                same round-trip.
+            push: Absolute paths to $push onto. Stays private precisely because
+                these keys are not prefixed by anything the repository owns.
+            touch_timestamps: Refresh updated_at on message, agent and session.
+                Private on purpose: a redaction is a visible change to the
+                session, but annotating a turn that already happened is not, and
+                moving the session clock for it would misreport session duration
+                to its consumers.
+
+        Returns:
+            True when the filter matched a document. A no-match is not an error
+            here: update_message() turns it into a ValueError, the agent sync
+            logs it and the guardrail event ignores it. matched_count is pymongo
+            vocabulary and does not leave this class.
+        """
+        message_prefix = f"agents.{agent_id}.messages.$"
+        set_operations: dict[str, Any] = {
+            f"{message_prefix}.{name}": value for name, value in message_fields.items()
+        }
+
+        if agent_fields:
+            set_operations.update(
+                {
+                    f"agents.{agent_id}.{name}": value
+                    for name, value in agent_fields.items()
+                }
+            )
+
+        if touch_timestamps:
+            now = datetime.now(UTC)
+            set_operations[f"{message_prefix}.updated_at"] = now
+            set_operations[f"agents.{agent_id}.updated_at"] = now
+            set_operations["updated_at"] = now
+
+        if not set_operations and not push:
+            return False
+
+        update: dict[str, Any] = {}
+        if set_operations:
+            update["$set"] = set_operations
+        if push:
+            update["$push"] = dict(push)
+
+        try:
+            # message_id is not a unique key -- Strands derives it in memory --
+            # so a duplicated id matches its first occurrence only. See #78.
+            result = self.collection.update_one(
+                {
+                    "_id": session_id,
+                    f"agents.{agent_id}.messages.message_id": message_id,
+                },
+                update,
+            )
+        except PyMongoError as e:
+            logger.error(
+                f"Failed to update message {message_id} of agent {agent_id} "
+                f"in session {session_id}: {e}"
+            )
+            raise
+
+        return result.matched_count > 0
+
+    def update_message_fields(
+        self,
+        session_id: str,
+        agent_id: str,
+        message_id: int,
+        set_operations: Mapping[str, Any],
+        agent_set_operations: Mapping[str, Any] | None = None,
+    ) -> bool:
+        """Write fields on one message, and optionally on its agent, in one write.
+
+        Args:
+            set_operations: Keys relative to the message document.
+            agent_set_operations: Keys relative to the agent document
+                ("agent_data.model"). They travel in the same round-trip: on
+                DocumentDB every write costs 40-55 ms regardless of its size,
+                so what drives latency is the number of round-trips.
+
+        Returns:
+            True when the filter matched a document.
+        """
+        return self._update_message_document(
+            session_id,
+            agent_id,
+            message_id,
+            set_operations,
+            agent_fields=agent_set_operations,
+        )
+
+    def update_agent_fields(
+        self, session_id: str, agent_id: str, set_operations: Mapping[str, Any]
+    ) -> bool:
+        """Write fields under agents.<agent_id> without touching its messages.
+
+        The non-positional sibling of update_message_fields(): the filter names
+        the session only. Used when there is no message to point at, such as the
+        first sync of an agent that has not appended anything yet.
+
+        Args:
+            set_operations: Keys relative to the agent document.
+
+        Returns:
+            True when the session was found.
+        """
+        if not set_operations:
+            return False
+
+        prefixed = {
+            f"agents.{agent_id}.{name}": value for name, value in set_operations.items()
+        }
+
+        try:
+            result = self.collection.update_one({"_id": session_id}, {"$set": prefixed})
+        except PyMongoError as e:
+            logger.error(
+                f"Failed to update agent {agent_id} in session {session_id}: {e}"
+            )
+            raise
+
+        return result.matched_count > 0
+
     def update_message(
         self,
         session_id: str,
@@ -599,38 +751,25 @@ class MongoDBSessionRepository(SessionRepository):
         Note that message_id is not a unique key -- Strands derives it in memory
         -- so a duplicated id matches its first occurrence only. See issue #78.
         """
-        now = datetime.now(UTC)
-        message_prefix = f"agents.{agent_id}.messages.$"
+        matched = self._update_message_document(
+            session_id,
+            agent_id,
+            session_message.message_id,
+            {
+                "message": session_message.message,
+                "redact_message": session_message.redact_message,
+            },
+            touch_timestamps=True,
+        )
 
-        set_operations: dict[str, Any] = {
-            f"{message_prefix}.message": session_message.message,
-            f"{message_prefix}.redact_message": session_message.redact_message,
-            f"{message_prefix}.updated_at": now,
-            f"agents.{agent_id}.updated_at": now,
-            "updated_at": now,
-        }
-
-        try:
-            result = self.collection.update_one(
-                {
-                    "_id": session_id,
-                    f"agents.{agent_id}.messages.message_id": session_message.message_id,
-                },
-                {"$set": set_operations},
+        if not matched:
+            raise self._missing_message_error(
+                session_id, agent_id, session_message.message_id
             )
 
-            if result.matched_count == 0:
-                raise self._missing_message_error(
-                    session_id, agent_id, session_message.message_id
-                )
-
-            logger.info(
-                f"Updated message {session_message.message_id} for agent {agent_id}"
-            )
-
-        except PyMongoError as e:
-            logger.error(f"Failed to update message: {e}")
-            raise
+        logger.info(
+            f"Updated message {session_message.message_id} for agent {agent_id}"
+        )
 
     def list_messages(
         self,
@@ -823,5 +962,148 @@ class MongoDBSessionRepository(SessionRepository):
         except PyMongoError as e:
             logger.error(
                 f"Failed to get application_name for session {session_id}: {e}"
+            )
+            raise
+
+    def record_guardrail_event(
+        self, session_id: str, agent_id: str, message_id: int, event: Mapping[str, Any]
+    ) -> bool:
+        """Record a guardrail intervention on its message and on the session.
+
+        The session-level entry is derived from the message one: the same fields
+        plus the identifiers needed to find the message again, minus the full
+        GuardrailTrace. The session array is read whole to audit a session and
+        grows with every intervention, so the trace stays on the message, where
+        it is read only when someone opens that message.
+
+        Both halves travel in a single write.
+
+        Args:
+            event: The guardrail event as stored on the message, trace included.
+
+        Returns:
+            True when the message was found.
+        """
+        return self._update_message_document(
+            session_id,
+            agent_id,
+            message_id,
+            {"guardrail_event": event},
+            push={
+                "guardrail_events": self._session_guardrail_entry(
+                    agent_id, message_id, event
+                )
+            },
+        )
+
+    @staticmethod
+    def _session_guardrail_entry(
+        agent_id: str, message_id: int, event: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Derive the session-level guardrail entry from the message-level one.
+
+        Shared with the in-memory double so the rule -- the full trace stays on
+        the message -- cannot drift between the two implementations.
+        """
+        return {
+            "message_id": message_id,
+            "agent_id": agent_id,
+            **{name: value for name, value in event.items() if name != "trace"},
+        }
+
+    @staticmethod
+    def _agent_config(agent_id: str, agent_data: Mapping[str, Any]) -> dict[str, Any]:
+        """Shape the configuration a session stores for one agent."""
+        return {
+            "agent_id": agent_id,
+            "model": agent_data.get("model"),
+            "system_prompt": agent_data.get("system_prompt"),
+            "prompt_metadata": agent_data.get("prompt_metadata"),
+        }
+
+    def get_agent_config(self, session_id: str, agent_id: str) -> dict[str, Any] | None:
+        """Read the stored configuration of one agent, None when it does not exist.
+
+        Unlike pop_read_agent_config(), this is a standalone read that consumes
+        nothing and also carries prompt_metadata.
+        """
+        try:
+            # Projecting agents.<id> would pull the agent subdocument with its
+            # whole messages array; only agent_data is needed here.
+            doc = self.collection.find_one(
+                {"_id": session_id}, {f"agents.{agent_id}.agent_data": 1}
+            )
+
+            if not self._agent_exists(doc, agent_id):
+                logger.debug(f"Agent {agent_id} not found in session {session_id}")
+                return None
+
+            return self._agent_config(
+                agent_id, doc["agents"][agent_id].get("agent_data", {})
+            )
+        except PyMongoError as e:
+            logger.error(
+                f"Failed to read config of agent {agent_id} "
+                f"in session {session_id}: {e}"
+            )
+            raise
+
+    def list_agent_configs(self, session_id: str) -> list[dict[str, Any]]:
+        """List the stored configuration of every agent in the session."""
+        try:
+            doc = self.collection.find_one({"_id": session_id}, {"agents": 1})
+
+            if not doc or "agents" not in doc:
+                logger.debug(f"No agents found in session {session_id}")
+                return []
+
+            return [
+                self._agent_config(agent_id, agent_obj.get("agent_data", {}))
+                for agent_id, agent_obj in doc["agents"].items()
+            ]
+        except PyMongoError as e:
+            logger.error(f"Failed to list agents of session {session_id}: {e}")
+            raise
+
+    def count_messages(self, session_id: str, agent_id: str) -> int:
+        """Count the messages stored for one agent, 0 when the agent is unknown."""
+        try:
+            doc = self.collection.find_one(
+                {"_id": session_id}, {f"agents.{agent_id}.messages": 1}
+            )
+
+            if not self._agent_exists(doc, agent_id):
+                return 0
+
+            return len(doc["agents"][agent_id].get("messages", []))
+        except PyMongoError as e:
+            logger.error(
+                f"Failed to count messages of agent {agent_id} "
+                f"in session {session_id}: {e}"
+            )
+            raise
+
+    def get_last_message_id(self, session_id: str, agent_id: str) -> int | None:
+        """Read the message_id of the agent's last message, None when there is none.
+
+        The second place that resolves message identity, after
+        _update_message_document(). See #78.
+        """
+        try:
+            # $slice keeps the whole history from travelling over the wire.
+            doc = self.collection.find_one(
+                {"_id": session_id},
+                {f"agents.{agent_id}.messages": {"$slice": -1}},
+            )
+
+            if not self._agent_exists(doc, agent_id):
+                return None
+
+            messages = doc["agents"][agent_id].get("messages", [])
+            return messages[-1]["message_id"] if messages else None
+        except PyMongoError as e:
+            logger.error(
+                f"Failed to read the last message id of agent {agent_id} "
+                f"in session {session_id}: {e}"
             )
             raise

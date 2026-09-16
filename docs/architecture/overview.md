@@ -196,6 +196,20 @@ read_message(session_id, agent_id, message_id, **kwargs) -> Optional[SessionMess
 update_message(session_id, agent_id, session_message, **kwargs)
 list_messages(session_id, agent_id, limit, offset, **kwargs) -> List[SessionMessage]
 
+# Write primitives (custom methods)
+# Keys are relative to the message or to the agent; the repository owns the
+# dot-notation paths and the positional selector.
+update_message_fields(session_id, agent_id, message_id, set_operations,
+                      agent_set_operations=None) -> bool
+update_agent_fields(session_id, agent_id, set_operations) -> bool
+record_guardrail_event(session_id, agent_id, message_id, event) -> bool
+
+# Domain reads (custom methods)
+get_agent_config(session_id, agent_id) -> Optional[Dict[str, Any]]
+list_agent_configs(session_id) -> List[Dict[str, Any]]
+count_messages(session_id, agent_id) -> int
+get_last_message_id(session_id, agent_id) -> Optional[int]
+
 # Metadata operations (custom methods)
 update_metadata(session_id, metadata)      # Uses $set with dot notation
 get_metadata(session_id) -> Dict[str, Any]

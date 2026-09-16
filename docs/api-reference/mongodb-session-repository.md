@@ -387,6 +387,56 @@ repo.update_agent("user-123", agent)
 
 ---
 
+### `update_agent_fields`
+
+```python
+def update_agent_fields(
+    self, session_id: str, agent_id: str, set_operations: Mapping[str, Any]
+) -> bool
+```
+
+Write fields under `agents.<agent_id>` without touching its messages.
+
+The non-positional sibling of [`update_message_fields`](#update_message_fields): the filter names the session only. Used when there is no message to point at — for instance the first sync of an agent that has not appended anything yet.
+
+#### Parameters
+
+- **session_id** (`str`): ID of the session.
+
+- **agent_id** (`str`): ID of the agent.
+
+- **set_operations** (`Mapping[str, Any]`): Keys **relative to the agent document**, such as `"agent_data.model"`. The repository prefixes them; callers never write `agents.<id>.` themselves.
+
+#### Returns
+
+`bool`: `True` when the session was found. An empty `set_operations` returns `False` without a round-trip.
+
+#### Example
+
+```python
+repo.update_agent_fields(
+    "user-123", "assistant-1", {"agent_data.model": "claude-opus-5"}
+)
+```
+
+### `get_agent_config`
+
+```python
+def get_agent_config(self, session_id: str, agent_id: str) -> dict[str, Any] | None
+```
+
+Read the stored configuration of one agent: `agent_id`, `model`, `system_prompt` and `prompt_metadata`. Returns `None` when the session or the agent does not exist.
+
+Projects only `agent_data`, so it never drags the agent's message history over the wire. Unlike [`pop_read_agent_config`](#pop_read_agent_config), this is a standalone read that consumes nothing.
+
+### `list_agent_configs`
+
+```python
+def list_agent_configs(self, session_id: str) -> list[dict[str, Any]]
+```
+
+Same shape as `get_agent_config`, one entry per agent in the session. Returns `[]` when the session has no agents.
+
 ## Message Operations
 
 ### `create_message`
@@ -529,6 +579,88 @@ message.redact_message = {
 # Update in database (metrics and guardrail_event are preserved)
 repo.update_message("user-123", "assistant-1", message)
 ```
+
+### `update_message_fields`
+
+```python
+def update_message_fields(
+    self,
+    session_id: str,
+    agent_id: str,
+    message_id: int,
+    set_operations: Mapping[str, Any],
+    agent_set_operations: Mapping[str, Any] | None = None,
+) -> bool
+```
+
+Write fields on one message — and optionally on its agent — in a **single write**.
+
+This is the public face of the only method in the project that builds the positional selector. `update_message()` and `record_guardrail_event()` go through the same primitive, so the message identity of [issue #78](https://github.com/iguinea/mongodb-session-manager/issues/78) lives in one place.
+
+#### Parameters
+
+- **session_id** (`str`): ID of the session.
+
+- **agent_id** (`str`): ID of the agent.
+
+- **message_id** (`int`): Message to locate, server-side, with the positional operator.
+
+- **set_operations** (`Mapping[str, Any]`): Keys **relative to the message document**, such as `"event_loop_metrics.cycle_metrics"`.
+
+- **agent_set_operations** (`Mapping[str, Any] | None`): Keys relative to the agent document. They travel in the **same round-trip**: on DocumentDB every write costs 40-55 ms regardless of size, so what drives latency is the number of round-trips, not the bytes.
+
+!!! note "This method never moves the session clock"
+    Refreshing `updated_at` is a decision of the private primitive, not of its callers: a redaction is a visible change to the session, but annotating a turn that already happened is not, and moving the clock for it would misreport session duration to its consumers.
+
+#### Returns
+
+`bool`: `True` when the filter matched a document. A no-match is **not** an error here — `update_message()` turns it into a `ValueError`, the agent sync logs it, and the guardrail event ignores it.
+
+#### Example
+
+```python
+repo.update_message_fields(
+    "user-123",
+    "assistant-1",
+    message_id=7,
+    set_operations={"event_loop_metrics.accumulated_usage": {"totalTokens": 900}},
+    agent_set_operations={"agent_data.model": "claude-opus-5"},
+)
+```
+
+### `record_guardrail_event`
+
+```python
+def record_guardrail_event(
+    self, session_id: str, agent_id: str, message_id: int, event: Mapping[str, Any]
+) -> bool
+```
+
+Record a guardrail intervention on its message **and** on the session, in a single write.
+
+Only the message-level event is passed in. The session-level entry is *derived* from it: the same fields, plus `message_id` and `agent_id`, minus the full `trace`. The session array is read whole to audit a session and grows with every intervention, so the `GuardrailTrace` stays on the message, where it is read only when someone opens that message.
+
+#### Returns
+
+`bool`: `True` when the message was found.
+
+### `count_messages`
+
+```python
+def count_messages(self, session_id: str, agent_id: str) -> int
+```
+
+Count the messages stored for one agent. Returns `0` when the agent is unknown.
+
+### `get_last_message_id`
+
+```python
+def get_last_message_id(self, session_id: str, agent_id: str) -> int | None
+```
+
+Read the `message_id` of the agent's last message, or `None` when it has none.
+
+Projects with `$slice: -1`, so only the last message travels over the wire. The session manager prefers its in-memory value and falls back here only for a session restored in another process.
 
 ### `list_messages`
 
@@ -813,10 +945,10 @@ This method is called automatically during initialization. It creates indexes on
 
 Errors during index creation are logged but do not raise exceptions.
 
-### `_pop_read_agent_config`
+### `pop_read_agent_config`
 
 ```python
-def _pop_read_agent_config(
+def pop_read_agent_config(
     self, session_id: str, agent_id: str
 ) -> dict[str, Any] | None
 ```
@@ -824,6 +956,8 @@ def _pop_read_agent_config(
 Return, and forget, the `model` and `system_prompt` found by the last `read_agent()` for this session and agent.
 
 `MongoDBSessionManager.initialize()` calls it right after the Strands SDK restores an agent, to learn which config is already persisted without a second read. Only the last read is kept, so a long-lived repository does not accumulate system prompts. Any narrower projection in `read_agent()` must keep `agent_data.model` and `agent_data.system_prompt`.
+
+It is public because the manager calls it: any repository passed as `session_repository=` has to provide it, or `initialize()` raises `AttributeError`.
 
 ---
 

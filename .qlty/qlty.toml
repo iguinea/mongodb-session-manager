@@ -93,11 +93,19 @@ drivers = [
 [[plugin]]
 name = "trufflehog"
 
-# Ignore bandit B101 (assert_used) in test files - standard in pytest
+# Ignore bandit B101 (assert_used) in test files - standard in pytest.
+# tests/**/*.py also covers the shared support modules (contract base class,
+# in-memory double), which assert like any test but are not named test_*.py --
+# naming them so would make pytest collect the base class on its own.
 [[triage]]
 match.plugins = ["bandit"]
 match.rules = ["bandit:B101"]
-match.file_patterns = ["**/test_*.py", "**/*_test.py", "**/conftest.py"]
+match.file_patterns = [
+  "**/test_*.py",
+  "**/*_test.py",
+  "**/conftest.py",
+  "tests/**/*.py",
+]
 set.ignored = true
 
 # Ignore bandit B104 (hardcoded_bind_all_interfaces) in examples and backend config - intentional for dev servers
@@ -112,6 +120,14 @@ set.ignored = true
 match.plugins = ["radarlint-python"]
 match.rules = ["radarlint-python:python:S107"]
 match.file_patterns = ["**/conftest.py"]
+set.ignored = true
+
+# Ignore duplicated literals in tests - a case that spells out the document
+# path it exercises reads better than one that hides it behind a constant
+[[triage]]
+match.plugins = ["radarlint-python"]
+match.rules = ["radarlint-python:python:S1192"]
+match.file_patterns = ["tests/**/*.py"]
 set.ignored = true
 
 # Ignore trufflehog in README/docs - example credentials for local development

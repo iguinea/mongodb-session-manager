@@ -701,34 +701,64 @@ def create_message(self, session_id, agent_id, session_message, **kwargs):
 #### Update Message (Redaction)
 ```python
 def update_message(self, session_id, agent_id, session_message, **kwargs):
-    now = datetime.now(UTC)
-    message_prefix = f"agents.{agent_id}.messages.$"
-
     # The fields are listed by hand on purpose: deriving them from
     # SessionMessage.__dict__ would let a new SDK field into the schema.
-    set_operations = {
-        f"{message_prefix}.message": session_message.message,
-        f"{message_prefix}.redact_message": session_message.redact_message,
-        f"{message_prefix}.updated_at": now,
-        f"agents.{agent_id}.updated_at": now,
-        "updated_at": now,
-    }
+    matched = self._update_message_document(
+        session_id,
+        agent_id,
+        session_message.message_id,
+        {
+            "message": session_message.message,
+            "redact_message": session_message.redact_message,
+        },
+        touch_timestamps=True,
+    )
 
-    self.collection.update_one(
+    if not matched:
+        raise self._missing_message_error(
+            session_id, agent_id, session_message.message_id
+        )
+```
+
+Every write on a message goes through the same private primitive — this one,
+the turn metrics and the guardrail event — so the positional selector exists in
+exactly one place:
+
+```python
+def _update_message_document(
+    self,
+    session_id,
+    agent_id,
+    message_id,
+    message_fields,
+    *,
+    extra_set=None,
+    push=None,
+    touch_timestamps=False,
+):
+    message_prefix = f"agents.{agent_id}.messages.$"
+    set_operations = {
+        f"{message_prefix}.{name}": value for name, value in message_fields.items()
+    }
+    # ... extra_set, push and the three updated_at when touch_timestamps ...
+
+    result = self.collection.update_one(
         # The positional $ resolves to the array element matched in the query.
         {
             "_id": session_id,
-            f"agents.{agent_id}.messages.message_id": session_message.message_id,
+            f"agents.{agent_id}.messages.message_id": message_id,
         },
-        {"$set": set_operations},
+        update,
     )
+    return result.matched_count > 0
 ```
 
 **Operation**: `$set` with the positional operator `$`, one path per field
 **Reads**: none — the message is located server-side instead of by an index computed in the client
+**Callers**: keys are relative to the message (`"guardrail_event"`); the repository owns the prefix
 **Field Preservation**: `event_loop_metrics` and `guardrail_event` survive the redaction; a `$set` of the whole subdocument replaced it and wiped them
-**Timestamp Preservation**: `created_at` is never named, so it keeps both its value and its type; `updated_at` is refreshed
-**Caveat**: `message_id` is not a unique key (Strands derives it in memory), so a duplicated id matches its first occurrence only — see issue #78
+**Timestamp Preservation**: `created_at` is never named, so it keeps both its value and its type; `updated_at` is refreshed only when `touch_timestamps` is set, which annotations deliberately leave off
+**Caveat**: `message_id` is not a unique key (Strands derives it in memory), so a duplicated id matches its first occurrence only — see issue #78. Since the selector now lives in one method, fixing that is a local change
 
 #### List Messages
 ```python
