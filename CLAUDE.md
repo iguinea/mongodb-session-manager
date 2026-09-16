@@ -49,11 +49,13 @@ cd playground/chat && make frontend                   # Port 8881
    - `get_metadata_tool()`: Returns Strands tool for agent metadata management
    - Metadata/Feedback hooks for intercepting operations
    - Agent config persistence (model, system_prompt), written only when it changes; `initialize()` seeds the cache from `read_agent()`
+   - `initialize()` / `initialize_bidi_agent()` validate the `agent_id` **before** `super()` (Strands registers the id before touching the repository), and the metadata hook wrappers validate keys before calling the hook (#79)
    - **Never touches `session_repository.collection`**: every data access goes through the repository. Accepts `session_repository=` to inject the in-memory double in tests; a replacement must implement the whole repository surface (the contract lives in `tests/support/repository_contract.py`, not as a `Protocol`)
 
 2. **MongoDBSessionRepository** (`mongodb_session_repository.py`): Implements `SessionRepository` interface
    - All MongoDB CRUD operations for sessions, agents, messages
    - `_update_message_document()` is the **only** place that builds the positional selector; `update_message()`, `update_message_fields()` and `record_guardrail_event()` all go through it, and all name the message with a `MessageRef` (#78)
+   - `_agent_path()` is the **only** place that builds `agents.<agent_id>`, and `_prefixed()` the only one that joins a caller's keys to a path. No external name reaches a MongoDB path unchecked: `field_names.py` rejects, with `ValueError` and before any round-trip or early return, what MongoDB would read as syntax. A segment is non-empty, has no leading `$` and no NUL; an `agent_id` is one segment (so no `.`); metadata keys, `metadata_fields` and the relative keys of `update_*_fields()` are paths (`user.name`, `tags.0`). The in-memory double applies the same rule at the same point (#79)
    - `update_message_fields()` / `update_agent_fields()`: take keys relative to the message or the agent, and own the dot-notation paths. The agent config rides along with the metrics in a single write
    - `record_guardrail_event()`: derives the session-level event from the message one, minus the full `GuardrailTrace`
    - Domain reads: `get_agent_config()`, `list_agent_configs()`, `count_messages()`, `get_last_message_ref()`
@@ -195,7 +197,7 @@ When releasing, update version in **three places**:
 2. `pyproject.toml` (`version`)
 3. `CHANGELOG.md` (add release entry)
 
-Current version: **0.12.0**
+Current version: **0.13.0**
 
 ## Workflow Rules
 

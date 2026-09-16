@@ -63,6 +63,21 @@ class TestFactoryInit:
         )
         assert factory.metadata_fields == ["status"]
 
+    @patch("mongodb_session_manager.mongodb_session_factory.MongoDBConnectionPool")
+    def test_invalid_metadata_fields_fail_at_startup(self, mock_pool):
+        """The factory is where config enters a stateless app (#79).
+
+        Left to the repository, a bad field would fail every request instead of
+        the application's startup.
+        """
+        with pytest.raises(ValueError, match="metadata field '\\$where'"):
+            MongoDBSessionManagerFactory(
+                connection_string="mongodb://localhost/",
+                metadata_fields=["status", "$where"],
+            )
+
+        mock_pool.initialize.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # create_session_manager

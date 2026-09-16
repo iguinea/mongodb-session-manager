@@ -22,13 +22,16 @@ class TestInMemoryContract(SessionRepositoryContract):
     def store(self) -> InMemorySessionRepository:
         return InMemorySessionRepository()
 
+    def _raw_session(self, store, session_id: str) -> dict[str, Any]:
+        return store.session(session_id)
+
     def _raw_message(self, store, session_id: str, message_id: int) -> dict[str, Any]:
         return store.message(session_id, "a1", message_id)
 
     def _raw_messages_with_id(
         self, store, session_id: str, message_id: int
     ) -> list[dict[str, Any]]:
-        messages = store.session(session_id)["agents"]["a1"]["messages"]
+        messages = self._raw_session(store, session_id)["agents"]["a1"]["messages"]
         return [m for m in messages if m.get("message_id") == message_id]
 
     def _push_legacy_message(self, store, session_id: str, message_id: int) -> None:
@@ -37,7 +40,7 @@ class TestInMemoryContract(SessionRepositoryContract):
         )
 
     def _session_guardrail_events(self, store, session_id: str) -> list[dict[str, Any]]:
-        return store.session(session_id)["guardrail_events"]
+        return self._raw_session(store, session_id)["guardrail_events"]
 
 
 def _public_methods(cls: type) -> set[str]:

@@ -57,6 +57,11 @@ The factory can be initialized either with a connection string (which uses `Mong
 
 - **client_kwargs** (`Any`): Additional MongoDB client configuration options, only used when `connection_string` is provided. These are passed to `MongoDBConnectionPool.initialize()`.
 
+#### Raises
+
+- `ValueError`: If neither `connection_string` nor `client` is provided.
+- `ValueError`: If a metadata field is not a valid [path](mongodb-session-repository.md#names-that-become-paths). Checked before connecting, so a bad configuration fails the application's startup instead of every request.
+
 #### Connection Ownership
 
 - **Factory Owns Client** (`_owns_client = True`): When initialized via `connection_string`, the factory creates and owns the connection pool. Calling `close()` will close the pool.

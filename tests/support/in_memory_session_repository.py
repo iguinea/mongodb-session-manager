@@ -18,9 +18,13 @@ kinder than the real thing lies:
 - `update_agent()` writes field by field, so it does not wipe the config the
   manager keeps under `agent_data` (see issue #65).
 
-Known divergence: MongoDB's dot-notation paths break when an `agent_id`
-contains `.` or `$` (issue #79). This double resolves those paths its own way,
-so it is not evidence about that case either way.
+Names MongoDB would read as syntax -- an `agent_id` with a dot, a segment
+starting with `$`, an empty one -- are rejected here exactly as there, with the
+same rule and at the same point, before anything is looked up (#79).
+
+Known divergence: `_set_dotted()` only walks documents. On MongoDB `tags.0`
+over an existing array writes its first element; here it replaces the array
+with `{"0": ...}`. No test relies on it.
 
 It has no `collection` attribute, and that is the point: any manager code that
 reaches for the raw pymongo collection fails loudly against this double.
@@ -36,6 +40,10 @@ from typing import Any
 from strands.session.session_repository import SessionRepository
 from strands.types.session import Session, SessionAgent, SessionMessage
 
+from mongodb_session_manager.field_names import (
+    validate_agent_id,
+    validate_field_paths,
+)
 from mongodb_session_manager.message_identity import (
     STORAGE_ID_FIELD,
     MessageRef,
@@ -122,7 +130,12 @@ class InMemorySessionRepository(SessionRepository):
     # -- Internals ---------------------------------------------------------
 
     def _agent(self, session_id: str, agent_id: str) -> dict[str, Any] | None:
-        """Return the live agent subdocument, or None if session or agent is gone."""
+        """Return the live agent subdocument, or None if session or agent is gone.
+
+        Every agent-scoped read goes through here, so this is where the agent_id
+        is checked for them -- before the session is even looked up.
+        """
+        validate_agent_id(agent_id)
         session = self._sessions.get(session_id)
         if not session or agent_id not in session["agents"]:
             return None
@@ -184,6 +197,7 @@ class InMemorySessionRepository(SessionRepository):
         self, session_id: str, session_agent: SessionAgent, **kwargs: Any
     ) -> None:
         """Create an agent inside a session."""
+        validate_agent_id(session_agent.agent_id)
         session = self._sessions.get(session_id)
         if session is None:
             raise ValueError(f"Session {session_id} not found")
@@ -363,6 +377,9 @@ class InMemorySessionRepository(SessionRepository):
         touch_timestamps: bool = False,
     ) -> bool:
         """Mirror of the repository's positional primitive, over a dict."""
+        validate_agent_id(agent_id)
+        validate_field_paths(message_fields, "message field")
+        validate_field_paths(agent_fields or (), "agent field")
         if not message_fields and not agent_fields and not push:
             return False
 
@@ -408,6 +425,8 @@ class InMemorySessionRepository(SessionRepository):
         self, session_id: str, agent_id: str, set_operations: dict[str, Any]
     ) -> bool:
         """Write fields under an agent without touching its messages."""
+        validate_agent_id(agent_id)
+        validate_field_paths(set_operations, "agent field")
         if not set_operations:
             return False
 
@@ -478,7 +497,8 @@ class InMemorySessionRepository(SessionRepository):
     # -- Metadata, feedback, lifecycle -------------------------------------
 
     def update_metadata(self, session_id: str, metadata: dict[str, Any]) -> None:
-        """Merge keys into the session metadata."""
+        """Merge keys into the session metadata, all of them checked first."""
+        validate_field_paths(metadata, "metadata key")
         session = self._sessions.get(session_id)
         if session is None:
             return
@@ -493,7 +513,8 @@ class InMemorySessionRepository(SessionRepository):
         return {"_id": session_id, "metadata": copy.deepcopy(session["metadata"])}
 
     def delete_metadata(self, session_id: str, metadata_keys: list[str]) -> None:
-        """Remove keys from the session metadata."""
+        """Remove keys from the session metadata, all of them checked first."""
+        validate_field_paths(metadata_keys, "metadata key")
         session = self._sessions.get(session_id)
         if session is None:
             return

@@ -7,6 +7,7 @@ from typing import Any
 
 from pymongo import MongoClient
 
+from .field_names import validate_field_paths
 from .mongodb_connection_pool import MongoDBConnectionPool
 from .mongodb_session_manager import MongoDBSessionManager
 
@@ -40,7 +41,13 @@ class MongoDBSessionManagerFactory:
             metadata_fields: List of fields to include in metadata
             application_name: Default application name for all sessions created by this factory
             **client_kwargs: Additional arguments for MongoClient configuration
+
+        Raises:
+            ValueError: If a metadata field is not a valid dot-notation path.
+                Checked here, before connecting, so a bad config fails the
+                application's startup instead of every request (#79).
         """
+        validate_field_paths(metadata_fields or (), "metadata field")
         self.database_name = database_name
         self.collection_name = collection_name
         self.metadata_fields = metadata_fields

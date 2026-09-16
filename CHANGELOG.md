@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.13.0] - 2026-09-16
+
+### Fixed
+- **Un `agent_id` con punto borraba el historial del agente en cada petición** (#79). El repositorio guarda cada agente en `agents.<agent_id>` y llega a él con dot notation, así que MongoDB leía `a.b` como la ruta anidada `agents.a.b`: `create_agent()` escribía ahí, pero `read_agent()` buscaba la clave literal y no la encontraba. Strands creaba el agente de nuevo en cada petición y el `$set` reemplazaba sus mensajes por un array vacío. Verificado contra MongoDB 8.2.7 con un manager real: tres peticiones restauraban 0, 0 y 0 mensajes. Ahora el `Agent` falla al construirse con un `ValueError` que explica el motivo
+- **Otros nombres que MongoDB lee como sintaxis fallaban con errores opacos o hacían algo inesperado**: un `agent_id` que empieza por `$` se podía escribir pero no leer; uno vacío o con NUL fallaba con errores del servidor o de BSON; la clave de metadata `tags.$[]` reescribía todos los elementos de un array existente (y `delete_metadata()` los ponía a `null`)
+- **Un `metadata_fields` inválido dejaba índices sin crear en silencio**: MongoDB rechaza indexar `metadata.$where`, el error se absorbía y se llevaba por delante los índices posteriores, incluido el de `application_name`. Ahora es un error de configuración al construir el repositorio o la factoría
+
+### Changed
+- **Breaking: las claves de metadata con un segmento que empieza por `$`** (`$where`, `x.$y`) ya no se aceptan. Antes se guardaban como campo literal, que no se puede indexar
+- Una sola regla para todo nombre que acaba en una ruta (`mongodb_session_manager.field_names`): un segmento no está vacío, no empieza por `$` y no contiene NUL; un `agent_id` es un único segmento, así que tampoco lleva `.`. Las claves de metadata, `metadata_fields` y las claves relativas de `update_message_fields()`/`update_agent_fields()` son rutas: `user.name` y `tags.0` siguen funcionando
+- `_agent_path()` es el único sitio que construye `agents.<agent_id>`, y `_prefixed()` el único que une claves externas a una ruta, así que la validación va por construcción. Un lote con una clave inválida no escribe nada
+- `initialize()` e `initialize_bidi_agent()` validan el `agent_id` antes de llamar a Strands, que registra el id antes de tocar el repositorio: un reintento con el mismo manager da el mismo `ValueError`, no un `SessionException` engañoso
+- Los wrappers de `metadata_hook` validan las claves antes de invocar el hook, para que un hook propio no publique una clave que el repositorio va a rechazar
+
+### Notes
+- **Los documentos no cambian** y no hay que migrar nada: con nombres válidos se envían exactamente las mismas operaciones, y managers 0.12 y 0.13 conviven sobre la misma colección
+- **Un `$` que no inicia el nombre es un dato normal**: `a$b` funciona en todas las operaciones y se sigue aceptando
+- **Lo que no arregla**: los documentos que un `agent_id` con punto ya dejó anidados no se limpian; las claves `$…` ya almacenadas siguen ahí y `get_metadata()` las devuelve, pero borrarlas requiere `repo.collection`; los límites del servidor que no son de sintaxis (rutas en conflicto en un mismo lote, más de 100 niveles) siguen llegando como error de MongoDB
+- El doble in-memory rechaza lo mismo en el mismo punto, y el contrato lo comprueba contra las dos implementaciones. Queda una divergencia documentada: `tags.0` sobre un array existente
+- El presupuesto de escrituras por turno no se mueve
+
 ## [2026-09-16] PR #85 - Fix: identidad estable de mensaje para los updates posicionales (#78) (@iguinea)
 
 - Fix: identidad estable de mensaje para los updates posicionales (#78)

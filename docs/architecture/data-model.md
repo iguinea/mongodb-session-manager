@@ -400,6 +400,8 @@ Agents are stored in an object (not array) keyed by `agent_id`:
 - Update path: `agents.{agent_id}.field` is simpler than array position
 - Query efficiency: `{"agents.support-agent.messages": {...}}` works directly
 
+**The price of keying by `agent_id`**: the id becomes a segment of every path, and MongoDB reads it as syntax. `agents.a.b` is a nested path, not the key `a.b`: an agent stored that way is never found again, so each request recreated it with an empty history. A leading `$` is an operator. The repository therefore only accepts an `agent_id` that is one non-empty segment, with no `.`, no leading `$` and no NUL byte, and raises `ValueError` otherwise before any round-trip (#79). A `$` elsewhere (`a$b`) is plain data. Metadata keys follow the same segment rule, but a dot there is a path on purpose: `metadata.user.name`.
+
 ### Agent Fields
 
 #### agent_data (Strands SDK State)
@@ -521,7 +523,8 @@ def create_agent(self, session_id, session_agent, **kwargs):
         {"_id": session_id},
         {
             "$set": {
-                f"agents.{session_agent.agent_id}": agent_doc,
+                # _agent_path() validates the id: the only place agents.<id> is built.
+                self._agent_path(session_agent.agent_id): agent_doc,
                 "updated_at": datetime.now(UTC),
             }
         },

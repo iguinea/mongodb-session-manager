@@ -14,7 +14,6 @@ from typing import Any
 import pytest
 from pymongo import MongoClient, monitoring
 from strands import Agent, tool
-from strands.models.model import Model
 from strands.types.session import Session, SessionAgent, SessionMessage
 
 from mongodb_session_manager.mongodb_session_factory import (
@@ -24,6 +23,7 @@ from mongodb_session_manager.mongodb_session_repository import (
     MongoDBSessionRepository,
     _reset_index_registry,
 )
+from tests.support.scripted_model import ScriptedModel, text_stream, tool_stream
 
 pytestmark = pytest.mark.integration
 
@@ -42,9 +42,6 @@ _IGNORED_COMMANDS = frozenset(
         "listIndexes",
     }
 )
-
-_USAGE = {"inputTokens": 1200, "outputTokens": 80, "totalTokens": 1280}
-_METRICS = {"latencyMs": 900}
 
 
 class CommandCounter(monitoring.CommandListener):
@@ -75,52 +72,6 @@ class CommandCounter(monitoring.CommandListener):
 
     def counts(self) -> Counter:
         return Counter(self.commands)
-
-
-def _text_stream(text: str):
-    yield {"messageStart": {"role": "assistant"}}
-    yield {"contentBlockDelta": {"delta": {"text": text}}}
-    yield {"contentBlockStop": {}}
-    yield {"messageStop": {"stopReason": "end_turn"}}
-    yield {"metadata": {"usage": _USAGE, "metrics": _METRICS}}
-
-
-def _tool_stream(name: str, tool_use_id: str, payload: str):
-    yield {"messageStart": {"role": "assistant"}}
-    yield {
-        "contentBlockStart": {
-            "start": {"toolUse": {"name": name, "toolUseId": tool_use_id}}
-        }
-    }
-    yield {"contentBlockDelta": {"delta": {"toolUse": {"input": payload}}}}
-    yield {"contentBlockStop": {}}
-    yield {"messageStop": {"stopReason": "tool_use"}}
-    yield {"metadata": {"usage": _USAGE, "metrics": _METRICS}}
-
-
-class ScriptedModel(Model):
-    """Modelo que reproduce una secuencia fija de respuestas."""
-
-    def __init__(
-        self, scripted: list[list[dict]], model_id: str = "test-model"
-    ) -> None:
-        self.config = {"model_id": model_id}
-        self._scripted = scripted
-        self._index = 0
-
-    def update_config(self, **model_config: Any) -> None:
-        self.config.update(model_config)
-
-    def get_config(self) -> Any:
-        return self.config
-
-    def structured_output(self, *args: Any, **kwargs: Any):
-        raise NotImplementedError
-
-    async def stream(self, *args: Any, **kwargs: Any):
-        for event in self._scripted[min(self._index, len(self._scripted) - 1)]:
-            yield event
-        self._index += 1
 
 
 # Un system prompt realista: en producción son varios KB.
@@ -168,9 +119,7 @@ def run_turn(factory, session_id: str, prompt: str) -> None:
         sub_manager = factory.create_session_manager(session_id)
         sub_agent = Agent(
             agent_id="info_suministro_agent",
-            model=ScriptedModel(
-                [list(_text_stream("Datos del suministro: OK"))], "sub"
-            ),
+            model=ScriptedModel([list(text_stream("Datos del suministro: OK"))], "sub"),
             system_prompt=SYSTEM_PROMPT,
             session_manager=sub_manager,
         )
@@ -183,11 +132,9 @@ def run_turn(factory, session_id: str, prompt: str) -> None:
         model=ScriptedModel(
             [
                 list(
-                    _tool_stream(
-                        "info_suministro_agent", "tu-1", '{"query": "consumo"}'
-                    )
+                    tool_stream("info_suministro_agent", "tu-1", '{"query": "consumo"}')
                 ),
-                list(_text_stream("Tu consumo del ultimo mes es de 312 kWh.")),
+                list(text_stream("Tu consumo del ultimo mes es de 312 kWh.")),
             ],
             "supervisor",
         ),

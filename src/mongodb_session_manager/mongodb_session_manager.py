@@ -7,7 +7,7 @@ import logging
 import warnings
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from pymongo import MongoClient
 from strands import Agent, tool
@@ -15,8 +15,12 @@ from strands.session.repository_session_manager import RepositorySessionManager
 from strands.types.content import Message
 from strands.types.tools import JSONSchema
 
+from .field_names import validate_agent_id, validate_field_paths
 from .message_identity import MessageRef, ref_of
 from .mongodb_session_repository import MongoDBSessionRepository
+
+if TYPE_CHECKING:
+    from strands.experimental.bidi.agent.agent import BidiAgent
 
 logger = logging.getLogger(__name__)
 
@@ -226,11 +230,16 @@ class MongoDBSessionManager(RepositorySessionManager):
         - action: "update", "get", or "delete"
         - session_id: The current session ID
         - **kwargs: Additional arguments (metadata for update, keys for delete)
+
+        Keys are validated before the hook runs: a hook may publish what it
+        receives before calling the original, and must never see a key the
+        repository is about to reject (#79).
         """
         # Wrap update_metadata
         original_update = self.update_metadata
 
         def wrapped_update(metadata: dict[str, Any]) -> None:
+            validate_field_paths(metadata, "metadata key")
             return hook(original_update, "update", self.session_id, metadata=metadata)
 
         self.update_metadata = wrapped_update
@@ -247,6 +256,7 @@ class MongoDBSessionManager(RepositorySessionManager):
         original_delete = self.delete_metadata
 
         def wrapped_delete(metadata_keys: list[str]) -> None:
+            validate_field_paths(metadata_keys, "metadata key")
             return hook(original_delete, "delete", self.session_id, keys=metadata_keys)
 
         self.delete_metadata = wrapped_delete
@@ -367,7 +377,14 @@ class MongoDBSessionManager(RepositorySessionManager):
         and system_prompt. Seeding the config cache with them spares the first
         sync of every request from rewriting an unchanged system prompt, the
         largest write of the turn.
+
+        Raises:
+            ValueError: If the agent_id cannot be stored under `agents.<agent_id>`
+                (#79). Checked before super(): Strands registers the id before it
+                touches the repository, so failing later would turn a retry on
+                the same manager into a misleading "must be unique" error.
         """
+        validate_agent_id(agent.agent_id)
         super().initialize(agent, **kwargs)
 
         persisted = self.session_repository.pop_read_agent_config(
@@ -378,6 +395,15 @@ class MongoDBSessionManager(RepositorySessionManager):
                 persisted["model"],
                 persisted["system_prompt"],
             )
+
+    def initialize_bidi_agent(self, agent: BidiAgent, **kwargs: Any) -> None:
+        """Initialize a bidirectional agent, rejecting an unstorable agent_id first.
+
+        Raises:
+            ValueError: For the same reason, and at the same point, as initialize().
+        """
+        validate_agent_id(agent.agent_id)
+        super().initialize_bidi_agent(agent, **kwargs)
 
     def sync_agent(self, agent: Agent, **kwargs: Any) -> None:
         """Sync agent data and capture model/system_prompt.

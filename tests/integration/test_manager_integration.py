@@ -7,10 +7,12 @@ and test_session_viewer_password.py.
 from unittest.mock import MagicMock
 
 import pytest
+from strands import Agent
 
 from mongodb_session_manager import (
     create_mongodb_session_manager,
 )
+from tests.support.scripted_model import ScriptedModel, text_stream
 
 pytestmark = pytest.mark.integration
 
@@ -250,3 +252,58 @@ class TestManagerIntegration:
         agent_b = next(a for a in agents if a["agent_id"] == "pm-agent-b")
         assert agent_a["prompt_metadata"]["prompt_id"] == "p1"
         assert agent_b["prompt_metadata"] is None
+
+
+class TestAgentIdInPaths:
+    """#79 with a real Agent: an agent_id with a dot used to lose its history.
+
+    MongoDB read `agents.a.b` as a nested path. Every read looked for the literal
+    key and missed it, so each request created the agent again and replaced its
+    messages with an empty array.
+    """
+
+    @staticmethod
+    def _request(connection: str, session_id: str, agent_id: str) -> int:
+        """Serve one stateless request; return how many messages were restored."""
+        manager = create_mongodb_session_manager(
+            session_id=session_id,
+            connection_string=connection,
+            database_name="test_db",
+            collection_name="test_sessions",
+        )
+        try:
+            agent = Agent(
+                agent_id=agent_id,
+                model=ScriptedModel([list(text_stream("ok"))]),
+                session_manager=manager,
+                callback_handler=None,
+            )
+            restored = len(agent.messages)
+            agent("hola")
+            return restored
+        finally:
+            manager.close()
+
+    def test_a_dot_fails_before_touching_the_session(self, manager, unique_session_id):
+        with pytest.raises(ValueError, match=r"agent_id 'a\.b' cannot contain"):
+            Agent(
+                agent_id="a.b",
+                model=ScriptedModel([list(text_stream("ok"))]),
+                session_manager=manager,
+                callback_handler=None,
+            )
+
+        doc = manager.session_repository.collection.find_one({"_id": unique_session_id})
+        assert doc["agents"] == {}
+
+    @pytest.mark.usefixtures("manager")  # creates the session and cleans it up
+    def test_a_dollar_inside_keeps_the_history_across_requests(
+        self, mongodb_connection, unique_session_id
+    ):
+        """Only a leading `$` breaks MongoDB: `a$b` restores like any other id."""
+        restored = [
+            self._request(mongodb_connection, unique_session_id, "a$b")
+            for _ in range(3)
+        ]
+
+        assert restored == [0, 2, 4]

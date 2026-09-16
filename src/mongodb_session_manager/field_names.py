@@ -1,0 +1,77 @@
+"""Names that end up inside a MongoDB dot-notation path.
+
+The repository stores each agent under `agents.<agent_id>` and each metadata key
+under `metadata.<key>`, and reaches both with dot notation. MongoDB reads those
+names as syntax, not as data (issue #79):
+
+- A dot is a path separator. `agent_id="a.b"` writes to `agents.a.b`, nested,
+  while every read looks for the literal key; the agent is never found, so each
+  request creates it again and wipes its history.
+- A leading `$` is an operator: `tags.$[]` rewrites every element of an array,
+  `$x` breaks every projection, and neither can be indexed.
+- An empty segment is rejected by the server with an opaque error, and a NUL
+  byte cannot be encoded as BSON at all.
+
+A `$` anywhere else is plain data: `a$b` works in every operation, so it stays.
+
+The rule lives here, in one place, so the MongoDB repository, the in-memory
+double and the session manager all reject the same names -- before any
+round-trip, with an error that says why.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterable
+
+
+def _segment_problem(segment: str) -> str | None:
+    """Say why a single field name cannot go into a path, None when it can."""
+    if not segment:
+        return "cannot be empty"
+    if segment.startswith("$"):
+        return "cannot start with '$': MongoDB reads it as an operator"
+    if "\x00" in segment:
+        return "contains a NUL byte, which BSON cannot encode"
+    return None
+
+
+def validate_field_paths(paths: Iterable[str], what: str) -> None:
+    """Check dot-notation paths whose segments come from outside the repository.
+
+    A dot separates segments on purpose here: `user.name` is a nested field and
+    `tags.0` an array element, as documented for metadata (#47). Every path is
+    checked before the caller uses any of them, so a batch is all or nothing.
+
+    Args:
+        paths: The paths, relative to wherever the repository will prefix them.
+        what: What the paths are, to name them in the error ("metadata key").
+
+    Raises:
+        ValueError: When a segment is empty, starts with `$` or holds a NUL.
+    """
+    for path in paths:
+        # A path is checked as the text it becomes: keys have always been joined
+        # with an f-string, so `{1: "x"}` writes `metadata.1`.
+        for segment in str(path).split("."):
+            problem = _segment_problem(segment)
+            if problem is not None:
+                raise ValueError(
+                    f"{what} {path!r} is invalid: segment {segment!r} {problem}"
+                )
+
+
+def validate_agent_id(agent_id: str) -> None:
+    """Check that an agent_id is a single field name, usable as `agents.<agent_id>`.
+
+    Raises:
+        ValueError: When it contains a dot, is empty, starts with `$` or holds a NUL.
+    """
+    if "." in agent_id:
+        raise ValueError(
+            f"agent_id {agent_id!r} cannot contain '.': MongoDB reads it as a path "
+            f"separator, so the agent would be stored where no read can find it"
+        )
+
+    problem = _segment_problem(agent_id)
+    if problem is not None:
+        raise ValueError(f"agent_id {agent_id!r} {problem}")
