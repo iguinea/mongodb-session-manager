@@ -272,7 +272,7 @@ session_manager.close()
 
 ### Automatic Metrics Capture
 
-The session manager automatically captures metrics during `sync_agent()`:
+The session manager captures metrics automatically at the end of each invocation and stores them on its last message. An explicit `sync_agent()` writes them again with the current values:
 
 ```python
 # Use the agent
@@ -567,7 +567,7 @@ Each message contains:
     "content": "Hello",  # Message content
     "created_at": "2024-01-15...",  # Timestamp
     "updated_at": "2024-01-15...",  # Timestamp
-    "event_loop_metrics": {  # Only for assistant messages
+    "event_loop_metrics": {  # Only on the last message of each invocation
         "accumulated_metrics": {"latencyMs": 250},
         "accumulated_usage": {"inputTokens": 10, "outputTokens": 20, "totalTokens": 30},
     },

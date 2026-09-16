@@ -673,8 +673,10 @@ def create_agent(self, session_id, session_agent, **kwargs):
 ```
 
 **Type**: Object (optional)
-**Present on**: Assistant messages only (after `sync_agent()`)
+**Present on**: The last message of each invocation that closes. Usually the final assistant message; after a tool interrupt, the assistant message with the `toolUse`; after a failure mid-turn, the last message stored. Intermediate messages -- tool use, tool results, the next prompt -- carry none.
 **Purpose**: Performance and usage metrics from agent execution
+
+**Values**: Accumulated over the life of the `Agent` object. With one `Agent` per request, as the factory pattern does, that is the invocation, and the sum over the messages that carry metrics is the session total. An `Agent` kept across invocations reports running totals, and summing them counts earlier invocations again.
 
 **Subfields**:
 - `accumulated_metrics.latencyMs`: Response time in milliseconds
@@ -682,7 +684,11 @@ def create_agent(self, session_id, session_agent, **kwargs):
 - `accumulated_usage.outputTokens`: Tokens in the response
 - `accumulated_usage.totalTokens`: Sum of input and output
 
-**When Added**: During `sync_agent()` call, if `latencyMs > 0`
+**When Added**: By the sync Strands runs at the end of each invocation (`AfterInvocationEvent`), or by an explicit `sync_agent()` call, if `latencyMs > 0`. Not by the sync Strands runs after each message is added: `MessageAddedEvent` fires before the event loop accumulates the metrics of the model call behind that message, so they would be the previous cycle's (issue #66, v0.15.0). Documents written before v0.15.0 also carry a snapshot on intermediate messages, one cycle behind.
+
+**Not added when**:
+- The invocation does not reach its closing sync: a hook registered for `AfterInvocationEvent` raises before it, or the conversation manager raises in `apply_management()`, which Strands runs before that event.
+- No latency was measured, for instance a stream cancelled before the model sent its metadata.
 
 **Note**: This field is filtered out when returning `SessionMessage` objects (SDK doesn't support it):
 
@@ -1609,18 +1615,22 @@ db.sessions.aggregate([
 ```
 
 #### 4. Token Usage per Session
+
+`agents` is an object keyed by agent id, so it is turned into an array before unwinding. Since v0.15.0 each invocation that closes leaves its metrics on one message, so summing the messages that carry them adds up the invocations -- as long as each request builds its own `Agent` (see [event_loop_metrics](#event_loop_metrics-optional)). Sessions written before v0.15.0 also have snapshots on intermediate messages, and this sum counts them again.
+
 ```javascript
 db.sessions.aggregate([
-    {"$unwind": {"path": "$agents", "preserveNullAndEmptyArrays": false}},
-    {"$unwind": "$agents.messages"},
-    {"$match": {"agents.messages.event_loop_metrics": {"$exists": true}}},
+    {"$project": {"agents": {"$objectToArray": "$agents"}}},
+    {"$unwind": "$agents"},
+    {"$unwind": "$agents.v.messages"},
+    {"$match": {"agents.v.messages.event_loop_metrics": {"$exists": true}}},
     {"$group": {
         "_id": "$_id",
         "total_tokens": {
-            "$sum": "$agents.messages.event_loop_metrics.accumulated_usage.totalTokens"
+            "$sum": "$agents.v.messages.event_loop_metrics.accumulated_usage.totalTokens"
         },
         "total_latency": {
-            "$sum": "$agents.messages.event_loop_metrics.accumulated_metrics.latencyMs"
+            "$sum": "$agents.v.messages.event_loop_metrics.accumulated_metrics.latencyMs"
         }
     }}
 ])

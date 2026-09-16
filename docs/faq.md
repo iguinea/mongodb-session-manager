@@ -212,7 +212,7 @@ sales_response = sales_agent("Tell me about pricing")
 
 ### How are metrics captured?
 
-Metrics are **automatically** captured from the agent's event loop when you call `sync_agent()`:
+Metrics are **automatically** captured from the agent's event loop at the end of each invocation, and again whenever you call `sync_agent()` yourself:
 
 ```python
 # Use the agent
@@ -225,10 +225,10 @@ response = agent("Hello, how are you?")
 # - totalTokens: Sum of input and output
 session_manager.sync_agent(agent)
 
-# Metrics are stored in MongoDB with the assistant message
+# Metrics are stored in MongoDB on the last message of the invocation
 ```
 
-Metrics are stored in the `event_loop_metrics` field of assistant messages in MongoDB.
+Metrics are stored in the `event_loop_metrics` field of the last message of each invocation. Intermediate messages (tool use, tool results) carry none: when Strands syncs after adding each message, the metrics of the model call behind it are not accumulated yet. An invocation that does not reach its closing sync, because a hook for `AfterInvocationEvent` or the conversation manager raised first, is left without metrics.
 
 ### What's the difference between metadata and messages?
 
@@ -835,10 +835,15 @@ manager = create_mongodb_session_manager(
 
 4. **Metrics collection**:
    ```python
-   # Collect metrics from messages
-   messages = manager.list_messages(agent_id="assistant")
+   # Read the raw document: the repository's read methods drop event_loop_metrics
+   doc = manager.session_repository.collection.find_one({"_id": "session-123"})
+   messages = doc["agents"]["assistant"]["messages"]
+   # Each invocation leaves its totals on one message. With one Agent per
+   # request (the factory pattern) their sum is the session total.
    total_tokens = sum(
-       msg.get("event_loop_metrics", {}).get("accumulated_usage", {}).get("totalTokens", 0)
+       (msg.get("event_loop_metrics") or {})
+       .get("accumulated_usage", {})
+       .get("totalTokens", 0)
        for msg in messages
    )
    print(f"Total tokens used: {total_tokens}")

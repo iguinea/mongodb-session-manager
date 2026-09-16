@@ -324,7 +324,7 @@ session_manager.sync_agent(agent)
 
 ### Metrics Location
 
-Metrics are stored in the `event_loop_metrics` field of assistant messages:
+Metrics are stored in the `event_loop_metrics` field of the last message of each invocation, usually the final assistant message. Tool use and tool result messages carry none:
 
 ```json
 {

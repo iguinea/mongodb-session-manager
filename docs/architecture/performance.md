@@ -671,25 +671,44 @@ chunks produces exactly the same writes.
 Measured on a warm turn (the session already exists) with a supervisor and a
 sub-agent (one tool call):
 
-| | v0.9.1 | #54 | + #65 |
-|---|---|---|---|
-| `update` | 21 | 15 | 13 |
-| `find` | 13 | 6 | 6 |
-| `createIndexes` | 8 | 0 | 0 |
-| **total** | **42** | **21** | **19** |
+| | v0.9.1 | #54 | + #65 | + #67 | + #66 |
+|---|---|---|---|---|---|
+| `update` | 21 | 15 | 13 | 10 | 8 |
+| `find` | 13 | 6 | 6 | 6 | 6 |
+| `createIndexes` | 8 | 0 | 0 | 0 | 0 |
+| **total** | **42** | **21** | **19** | **16** | **14** |
 
-The 13 remaining writes break down as:
+The 8 remaining writes break down as:
 
 | Writes | Operation | When |
 |---:|---|---|
 | 6 | `create_message` (`$push`) | One per message: 4 from the supervisor, 2 from the sub-agent |
-| 3 | `update_agent` | First sync of each manager, plus the supervisor again after running the tool (Strands bumps its `interrupt_state` version) |
-| 4 | Metrics on the last message | Once the model has produced metrics: 3 for the supervisor, 1 for the sub-agent (#66 tracks the one that is overwritten right away) |
+| 2 | Metrics on the last message | One per agent, when its invocation closes (`AfterInvocationEvent`) |
 
-The agent config (model and system prompt, ~14 KB each in this scenario) is not
-written at all. `read_agent()` already fetches it when an agent is restored, so
-each manager seeds its config cache with the persisted values and only writes
-when they differ. On a brand-new session the first sync still writes it once.
+Neither the agent state nor its config travels. `update_agent()` skips an agent
+whose content is what the repository last read or wrote (#67), which covers the
+first sync of each manager and the supervisor's sync after the tool. The agent
+config (model and system prompt, ~14 KB each in this scenario) is known from
+`read_agent()`: each manager seeds its config cache with the persisted values
+and only writes when they differ (#65). On a brand-new session the first sync
+still writes it once.
+
+#### Metrics are written when the invocation closes
+
+Strands fires `MessageAddedEvent` *before* the event loop accumulates the usage
+and metrics of the model call that produced the message (`event_loop.py:409-414`
+in strands 1.30, `:699-703` in 1.56). Up to v0.14.0 every sync wrote metrics,
+so the one run for each message wrote the previous cycle's: a snapshot on each
+tool result and a stale write on the final message that the closing sync
+overwrote an instant later. An agent that called N tools cost 2N+1 metric
+writes. Now the sync run for each message leaves the metrics out, and the closing
+sync writes them once: 1 write per invocation, whatever N is (#66).
+
+The sync run for each message is told apart by wrapping the hook registry
+(`sync_origin.MessageAddedTagging`): Strands registers the same `sync_agent`
+for both events, and the callbacks of `MessageAddedEvent` run with a
+`ContextVar` tag set. An explicit `sync_agent()` call always writes, so an
+application can still add a value to the metrics after the invocation and sync.
 
 `update_agent` writes each `SessionAgent` field on its own path
 (`agents.<id>.agent_data.<field>`). Setting `agent_data` as a whole replaced the

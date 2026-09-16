@@ -18,9 +18,11 @@ from strands.types.tools import JSONSchema
 from .field_names import validate_agent_id, validate_field_paths
 from .message_identity import MessageRef, ref_of
 from .mongodb_session_repository import MongoDBSessionRepository
+from .sync_origin import MessageAddedTagging, syncing_added_message
 
 if TYPE_CHECKING:
     from strands.experimental.bidi.agent.agent import BidiAgent
+    from strands.hooks import HookRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -405,6 +407,16 @@ class MongoDBSessionManager(RepositorySessionManager):
         validate_agent_id(agent.agent_id)
         super().initialize_bidi_agent(agent, **kwargs)
 
+    def register_hooks(self, registry: HookRegistry, **kwargs: Any) -> None:
+        """Register Strands' session hooks, telling apart the sync of each message.
+
+        Strands registers the same sync_agent() for MessageAddedEvent and for
+        AfterInvocationEvent. The registry is wrapped so that the callbacks of
+        MessageAddedEvent run tagged, and sync_agent() can leave the metrics out
+        of that sync: they are still the previous cycle's (issue #66).
+        """
+        super().register_hooks(MessageAddedTagging(registry), **kwargs)
+
     def sync_agent(self, agent: Agent, **kwargs: Any) -> None:
         """Sync agent data and capture model/system_prompt.
 
@@ -413,6 +425,14 @@ class MongoDBSessionManager(RepositorySessionManager):
         - Performance metrics (latency, time to first byte)
         - Cycle metrics (count, durations, averages)
         - Tool metrics (call counts, success/error rates, execution times)
+
+        The metrics go on the agent's last message, except in the sync Strands
+        runs for each MessageAddedEvent. That event fires before the event loop
+        accumulates the metrics of the model call behind the message, so they
+        would be the previous cycle's: a stale snapshot on every intermediate
+        message, and a write the closing sync overwrites an instant later. The
+        closing sync (AfterInvocationEvent) writes them once, on the last message
+        of the invocation, and so does any explicit call (issue #66).
         """
         super().sync_agent(agent, **kwargs)
 
@@ -420,7 +440,10 @@ class MongoDBSessionManager(RepositorySessionManager):
         # are combined into a single write. On DocumentDB every write costs
         # 40-55 ms regardless of its size, so the number of round-trips is what
         # drives latency, not the number of bytes.
-        metrics_ops, message_ref = self._build_metrics_update(agent)
+        if syncing_added_message():
+            metrics_ops, message_ref = {}, None
+        else:
+            metrics_ops, message_ref = self._build_metrics_update(agent)
         config_ops, config_cache_entry = self._build_agent_config_update(agent)
 
         # _build_agent_config_update() returns ({}, None) together, so the cache
