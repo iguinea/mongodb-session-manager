@@ -243,7 +243,7 @@ async def resume_and_continue():
 
 ### Automatic Metrics
 
-Metrics are automatically captured when you call `sync_agent()`:
+Metrics are captured automatically when the invocation ends, streamed or not, and stored on its last message. Calling `sync_agent()` afterwards writes them again with the current values:
 
 ```python
 async def stream_with_metrics():

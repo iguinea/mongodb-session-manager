@@ -207,14 +207,17 @@ class TestTurnOperationBudget:
 
         Contra v0.9.1 el mismo escenario producía 42 operaciones: 21 updates,
         13 finds y 8 createIndexes. Con #54 bajó a 21 (15 updates, 6 finds y 0
-        createIndexes), con #65 a 19 y con #67 a 16.
+        createIndexes), con #65 a 19, con #67 a 16 y con #66 a 14.
 
-        El presupuesto de 10 se desglosa así, medido con este mismo listener
+        El presupuesto de 8 se desglosa así, medido con este mismo listener
         (6 mensajes en total: 4 del supervisor, 2 del sub-agente):
           6  create_message ($push, uno por mensaje)
-          4  métricas del último mensaje
+          2  métricas, una por agente, en el cierre de su invocación
 
-        La configuración no viaja: cada manager la conoce desde read_agent()
+        Las métricas eran 4: el supervisor las escribía también en el sync del
+        toolResult y en el de su mensaje final, y esa segunda llevaba las del
+        ciclo anterior, porque Strands dispara MessageAddedEvent antes de
+        acumularlas (#66). La configuración no viaja: cada manager la conoce desde read_agent()
         (#65). Antes eran 2 escrituras más, de ~14 KB cada una. El estado del
         agente tampoco (#67): ninguno de los dos cambia en el turno, y eran 3
         update_agent, el primer sync de cada manager y el del supervisor tras
@@ -232,7 +235,7 @@ class TestTurnOperationBudget:
         counter.enabled = False
 
         counts = counter.counts()
-        assert counts["update"] <= 10, f"{counts['update']} updates: {counts}"
+        assert counts["update"] <= 8, f"{counts['update']} updates: {counts}"
         assert counts["createIndexes"] == 0, "los índices ya estaban asegurados"
         assert counts["find"] <= 6, f"{counts['find']} finds: {counts}"
         rewritten = [
@@ -348,6 +351,36 @@ class TestTurnOperationBudget:
                 assert agent_data.get("system_prompt") == SYSTEM_PROMPT, (
                     f"{agent_id} sin system_prompt tras el turno '{prompt}'"
                 )
+
+    def test_intermediate_messages_carry_no_metrics(
+        self, turn_factory, unique_session_id
+    ):
+        """Solo el último mensaje de cada invocación lleva métricas (#66).
+
+        El sync de cada MessageAddedEvent ve las métricas del ciclo anterior: el
+        toolResult se llevaba las del primer ciclo y el mensaje final, durante un
+        instante, unas obsoletas. Lo escribe el cierre, una vez.
+        """
+        factory, collection, _ = turn_factory
+
+        run_turn(factory, unique_session_id, "hola")
+
+        agents = collection.find_one({"_id": unique_session_id})["agents"]
+        for agent_id, agent in agents.items():
+            *intermediate, last = agent["messages"]
+            carrying = [
+                m["message_id"] for m in intermediate if "event_loop_metrics" in m
+            ]
+            assert not carrying, (
+                f"{agent_id}: métricas en mensajes intermedios {carrying}"
+            )
+            assert "event_loop_metrics" in last, (
+                f"{agent_id}: último mensaje sin métricas"
+            )
+
+        supervisor_metrics = agents["supervisor"]["messages"][-1]["event_loop_metrics"]
+        assert supervisor_metrics["cycle_metrics"]["cycle_count"] == 2
+        assert "info_suministro_agent" in supervisor_metrics["tool_usage"]
 
     def test_metrics_land_on_the_last_message(self, turn_factory, unique_session_id):
         """Las métricas se escriben en el último mensaje, no en el anterior.

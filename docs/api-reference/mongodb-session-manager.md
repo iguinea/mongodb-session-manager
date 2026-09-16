@@ -261,7 +261,17 @@ This method performs three key operations:
 2. Captures and persists agent configuration (model, system_prompt)
 3. Captures and stores event loop metrics (latency, token usage) from the agent's most recent interaction
 
-The metrics are automatically extracted from `agent.event_loop_metrics.accumulated_metrics` and `agent.event_loop_metrics.accumulated_usage`, and stored in the `event_loop_metrics` field of the latest assistant message.
+The metrics are automatically extracted from `agent.event_loop_metrics.get_summary()` and stored in the `event_loop_metrics` field of the agent's last message. They are the values accumulated over the life of the `Agent` object: with one `Agent` per request, as the factory pattern does, they are that invocation's.
+
+Strands calls `sync_agent()` on its own at two points, and they do not write the same thing:
+
+| When | Metrics |
+|---|---|
+| After each message is added (`MessageAddedEvent`) | **Not written.** The event fires before the event loop accumulates the usage and metrics of the model call behind the message, so they would still be the previous cycle's |
+| At the end of the invocation (`AfterInvocationEvent`) | Written once, on the last message of the invocation |
+| Any explicit call to `sync_agent()` | Written, with the values at that moment |
+
+So only the last message of each invocation carries `event_loop_metrics`; tool use, tool results and the next prompt carry none. An explicit call still writes, which is what lets an application add a value to the metrics after the invocation (for instance a time-to-first-token it measured) and then sync. If an invocation does not reach its closing sync -- a hook registered for `AfterInvocationEvent` or the conversation manager raising first -- it is left without metrics. Before v0.15.0 every sync wrote them, and intermediate messages got the previous cycle's values (issue #66).
 
 The agent configuration (model and system_prompt) is automatically extracted from the Agent object and stored in `agents.{agent_id}.agent_data` for later retrieval via `get_agent_config()`. It is only written when it differs from the config already persisted for that agent, as known from this manager's previous writes or from the restore read (see [`initialize`](#initialize)).
 
@@ -289,14 +299,24 @@ agent = Agent(model="claude-3-sonnet", session_manager=manager)
 # Use the agent
 response = agent("What is the capital of France?")
 
-# Sync to capture metrics
+# The closing sync already stored the metrics on the last message.
+# An explicit sync writes them again, with whatever the agent holds now.
 manager.sync_agent(agent)
-# Metrics are now stored in MongoDB with the assistant message
 
 # Check metrics were captured
 print(f"Latency: {agent.event_loop_metrics.accumulated_metrics['latencyMs']}ms")
 print(f"Tokens: {agent.event_loop_metrics.accumulated_usage['totalTokens']}")
 ```
+
+### `register_hooks`
+
+```python
+def register_hooks(self, registry: HookRegistry, **kwargs: Any) -> None
+```
+
+Registers Strands' session hooks. The `Agent` calls it when it is created with `session_manager=...`.
+
+It registers exactly what Strands' `SessionManager` does, through a wrapper around `registry` (`sync_origin.MessageAddedTagging`). The callbacks for `MessageAddedEvent` run with a context tag set, and that tag is how `sync_agent()` knows to leave the metrics out. The tag is a `ContextVar`: it is restored even when a callback raises, and a `sync_agent()` called from another thread does not see it. Every other registration, arguments included, reaches `registry` unchanged. A subclass that overrides `register_hooks()` should call `super()` to keep that behaviour.
 
 ### `initialize`
 

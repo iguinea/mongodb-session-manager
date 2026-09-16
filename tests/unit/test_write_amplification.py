@@ -18,6 +18,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from pymongo.errors import PyMongoError
+from strands.hooks import AfterInvocationEvent, HookRegistry, MessageAddedEvent
 from strands.interrupt import _InterruptState
 from strands.types.session import SessionAgent, SessionMessage
 
@@ -672,51 +673,67 @@ class TestAgentConfigHydratedOnRestore:
 # ---------------------------------------------------------------------------
 
 
+def run_hooked_turn(mgr, agent, on_message_added=None):
+    """Dispara los eventos de un turno de 4 mensajes por el registry del manager.
+
+    Pasan por `register_hooks()`, como en un Agent real, porque el sync de cada
+    MessageAddedEvent no escribe lo mismo que el de cierre (issue #66). Llamar a
+    `sync_agent()` a mano sería una llamada explícita, y esa sí escribe métricas.
+    El orden de los eventos lo prueba `test_invocation_metrics.py` con un Agent
+    real; aquí solo se cuenta.
+    """
+    registry = HookRegistry()
+    mgr.register_hooks(registry)
+    # user, assistant(toolUse), user(toolResult), assistant(final)
+    for i in range(4):
+        message = {
+            "role": "user" if i % 2 == 0 else "assistant",
+            "content": [{"text": "m"}],
+        }
+        registry.invoke_callbacks(MessageAddedEvent(agent=agent, message=message))
+        if on_message_added:
+            on_message_added()
+    registry.invoke_callbacks(AfterInvocationEvent(agent=agent))
+
+
 class TestTurnWriteBudget:
     def test_warm_turn_stays_within_budget(self, mock_agent):
-        """Un turno de 4 mensajes sobre una sesión existente: 8 escrituras.
+        """Un turno de 4 mensajes sobre una sesión existente: 5 escrituras.
 
         Es el turno de referencia: un manager por request sobre una sesión que
-        ya existe. Presupuesto de 8:
+        ya existe. Presupuesto de 5:
           4  create_message ($push, uno por mensaje)
-          4  métricas (del segundo mensaje en adelante, más el cierre)
+          1  métricas, en el cierre
 
-        La configuración no se escribe: el agente se restaura con la misma que
-        ya estaba persistida (issue #65). Antes costaba una escritura más, y
-        era la mayor del turno. El estado tampoco: el primer sync del manager
-        lleva justo lo que read_agent() acaba de leer (issue #67), y antes
-        costaba otra.
+        Las métricas se escribían en cada mensaje desde el segundo, más el
+        cierre: 4. Las de cada mensaje eran las del ciclo anterior, porque
+        Strands dispara MessageAddedEvent antes de acumularlas (issue #66). La
+        configuración no se escribe: el agente se restaura con la misma que ya
+        estaba persistida (issue #65). El estado tampoco: el primer sync del
+        manager lleva justo lo que read_agent() acaba de leer (issue #67).
         """
         mgr, agent, collection = restored_manager(mock_agent, {"a1": persisted_agent()})
-
         summary = agent.event_loop_metrics.get_summary.return_value
-        # user, assistant(toolUse), user(toolResult), assistant(final)
-        for i in range(4):
-            message = {
-                "role": "user" if i % 2 == 0 else "assistant",
-                "content": [{"text": "m"}],
-            }
-            mgr.append_message(message, agent)
-            mgr.sync_agent(agent)
+
+        def first_cycle_done():
             # Only the user prompt arrives before the first model cycle.
             summary["accumulated_metrics"]["latencyMs"] = 100
-        mgr.sync_agent(agent)  # AfterInvocationEvent
+
+        run_hooked_turn(mgr, agent, on_message_added=first_cycle_done)
 
         updates = collection.update_one.call_count
         finds = collection.find_one.call_count
-        assert updates <= 8, f"{updates} updates en un turno caliente de 4 mensajes"
+        assert updates <= 5, f"{updates} updates en un turno caliente de 4 mensajes"
         assert finds == 0, f"{finds} finds evitables en el camino caliente"
 
     def test_turn_with_tool_call_stays_within_budget(self, mock_agent):
-        """Un turno de 4 mensajes debe caber en el presupuesto de escrituras.
+        """Un turno de 4 mensajes sobre un agente nuevo cabe en 7 escrituras.
 
-        Simula la secuencia de callbacks del SDK: por cada mensaje añadido,
-        `append_message` + `sync_agent`, y un `sync_agent` final de cierre.
-
-        Presupuesto de 10, desglosado para que el número no sea mágico:
+        Presupuesto de 7, desglosado para que el número no sea mágico:
           4  create_message ($push, uno por mensaje)
-          1  update_agent (el SDK salta el resto: el state no cambia)
-          5  sync fusionado (métricas + config en un solo update_one)
+          1  update_agent (el resto no cambia de contenido, issue #67)
+          1  configuración, en el sync del primer mensaje
+          1  métricas, en el cierre
 
         Contra v0.9.1 eran 15 updates y 6 finds: las métricas y la config iban
         por separado (5 + 5) y cada sync leía el último message_id.
@@ -736,17 +753,9 @@ class TestTurnWriteBudget:
         collection.update_one.reset_mock()
         collection.find_one.reset_mock()
 
-        # user, assistant(toolUse), user(toolResult), assistant(final)
-        for i in range(4):
-            message = {
-                "role": "user" if i % 2 == 0 else "assistant",
-                "content": [{"text": "m"}],
-            }
-            mgr.append_message(message, agent)
-            mgr.sync_agent(agent)
-        mgr.sync_agent(agent)  # AfterInvocationEvent
+        run_hooked_turn(mgr, agent)
 
         updates = collection.update_one.call_count
         finds = collection.find_one.call_count
-        assert updates <= 10, f"{updates} updates en un turno de 4 mensajes"
+        assert updates <= 7, f"{updates} updates en un turno de 4 mensajes"
         assert finds == 0, f"{finds} finds evitables en el camino caliente"

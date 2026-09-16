@@ -45,7 +45,7 @@ cd playground/chat && make frontend                   # Port 8881
 ### Core Components (src/mongodb_session_manager/)
 
 1. **MongoDBSessionManager** (`mongodb_session_manager.py`): Main class extending `RepositorySessionManager` from Strands SDK
-   - `sync_agent()`: Captures metrics via `agent.event_loop_metrics.get_summary()` including tokens, latency, TTFB, cycle metrics, tool usage
+   - `sync_agent()`: Captures metrics via `agent.event_loop_metrics.get_summary()` including tokens, latency, TTFB, cycle metrics, tool usage, and writes them on the agent's last message — **except in the sync Strands runs for each `MessageAddedEvent`**, which fires before the event loop accumulates that cycle's metrics. `register_hooks()` wraps the registry with `sync_origin.MessageAddedTagging`, so those callbacks run with a `ContextVar` tag set. The closing sync (`AfterInvocationEvent`) and any explicit call still write them: OV writes the TTFT on the agent and syncs by hand (#66)
    - `get_metadata_tool()`: Returns Strands tool for agent metadata management
    - Metadata/Feedback hooks for intercepting operations
    - Agent config persistence (model, system_prompt), written only when it changes; `initialize()` seeds the cache from `read_agent()`
@@ -92,7 +92,7 @@ Sessions stored as single documents with embedded data:
 
 **Note:** `application_name` is a top-level immutable field set at session creation. Use it to categorize sessions by application (e.g., "customer-support-bot", "sales-assistant").
 
-Messages include `event_loop_metrics` with: `accumulated_usage` (tokens, cache), `accumulated_metrics` (latency, TTFB), `cycle_metrics`, `tool_usage`. Redacted messages may include `guardrail_event` with `action`, `timestamp`, and optionally `stop_reason`, `policies_triggered`, and `trace` (full GuardrailTrace).
+The last message of each invocation that closes carries `event_loop_metrics` with: `accumulated_usage` (tokens, cache), `accumulated_metrics` (latency, TTFB), `cycle_metrics`, `tool_usage`. Intermediate messages (`toolUse`, `toolResult`, the next prompt) carry none. The values accumulate over the life of the `Agent` object, so with the factory (one `Agent` per request) they are that invocation's. An invocation that does not close (a user hook or the conversation manager raising before the closing sync) is left without metrics (#66). Redacted messages may include `guardrail_event` with `action`, `timestamp`, and optionally `stop_reason`, `policies_triggered`, and `trace` (full GuardrailTrace).
 
 Every message also carries a `storage_id` (uuid4 hex), its stable identity: `message_id` is an index Strands derives in memory, so two managers on the same agent can duplicate it. Writes name the message by `storage_id` (`message_identity.MessageRef`); messages stored before v0.12.0 have none and fall back to `message_id` (#78).
 
@@ -198,7 +198,7 @@ When releasing, update version in **three places**:
 2. `pyproject.toml` (`version`)
 3. `CHANGELOG.md` (add release entry)
 
-Current version: **0.14.0**
+Current version: **0.15.0**
 
 ## Workflow Rules
 
