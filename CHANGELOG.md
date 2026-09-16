@@ -1,5 +1,9 @@
 # Changelog
 
+## [2026-09-16] PR #90 - Mover paginación, búsqueda y conteo al servidor (@iguinea)
+
+- Optimize server-side message reads (#58)
+
 ## [2026-09-16] PR #89 - Update: reducir lecturas completas al restaurar sesiones (#57) (@iguinea)
 
 - Update: reducir lecturas completas al restaurar sesiones (#57)
