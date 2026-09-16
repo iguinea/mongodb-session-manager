@@ -1,5 +1,10 @@
 # Changelog
 
+## [2026-09-16] PR #86 - Fix: validar los nombres que acaban en rutas dot-notation (#79) (@iguinea)
+
+- Fix: validar los nombres que acaban en rutas dot-notation (#79)
+- Refactor: nombrar una vez el operador $push (qlty S1192)
+
 ## [0.13.0] - 2026-09-16
 
 ### Fixed
