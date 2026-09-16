@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.15.0] - 2026-09-16
+
+### Changed
+- **Las métricas de una invocación se escriben una sola vez, en su último mensaje** (#66). Strands dispara `MessageAddedEvent` *antes* de acumular el uso y las métricas de la llamada al modelo que produjo el mensaje (`event_loop.py:409-414` en strands 1.30, `:699-703` en 1.56), así que el sync que lanza tras cada mensaje veía las del ciclo anterior. Ahora ese sync no escribe métricas. Las escriben el sync de cierre (`AfterInvocationEvent`) y cualquier llamada explícita a `sync_agent()`. Turno de referencia (supervisor, sub-agente y una tool) contra MongoDB: **10 → 8 updates**. Un agente que llama a N herramientas pasa de 2N+1 escrituras de métricas a 1. En DocumentDB cada una cuesta 40-55 ms
+- **Contrato de `event_loop_metrics`**: lo lleva el último mensaje de cada invocación que llega a cerrar. Los mensajes intermedios (`toolUse`, `toolResult`) no lo llevan. Los valores se acumulan durante toda la vida del objeto `Agent`: con la factoría, un `Agent` por petición, son los de esa invocación, y su suma es el total de la sesión
+- `register_hooks()` pasa a Strands un registry envuelto (`mongodb_session_manager.sync_origin.MessageAddedTagging`). Los callbacks de `MessageAddedEvent` corren con una etiqueta `ContextVar` y todo lo demás llega al registry sin cambios. Una subclase que sobrescriba `register_hooks()` debe llamar a `super()`
+
+### Fixed
+- **Los mensajes intermedios guardaban métricas de un ciclo anterior**. Con una tool, el `toolResult` se llevaba las del primer ciclo, y el mensaje final recibía unas obsoletas que el cierre pisaba un instante después. Con tres tools, el `assistant(tool_use)` del segundo ciclo guardaba `cycle_count=2` junto a los tokens del primero
+- **El prompt de un agente reutilizado heredaba las métricas de la invocación anterior**. Con un mismo `Agent` en dos invocaciones, el acumulado ya no vale 0 cuando llega el segundo prompt, y el sync de ese mensaje lo escribía
+
+### Notes
+- **Un `sync_agent()` explícito sigue escribiendo las métricas del momento**, desde cualquier hilo. Así una aplicación puede añadirles un valor después de la invocación, como hace OV con el TTFT, y sincronizar
+- **Se descartó escribir las métricas solo en `AfterInvocationEvent`** porque rompía justo ese flujo: el TTFT se quedaba en 0. También se descartó una primera versión con una marca por `agent_id`. La revisión adversarial (Codex + OpenCode/GLM 5.3) demostró que se quedaba puesta cuando `create_message` se aplicaba y después lanzaba, y que un sync explícito desde otro hilo la consumía. Detalle en `features/8_invocation_metrics_on_last_message/plan.md`
+- **Lo que no arregla**:
+  - Una invocación que no llega a su sync de cierre queda sin métricas. Pasa si un hook de usuario lanza en `AfterInvocationEvent` antes que el manager, o si el conversation manager lanza en `apply_management()`, que Strands ejecuta antes del evento. Antes quedaba el snapshot de un ciclo anterior, que tampoco era el total
+  - Sin latencia medida sigue sin haber métricas: por ejemplo, un stream cancelado antes de que llegue la metadata del modelo
+  - Con strands 1.56, un hook de prioridad `SDK_LAST` que añada un mensaje después del cierre lo deja sin métricas. Se sigue en #69
+- **Consumidores**:
+  - Control Center: las stats, que leen el último mensaje, y el total del detalle de sesión no cambian. El timeline y la API externa (`timeline[].metrics`) solo mostrarán métricas en el último mensaje de cada invocación
+  - OV: `scripts/latencia_tools_dump.py` separa invocaciones cuando baja `latencyMs`. Con datos 0.15 cada punto ya es una invocación
+- **Sin cambios de esquema ni migración**, y sin operadores nuevos para DocumentDB: son las mismas escrituras, menos. Los documentos anteriores conservan sus métricas intermedias. Managers 0.14 y 0.15 conviven en la misma colección
+
 ## [2026-09-16] PR #87 - Update: no reescribir un agente que no ha cambiado (#67) (@iguinea)
 
 - Update: no reescribir un agente que no ha cambiado (#67)
