@@ -777,7 +777,7 @@ wheels = [
 
 [[package]]
 name = "mongodb-session-manager"
-version = "0.10.0"
+version = "0.10.1"
 source = { editable = "." }
 dependencies = [
     { name = "boto3" },

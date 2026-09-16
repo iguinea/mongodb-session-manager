@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.10.1] - 2026-09-16
+
+### Fixed
+- **`update_agent()` wiped the agent config**: it wrote `agents.<id>.agent_data` as a whole document, and a `$set` on a subdocument path *replaces* it — dropping the `model`, `system_prompt` and `prompt_metadata` that the session manager stores there (`SessionAgent` cannot carry them). Each `SessionAgent` field is now written on its own dotted path, so the manager-owned fields survive. Same single `update_one`, no extra reads
+- **The reference turn ended with no config at rest**: Strands re-syncs an agent after every tool execution (`_interrupt_state.deactivate()` bumps its internal-state version) and, since 0.10.0, the config cache no longer rewrote the config on that second sync — so any agent that ran a tool finished the turn with `model` and `system_prompt` at `None`. v0.10.0 was never tagged nor published, so no release ever shipped this
+- **`prompt_metadata` survives the next request**: the same whole-subdocument write dropped it on the first sync of each request (this one predates 0.10.0)
+
+### Changed
+- **Two fewer writes per turn**: `read_agent()` already fetches `model` and `system_prompt`, so `initialize()` now seeds the agent config cache with what is persisted and the first sync of each request stops rewriting an unchanged system prompt — the largest write of the turn (~14 KB per agent). The reference turn (supervisor + sub-agent, one tool call) goes from 15 to 13 `update` commands and from ~33.7 KB to ~5.9 KB of update payload; 21 → 19 total operations
+- **Corrected the documented write breakdown** of the reference turn: measured with a pymongo `CommandListener` it is 6 `$push` + 3 `update_agent` + 4 metrics writes, not the 6 + 8 + 1 documented in 0.10.0
+
+### Notes
+- No public API or document schema changes: `_pop_read_agent_config()` is the internal channel between repository and manager, like `_agent_exists()`
+- Any narrower `read_agent()` projection (#57) must keep `agent_data.model` and `agent_data.system_prompt`; an integration assert fails loudly if the config starts travelling again
+
 ## [2026-09-15] PR #55 - Fix: reducir escrituras por turno (42→21 ops) y corregir read-after-write sobre secundarios (#54) (@iguinea)
 
 - Docs: plan de reduccion de escrituras por turno (#54)

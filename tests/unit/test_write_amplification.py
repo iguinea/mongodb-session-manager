@@ -400,11 +400,149 @@ class TestRootUpdatedAtInvariant:
 
 
 # ---------------------------------------------------------------------------
-# 7. Conteo de extremo a extremo
+# 7. Configuración hidratada al restaurar el agente (issue #65)
+# ---------------------------------------------------------------------------
+
+
+def persisted_agent():
+    """Agente guardado en un turno anterior, con su configuración y dos mensajes."""
+    return {
+        "agent_data": {
+            "agent_id": "a1",
+            "state": {},
+            "conversation_manager_state": {},
+            "model": "m1",
+            "system_prompt": "p1",
+        },
+        "messages": [
+            {"message_id": 0, "message": {"role": "user", "content": [{"text": "a"}]}},
+            {
+                "message_id": 1,
+                "message": {"role": "assistant", "content": [{"text": "b"}]},
+            },
+        ],
+    }
+
+
+def restored_manager(mock_agent, stored_agents, system_prompt="p1"):
+    """Manager nuevo sobre una sesión existente, con el agente a1 ya inicializado.
+
+    El agente usa el modelo m1 y aún no tiene métricas. Devuelve
+    (manager, agente, colección), con los contadores de la colección a cero.
+    """
+    client, collection = make_client()
+    collection.find_one.return_value = {
+        "_id": "s1",
+        "session_id": "s1",
+        "session_type": "AGENT",
+        "agents": stored_agents,
+    }
+    mgr = make_manager(client)
+    agent = mock_agent(
+        agent_id="a1", latency_ms=0, model_id="m1", system_prompt=system_prompt
+    )
+    agent.conversation_manager.restore_from_session.return_value = None
+    agent.conversation_manager.removed_message_count = 0
+    agent.conversation_manager.get_state.return_value = {}
+
+    mgr.initialize(agent)
+    collection.update_one.reset_mock()
+    collection.find_one.reset_mock()
+    return mgr, agent, collection
+
+
+def written_fields(collection):
+    """Todo lo escrito con $set en las llamadas a update_one, fusionado."""
+    written = {}
+    for call in collection.update_one.call_args_list:
+        written.update(call[0][1].get("$set", {}))
+    return written
+
+
+class TestAgentConfigHydratedOnRestore:
+    def test_same_config_is_not_rewritten(self, mock_agent):
+        """Nuevo manager sobre la sesión, misma configuración: no se reescribe.
+
+        read_agent() ya trae model y system_prompt. Sin aprovecharlos, el
+        primer sync de cada request reescribía el system prompt entero.
+        """
+        mgr, agent, collection = restored_manager(mock_agent, {"a1": persisted_agent()})
+
+        mgr.sync_agent(agent)
+
+        written = written_fields(collection)
+        assert "agents.a1.agent_data.model" not in written
+        assert "agents.a1.agent_data.system_prompt" not in written
+
+    def test_changed_config_is_rewritten(self, mock_agent):
+        """Prompt cambiado entre despliegues: sí se escribe.
+
+        Guardarraíl: pasa también sin hidratar. Está para que la caché
+        hidratada no se trague un cambio real de configuración.
+        """
+        mgr, agent, collection = restored_manager(
+            mock_agent, {"a1": persisted_agent()}, system_prompt="p2"
+        )
+
+        mgr.sync_agent(agent)
+
+        written = written_fields(collection)
+        assert written["agents.a1.agent_data.system_prompt"] == "p2"
+
+    def test_new_agent_in_existing_session_writes_config(self, mock_agent):
+        """Agente nuevo en una sesión existente: su primer sync escribe la config.
+
+        Guardarraíl: read_agent() no encuentra nada que hidratar. Es el caso
+        del sub-agente invocado por primera vez en una conversación empezada.
+        """
+        mgr, agent, collection = restored_manager(mock_agent, {})
+
+        mgr.sync_agent(agent)
+
+        written = written_fields(collection)
+        assert written["agents.a1.agent_data.model"] == "m1"
+        assert written["agents.a1.agent_data.system_prompt"] == "p1"
+
+
+# ---------------------------------------------------------------------------
+# 8. Conteo de extremo a extremo
 # ---------------------------------------------------------------------------
 
 
 class TestTurnWriteBudget:
+    def test_warm_turn_stays_within_budget(self, mock_agent):
+        """Un turno de 4 mensajes sobre una sesión existente: 9 escrituras.
+
+        Es el turno de referencia: un manager por request sobre una sesión que
+        ya existe. Presupuesto de 9:
+          4  create_message ($push, uno por mensaje)
+          1  update_agent (primer sync del manager)
+          4  métricas (del segundo mensaje en adelante, más el cierre)
+
+        La configuración no se escribe: el agente se restaura con la misma que
+        ya estaba persistida (issue #65). Antes costaba una escritura más, y
+        era la mayor del turno.
+        """
+        mgr, agent, collection = restored_manager(mock_agent, {"a1": persisted_agent()})
+
+        summary = agent.event_loop_metrics.get_summary.return_value
+        # user, assistant(toolUse), user(toolResult), assistant(final)
+        for i in range(4):
+            message = {
+                "role": "user" if i % 2 == 0 else "assistant",
+                "content": [{"text": "m"}],
+            }
+            mgr.append_message(message, agent)
+            mgr.sync_agent(agent)
+            # Only the user prompt arrives before the first model cycle.
+            summary["accumulated_metrics"]["latencyMs"] = 100
+        mgr.sync_agent(agent)  # AfterInvocationEvent
+
+        updates = collection.update_one.call_count
+        finds = collection.find_one.call_count
+        assert updates <= 9, f"{updates} updates en un turno caliente de 4 mensajes"
+        assert finds == 0, f"{finds} finds evitables en el camino caliente"
+
     def test_turn_with_tool_call_stays_within_budget(self, mock_agent):
         """Un turno de 4 mensajes debe caber en el presupuesto de escrituras.
 

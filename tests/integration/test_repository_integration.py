@@ -116,6 +116,47 @@ class TestAgentLifecycle:
         doc_after = repo.collection.find_one({"_id": unique_session_id})
         assert doc_after["agents"]["agent-1"]["created_at"] == created_at
 
+    def test_update_preserves_agent_config(self, repo, unique_session_id):
+        """update_agent no borra lo que el session manager guarda en agent_data.
+
+        SessionAgent no conoce model, system_prompt ni prompt_metadata: un $set
+        del subdocumento entero los borraba en cada sync del SDK.
+        """
+        session = Session(session_id=unique_session_id, session_type="default")
+        repo.create_session(session)
+
+        agent = SessionAgent(
+            agent_id="agent-1",
+            state={"old": "state"},
+            conversation_manager_state={},
+        )
+        repo.create_agent(unique_session_id, agent)
+        repo.collection.update_one(
+            {"_id": unique_session_id},
+            {
+                "$set": {
+                    "agents.agent-1.agent_data.model": "claude-3",
+                    "agents.agent-1.agent_data.system_prompt": "You are helpful",
+                    "agents.agent-1.agent_data.prompt_metadata": {"prompt_id": "p1"},
+                }
+            },
+        )
+
+        agent_updated = SessionAgent(
+            agent_id="agent-1",
+            state={"new": "state"},
+            conversation_manager_state={},
+        )
+        repo.update_agent(unique_session_id, agent_updated)
+
+        doc = repo.collection.find_one({"_id": unique_session_id})
+        agent_data = doc["agents"]["agent-1"]["agent_data"]
+        assert agent_data["model"] == "claude-3"
+        assert agent_data["system_prompt"] == "You are helpful"
+        assert agent_data["prompt_metadata"] == {"prompt_id": "p1"}
+        # The SDK fields are still replaced whole, not merged.
+        assert agent_data["state"] == {"new": "state"}
+
     def test_list_agents(self, repo, unique_session_id):
         session = Session(session_id=unique_session_id, session_type="default")
         repo.create_session(session)

@@ -48,10 +48,11 @@ cd playground/chat && make frontend                   # Port 8881
    - `sync_agent()`: Captures metrics via `agent.event_loop_metrics.get_summary()` including tokens, latency, TTFB, cycle metrics, tool usage
    - `get_metadata_tool()`: Returns Strands tool for agent metadata management
    - Metadata/Feedback hooks for intercepting operations
-   - Agent config persistence (model, system_prompt)
+   - Agent config persistence (model, system_prompt), written only when it changes; `initialize()` seeds the cache from `read_agent()`
 
 2. **MongoDBSessionRepository** (`mongodb_session_repository.py`): Implements `SessionRepository` interface
    - All MongoDB CRUD operations for sessions, agents, messages
+   - `update_agent()` writes each `SessionAgent` field on its own path, so the manager's config fields in `agent_data` survive
    - Smart connection lifecycle (owns vs borrowed client)
 
 3. **MongoDBConnectionPool** (`mongodb_connection_pool.py`): Singleton for connection reuse
@@ -184,7 +185,7 @@ When releasing, update version in **three places**:
 2. `pyproject.toml` (`version`)
 3. `CHANGELOG.md` (add release entry)
 
-Current version: **0.10.0**
+Current version: **0.10.1**
 
 ## Workflow Rules
 

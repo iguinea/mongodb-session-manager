@@ -89,7 +89,7 @@ class MongoDBSessionRepository(SessionRepository):
             Read an agent from a session by agent ID.
 
         update_agent(session_id, session_agent, **kwargs):
-            Update an existing agent, preserving timestamps.
+            Update an existing agent, preserving timestamps and the stored config.
 
         create_message(session_id, agent_id, session_message, **kwargs):
             Add a message to an agent's message array.
@@ -215,6 +215,8 @@ class MongoDBSessionRepository(SessionRepository):
         self.database: Database = self.client[database_name]
         self.collection: Collection = self.database[collection_name]
         self.metadata_fields = metadata_fields
+        # Config found by the last read_agent(); see _pop_read_agent_config().
+        self._last_read_agent_config: dict[tuple[str, str], dict[str, Any]] = {}
         # Create indexes for timestamp ordering (only once per collection)
         self._ensure_indexes()
 
@@ -388,6 +390,9 @@ class MongoDBSessionRepository(SessionRepository):
     ) -> SessionAgent | None:
         """Read an Agent from a Session."""
         try:
+            # Any narrower projection must keep agent_data.model and
+            # agent_data.system_prompt: the session manager relies on them to
+            # know which config is already persisted.
             doc = self.collection.find_one(
                 {"_id": session_id}, {f"agents.{agent_id}": 1}
             )
@@ -403,6 +408,12 @@ class MongoDBSessionRepository(SessionRepository):
             }
 
             session_agent = SessionAgent(**filtered_agent_data)
+            self._last_read_agent_config = {
+                (session_id, agent_id): {
+                    "model": agent_data.get("model"),
+                    "system_prompt": agent_data.get("system_prompt"),
+                }
+            }
             logger.debug(f"Read agent {agent_id} from session {session_id}")
             return session_agent
 
@@ -410,30 +421,57 @@ class MongoDBSessionRepository(SessionRepository):
             logger.error(f"Failed to read agent {agent_id}: {e}")
             raise
 
+    def _pop_read_agent_config(
+        self, session_id: str, agent_id: str
+    ) -> dict[str, Any] | None:
+        """Return, and forget, the agent config found by read_agent().
+
+        read_agent() already fetches model and system_prompt but cannot return
+        them inside a SessionAgent. The session manager takes them from here to
+        skip rewriting a config that is already persisted, without reading the
+        agent a second time. Only the last read is kept, so a long-lived
+        repository does not pile up system prompts.
+
+        Returns:
+            Dict with model and system_prompt, or None if it was already taken
+            or another agent has been read since.
+        """
+        return self._last_read_agent_config.pop((session_id, agent_id), None)
+
     def update_agent(
         self, session_id: str, session_agent: SessionAgent, **kwargs: Any
     ) -> None:
-        """Update an Agent in a Session."""
+        """Update an Agent in a Session.
+
+        Each SessionAgent field is written on its own path. Setting agent_data
+        as a whole would replace the subdocument and wipe model, system_prompt
+        and prompt_metadata, which the session manager also stores there but
+        SessionAgent does not carry. Every field is still replaced whole, so
+        keys removed from the agent state do disappear.
+        """
         now = datetime.now(UTC)
         agent_data = session_agent.__dict__.copy()
         agent_data["created_at"] = self._parse_iso_datetime(session_agent.created_at)
         agent_data["updated_at"] = self._parse_iso_datetime(session_agent.updated_at)
 
+        agent_prefix = f"agents.{session_agent.agent_id}"
+        set_operations = {
+            f"{agent_prefix}.agent_data.{name}": value
+            for name, value in agent_data.items()
+        }
+        set_operations[f"{agent_prefix}.updated_at"] = now
+        set_operations["updated_at"] = now
+
         try:
-            # created_at is deliberately absent from the $set: it was written by
-            # create_agent and an update that does not name it leaves it alone.
-            # Reading it back first would be a read-after-write, which on a
-            # secondaryPreferred cluster can return a stale document and end up
-            # overwriting the original timestamp with now.
+            # The agent's own created_at (agents.<id>.created_at) is deliberately
+            # absent from the $set: it was written by create_agent and an update
+            # that does not name it leaves it alone. Reading it back first would
+            # be a read-after-write, which on a secondaryPreferred cluster can
+            # return a stale document and end up overwriting the original
+            # timestamp with now.
             result = self.collection.update_one(
                 {"_id": session_id},
-                {
-                    "$set": {
-                        f"agents.{session_agent.agent_id}.agent_data": agent_data,
-                        f"agents.{session_agent.agent_id}.updated_at": now,
-                        "updated_at": now,
-                    }
-                },
+                {"$set": set_operations},
             )
 
             if result.matched_count == 0:

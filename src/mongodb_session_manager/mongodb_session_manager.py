@@ -358,6 +358,25 @@ class MongoDBSessionManager(RepositorySessionManager):
 
         return summary
 
+    def initialize(self, agent: Agent, **kwargs: Any) -> None:
+        """Initialize an agent with the session and learn its persisted config.
+
+        When the agent is restored, read_agent() has already fetched its model
+        and system_prompt. Seeding the config cache with them spares the first
+        sync of every request from rewriting an unchanged system prompt, the
+        largest write of the turn.
+        """
+        super().initialize(agent, **kwargs)
+
+        persisted = self.session_repository._pop_read_agent_config(
+            self.session_id, agent.agent_id
+        )
+        if persisted is not None:
+            self._agent_config_cache[agent.agent_id] = (
+                persisted["model"],
+                persisted["system_prompt"],
+            )
+
     def sync_agent(self, agent: Agent, **kwargs: Any) -> None:
         """Sync agent data and capture model/system_prompt.
 

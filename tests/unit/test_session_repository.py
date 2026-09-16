@@ -329,6 +329,15 @@ class TestAgentOperations:
         result = mock_repository.read_agent("s1", "a1")
         assert result is not None
 
+        # Left out of the SessionAgent, but handed over to the session manager
+        # (issue #65): once, and only for the session they were read from.
+        assert mock_repository._pop_read_agent_config("s2", "a1") is None
+        assert mock_repository._pop_read_agent_config("s1", "a1") == {
+            "model": "claude-3",
+            "system_prompt": "You are helpful",
+        }
+        assert mock_repository._pop_read_agent_config("s1", "a1") is None
+
     def test_update_agent(
         self, mock_repository, mock_mongo_collection, sample_session_agent
     ):
@@ -358,6 +367,26 @@ class TestAgentOperations:
         key = f"agents.{sample_session_agent.agent_id}.created_at"
         assert key not in set_data
         assert mock_mongo_collection.find_one.call_count == 0
+
+    def test_update_agent_does_not_replace_agent_data(
+        self, mock_repository, mock_mongo_collection, sample_session_agent
+    ):
+        """update_agent escribe cada campo de SessionAgent, no agent_data entero.
+
+        El session manager guarda model, system_prompt y prompt_metadata dentro
+        de agent_data. Un $set del subdocumento completo los borraba en cada
+        sync del SDK.
+        """
+        mock_repository.update_agent("s1", sample_session_agent)
+
+        set_data = mock_mongo_collection.update_one.call_args[0][1]["$set"]
+        prefix = f"agents.{sample_session_agent.agent_id}.agent_data"
+        assert prefix not in set_data
+        assert set_data[f"{prefix}.state"] == sample_session_agent.state
+        assert (
+            set_data[f"{prefix}.conversation_manager_state"]
+            == sample_session_agent.conversation_manager_state
+        )
 
     def test_update_agent_raises_when_session_missing(
         self, mock_repository, mock_mongo_collection, sample_session_agent

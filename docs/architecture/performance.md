@@ -668,18 +668,33 @@ A turn is driven by messages, not by streaming: the Strands SDK registers both
 `sync_agent` on `AfterInvocationEvent`. The same turn emitting 1 chunk or 200
 chunks produces exactly the same writes.
 
-Measured on a turn with a supervisor and a sub-agent (one tool call):
+Measured on a warm turn (the session already exists) with a supervisor and a
+sub-agent (one tool call):
 
-| | v0.9.1 | v0.10.0 |
-|---|---|---|
-| `update` | 21 | 15 |
-| `find` | 13 | 6 |
-| `createIndexes` | 8 | 0 |
-| **total** | **42** | **21** |
+| | v0.9.1 | #54 | + #65 |
+|---|---|---|---|
+| `update` | 21 | 15 | 13 |
+| `find` | 13 | 6 | 6 |
+| `createIndexes` | 8 | 0 | 0 |
+| **total** | **42** | **21** | **19** |
 
-The remaining 15 writes break down as 6 `create_message` (one per message),
-8 fused syncs (metrics + agent config in a single `update_one`) and 1
-`update_agent`.
+The 13 remaining writes break down as:
+
+| Writes | Operation | When |
+|---:|---|---|
+| 6 | `create_message` (`$push`) | One per message: 4 from the supervisor, 2 from the sub-agent |
+| 3 | `update_agent` | First sync of each manager, plus the supervisor again after running the tool (Strands bumps its `interrupt_state` version) |
+| 4 | Metrics on the last message | Once the model has produced metrics: 3 for the supervisor, 1 for the sub-agent (#66 tracks the one that is overwritten right away) |
+
+The agent config (model and system prompt, ~14 KB each in this scenario) is not
+written at all. `read_agent()` already fetches it when an agent is restored, so
+each manager seeds its config cache with the persisted values and only writes
+when they differ. On a brand-new session the first sync still writes it once.
+
+`update_agent` writes each `SessionAgent` field on its own path
+(`agents.<id>.agent_data.<field>`). Setting `agent_data` as a whole replaced the
+subdocument and wiped the model, system prompt and `prompt_metadata` that the
+session manager stores there.
 
 ### Index Cardinality
 

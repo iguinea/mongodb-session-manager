@@ -254,7 +254,7 @@ This method performs three key operations:
 
 The metrics are automatically extracted from `agent.event_loop_metrics.accumulated_metrics` and `agent.event_loop_metrics.accumulated_usage`, and stored in the `event_loop_metrics` field of the latest assistant message.
 
-The agent configuration (model and system_prompt) is automatically extracted from the Agent object and stored in `agents.{agent_id}.agent_data` for later retrieval via `get_agent_config()`.
+The agent configuration (model and system_prompt) is automatically extracted from the Agent object and stored in `agents.{agent_id}.agent_data` for later retrieval via `get_agent_config()`. It is only written when it differs from the config already persisted for that agent, as known from this manager's previous writes or from the restore read (see [`initialize`](#initialize)).
 
 #### Parameters
 
@@ -297,7 +297,9 @@ def initialize(self, agent: Agent, **kwargs: Any) -> None
 
 Initialize an agent with the session, loading conversation history.
 
-This method loads the existing conversation history from MongoDB and populates the agent's context with previous messages. This enables agents to resume conversations across different sessions or restarts.
+Strands calls this method automatically when an `Agent` is created with `session_manager=...`, so there is no need to call it yourself: a second call for the same `agent_id` raises `SessionException`.
+
+If the agent already exists in the session, its state and conversation history are restored from MongoDB, which lets agents resume conversations across requests or restarts. The same read tells the manager which model and system prompt are already persisted for the agent, so the first `sync_agent()` of each request does not rewrite an unchanged configuration.
 
 #### Parameters
 
@@ -308,15 +310,18 @@ This method loads the existing conversation history from MongoDB and populates t
 #### Example
 
 ```python
-# First conversation
+# First request: initialize() runs inside Agent(...)
 agent1 = Agent(model="claude-3-sonnet", session_manager=manager)
-manager.initialize(agent1)
 response1 = agent1("My name is Alice")
-manager.sync_agent(agent1)
 
-# Later, resume conversation (even after restart)
-agent2 = Agent(model="claude-3-sonnet", session_manager=manager)
-manager.initialize(agent2)  # Loads previous messages
+# A later request (even after a restart) uses a new manager for the same session
+manager2 = create_mongodb_session_manager(
+    session_id=manager.session_id,
+    connection_string="mongodb://localhost:27017/",
+    database_name="chat_db",
+)
+# Creating the agent restores the history
+agent2 = Agent(model="claude-3-sonnet", session_manager=manager2)
 response2 = agent2("What's my name?")  # Agent remembers: "Alice"
 ```
 

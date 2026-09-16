@@ -428,14 +428,16 @@ Agents are stored in an object (not array) keyed by `agent_id`:
 }
 ```
 
-**Type**: Object (from Strands SDK `SessionAgent.__dict__`)
+**Type**: Object (Strands SDK `SessionAgent.__dict__`, plus the config fields the session manager adds)
 **Purpose**: Complete agent configuration and state
-**Format**: Defined by Strands SDK
+**Format**: Defined by Strands SDK, except `model`, `system_prompt` and `prompt_metadata`
+
+**Update semantics**: `update_agent()` writes each SDK field on its own path (`agents.<id>.agent_data.<field>`), so the session manager's `model`, `system_prompt` and `prompt_metadata` survive every SDK sync. Each SDK field is still replaced whole: keys removed from `state` disappear from the document. `read_agent()` hands the SDK fields to Strands and keeps `model` and `system_prompt` for the session manager, which uses them to avoid rewriting an unchanged config.
 
 **Key Subfields**:
 - `agent_id`: Unique identifier for this agent
-- `model`: AI model being used
-- `system_prompt`: Agent's instructions
+- `model`: AI model being used. Written by the session manager on `sync_agent()`, only when it changes
+- `system_prompt`: Agent's instructions. Written like `model`
 - `prompt_metadata`: Prompt lineage data (prompt_id, prompt_name, prompt_version, deployment_id, deployment_name). Optional, set via `set_prompt_metadata()` or `update_agent_config()`.
 - `state`: Key-value store for agent state
 - `conversation_manager_state`: Internal SDK state
