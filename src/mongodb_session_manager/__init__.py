@@ -1,5 +1,6 @@
 """MongoDB Session Manager for Strands Agents."""
 
+from .message_identity import MessageRef, ref_of
 from .mongodb_connection_pool import MongoDBConnectionPool
 from .mongodb_session_factory import (
     MongoDBSessionManagerFactory,
@@ -64,6 +65,9 @@ __all__ = [  # noqa: RUF022  agrupado por categorías a propósito; ordenarlo al
     "MongoDBSessionRepository",
     "MongoDBConnectionPool",
     "MongoDBSessionManagerFactory",
+    # Value objects
+    "MessageRef",
+    "ref_of",
     # Constants
     "GUARDRAIL_STOP_REASONS",
     # Factory functions
@@ -124,6 +128,6 @@ __all__.extend(
     ]
 )
 
-__version__ = "0.11.0"
+__version__ = "0.12.0"
 __author__ = "Iñaki Guinea Beristain"
 __author_email__ = "iguinea@gmail.com"

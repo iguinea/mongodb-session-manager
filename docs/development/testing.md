@@ -535,7 +535,9 @@ A double that quietly drifts from the real repository is worse than no double. T
 
 The contract is a base class of assertions, subclassed twice: `tests/unit/test_in_memory_repository.py` runs it against the double, and `tests/integration/test_repository_contract.py` runs **the very same cases** against a real MongoDB. If you add a method to the repository, add its cases to the contract — then neither implementation can drift without turning the other suite red.
 
-Some behaviours are reproduced warts and all, because a double kinder than reality lies: the positional update matches only the first message with a given `message_id` ([#78](https://github.com/iguinea/mongodb-session-manager/issues/78)), and `update_agent()` writes field by field so it does not wipe the manager's config ([#65](https://github.com/iguinea/mongodb-session-manager/issues/65)).
+Some behaviours are reproduced warts and all, because a double kinder than reality lies: a message with no `storage_id` — one stored before [#78](https://github.com/iguinea/mongodb-session-manager/issues/78) — falls back to being located by `message_id`, where a duplicated index matches its first occurrence only, and `update_agent()` writes field by field so it does not wipe the manager's config ([#65](https://github.com/iguinea/mongodb-session-manager/issues/65)).
+
+Both implementations ask `MessageRef.locator()` which field names a message, so that rule cannot drift between them — the double scans a list, the repository builds a dot-path, and they agree on *what* they are looking for.
 
 !!! warning "Not evidence about `agent_id` with `.` or `$`"
     The double resolves dotted paths its own way, so it does not reproduce how MongoDB breaks on those identifiers ([#79](https://github.com/iguinea/mongodb-session-manager/issues/79)).

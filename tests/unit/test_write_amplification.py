@@ -20,6 +20,7 @@ import pytest
 from pymongo.errors import PyMongoError
 from strands.types.session import SessionMessage
 
+from mongodb_session_manager.message_identity import MessageRef, attach_storage_id
 from mongodb_session_manager.mongodb_session_manager import MongoDBSessionManager
 from mongodb_session_manager.mongodb_session_repository import (
     MongoDBSessionRepository,
@@ -127,7 +128,7 @@ class TestIndexCreationIsIdempotent:
 # ---------------------------------------------------------------------------
 
 
-class TestLastMessageIdFromMemory:
+class TestLastMessageRefFromMemory:
     def test_no_find_when_message_in_memory(self, mock_agent):
         """El camino caliente no lee: el dato ya está en _latest_agent_message.
 
@@ -138,12 +139,14 @@ class TestLastMessageIdFromMemory:
         mgr = make_manager(client)
         agent = mock_agent(agent_id="a1", latency_ms=100)
 
-        mgr._latest_agent_message["a1"] = SessionMessage(
+        message = SessionMessage(
             message_id=7, message={"role": "assistant", "content": [{"text": "hi"}]}
         )
+        attach_storage_id(message, "9f1c")
+        mgr._latest_agent_message["a1"] = message
         collection.find_one.reset_mock()
 
-        assert mgr._get_last_message_id(agent) == 7
+        assert mgr._get_last_message_ref(agent) == MessageRef(7, "9f1c")
         assert collection.find_one.call_count == 0
 
     def test_falls_back_to_find_when_not_in_memory(self, mock_agent):
@@ -154,11 +157,11 @@ class TestLastMessageIdFromMemory:
 
         mgr._latest_agent_message["a1"] = None
         collection.find_one.return_value = {
-            "agents": {"a1": {"messages": [{"message_id": 3}]}}
+            "agents": {"a1": {"messages": [{"message_id": 3, "storage_id": "9f1c"}]}}
         }
         collection.find_one.reset_mock()
 
-        assert mgr._get_last_message_id(agent) == 3
+        assert mgr._get_last_message_ref(agent) == MessageRef(3, "9f1c")
         assert collection.find_one.call_count == 1
 
     def test_falls_back_when_agent_unknown(self, mock_agent):
@@ -168,7 +171,7 @@ class TestLastMessageIdFromMemory:
         agent = mock_agent(agent_id="desconocido")
 
         collection.find_one.return_value = None
-        assert mgr._get_last_message_id(agent) is None
+        assert mgr._get_last_message_ref(agent) is None
 
     def test_unmatched_metrics_update_is_logged(self, mock_agent, caplog):
         """Si el update de métricas no casa, debe dejar rastro, no desaparecer."""
@@ -371,7 +374,7 @@ class TestGuardrailEventWriteCount:
 
         mgr._record_guardrail_event(
             agent,
-            5,
+            MessageRef(5, "9f1c"),
             stop_reason="guardrail_intervened",
             guardrail_trace={"inputAssessment": {}, "outputAssessments": []},
         )

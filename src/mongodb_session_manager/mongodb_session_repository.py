@@ -17,6 +17,14 @@ from pymongo.errors import PyMongoError
 from strands.session.session_repository import SessionRepository
 from strands.types.session import Session, SessionAgent, SessionMessage
 
+from .message_identity import (
+    STORAGE_ID_FIELD,
+    MessageRef,
+    attach_storage_id,
+    new_storage_id,
+    ref_of,
+)
+
 logger = logging.getLogger(__name__)
 
 TIMEZONE_UTC_SUFFIX = "+00:00"
@@ -30,6 +38,7 @@ _MESSAGE_EXCLUDED_FIELDS = frozenset(
         "input_tokens",
         "output_tokens",
         "guardrail_event",
+        STORAGE_ID_FIELD,
     ]
 )
 
@@ -136,6 +145,7 @@ class MongoDBSessionRepository(SessionRepository):
                     "messages": [
                         {
                             "message_id": 1,
+                            "storage_id": "9f1c...",
                             "role": "user",
                             "content": "...",
                             "created_at": ISODate(),
@@ -283,9 +293,20 @@ class MongoDBSessionRepository(SessionRepository):
         return bool(doc and "agents" in doc and agent_id in doc["agents"])
 
     @staticmethod
-    def _filter_message_data(msg_data: dict) -> dict:
+    def _filter_message_data(msg_data: Mapping[str, Any]) -> dict:
         """Filter out fields that SessionMessage.__init__() does not accept."""
         return {k: v for k, v in msg_data.items() if k not in _MESSAGE_EXCLUDED_FIELDS}
+
+    @classmethod
+    def _to_session_message(cls, msg_data: Mapping[str, Any]) -> SessionMessage:
+        """Rebuild a SessionMessage, identity included.
+
+        Shared with the in-memory double: a message read back has to carry its
+        storage_id, or a restored manager would go back to redacting by index.
+        """
+        session_message = SessionMessage(**cls._filter_message_data(msg_data))
+        attach_storage_id(session_message, msg_data.get(STORAGE_ID_FIELD))
+        return session_message
 
     @staticmethod
     def _filter_agent_data(agent_data: Mapping[str, Any]) -> dict:
@@ -498,9 +519,18 @@ class MongoDBSessionRepository(SessionRepository):
         session_message: SessionMessage,
         **kwargs: Any,
     ) -> None:
-        """Create a new Message for the Agent."""
+        """Create a new Message for the Agent.
+
+        The message is born with a storage_id: an identity that does not come
+        from its index, so later writes can name it even if another manager
+        appends a message numbered the same (issue #78). The same value is
+        attached to the SessionMessage, which Strands keeps for the rest of the
+        turn and hands back for the redaction.
+        """
         now = datetime.now(UTC)
+        storage_id = new_storage_id()
         message_data = session_message.__dict__.copy()
+        message_data[STORAGE_ID_FIELD] = storage_id
         message_data["created_at"] = now
         message_data["updated_at"] = now
 
@@ -519,6 +549,7 @@ class MongoDBSessionRepository(SessionRepository):
             if result.matched_count == 0:
                 raise ValueError(f"Session {session_id} not found")
 
+            attach_storage_id(session_message, storage_id)
             logger.info(
                 f"Created message {session_message.message_id} for agent {agent_id}"
             )
@@ -544,7 +575,7 @@ class MongoDBSessionRepository(SessionRepository):
             # Find message by ID
             for msg_data in messages:
                 if msg_data.get("message_id") == message_id:
-                    return SessionMessage(**self._filter_message_data(msg_data))
+                    return self._to_session_message(msg_data)
 
             logger.debug(f"Message {message_id} not found")
             return None
@@ -554,7 +585,7 @@ class MongoDBSessionRepository(SessionRepository):
             raise
 
     def _missing_message_error(
-        self, session_id: str, agent_id: str, message_id: int
+        self, session_id: str, agent_id: str, ref: MessageRef
     ) -> ValueError:
         """Say which of session, agent or message is missing after a no-match.
 
@@ -576,29 +607,40 @@ class MongoDBSessionRepository(SessionRepository):
         if self.collection.count_documents(agent_filter, limit=1) == 0:
             return ValueError(f"Agent {agent_id} not found in session {session_id}")
 
-        return ValueError(
-            f"Message {message_id} not found in agent {agent_id} "
-            f"of session {session_id}"
+        return ValueError(self._missing_message_text(session_id, agent_id, ref))
+
+    @staticmethod
+    def _missing_message_text(session_id: str, agent_id: str, ref: MessageRef) -> str:
+        """Word the diagnostic for a message that was not found.
+
+        Names what was actually searched for. Naming the index alone would be a
+        lie in the very case this exists for: with a duplicated message_id the
+        index does exist, and what is missing is the identity.
+
+        Shared with the in-memory double so both raise the same sentence.
+        """
+        field, value = ref.locator()
+        return (
+            f"Message {ref.message_id} not found in agent {agent_id} "
+            f"of session {session_id} (searched by {field}={value})"
         )
 
     def _update_message_document(
         self,
         session_id: str,
         agent_id: str,
-        message_id: int,
+        ref: MessageRef,
         message_fields: Mapping[str, Any],
         *,
         agent_fields: Mapping[str, Any] | None = None,
         push: Mapping[str, Any] | None = None,
         touch_timestamps: bool = False,
     ) -> bool:
-        """Write fields onto one message, located server-side by message_id.
+        """Write fields onto one message, located server-side by its reference.
 
         This is the only place in the project that builds the positional
         selector. Everything that writes on a message goes through here:
-        update_message(), the turn metrics and the guardrail event. Keeping it
-        in one place is what makes the message identity of issue #78 a local
-        change instead of a hunt across three call sites.
+        update_message(), the turn metrics and the guardrail event.
 
         Args:
             message_fields: Keys relative to the message document
@@ -648,19 +690,18 @@ class MongoDBSessionRepository(SessionRepository):
         if push:
             update["$push"] = dict(push)
 
+        # Which field names a message is MessageRef's rule, not this method's:
+        # the in-memory double resolves it the same way over a list.
+        field, value = ref.locator()
+
         try:
-            # message_id is not a unique key -- Strands derives it in memory --
-            # so a duplicated id matches its first occurrence only. See #78.
             result = self.collection.update_one(
-                {
-                    "_id": session_id,
-                    f"agents.{agent_id}.messages.message_id": message_id,
-                },
+                {"_id": session_id, f"agents.{agent_id}.messages.{field}": value},
                 update,
             )
         except PyMongoError as e:
             logger.error(
-                f"Failed to update message {message_id} of agent {agent_id} "
+                f"Failed to update message {ref.message_id} of agent {agent_id} "
                 f"in session {session_id}: {e}"
             )
             raise
@@ -671,13 +712,17 @@ class MongoDBSessionRepository(SessionRepository):
         self,
         session_id: str,
         agent_id: str,
-        message_id: int,
+        ref: MessageRef,
         set_operations: Mapping[str, Any],
         agent_set_operations: Mapping[str, Any] | None = None,
     ) -> bool:
         """Write fields on one message, and optionally on its agent, in one write.
 
         Args:
+            ref: Which message to write on. Build it from the message itself,
+                with `ref_of()` or `get_last_message_ref()`: a hand-made
+                MessageRef with no storage_id falls back to naming the message
+                by its index, which is what MessageRef exists to avoid.
             set_operations: Keys relative to the message document.
             agent_set_operations: Keys relative to the agent document
                 ("agent_data.model"). They travel in the same round-trip: on
@@ -690,7 +735,7 @@ class MongoDBSessionRepository(SessionRepository):
         return self._update_message_document(
             session_id,
             agent_id,
-            message_id,
+            ref,
             set_operations,
             agent_fields=agent_set_operations,
         )
@@ -736,9 +781,11 @@ class MongoDBSessionRepository(SessionRepository):
     ) -> None:
         """Update a Message (usually for redaction).
 
-        The message is located by message_id with the positional operator, so
-        the happy path is a single write: the whole history no longer has to be
-        read to compute an index in the client.
+        Strands hands back the very SessionMessage it appended, so the message
+        still carries the identity create_message() gave it and the redaction
+        lands on it -- see MessageRef. Located server-side, so the happy path is
+        a single write: the whole history no longer has to be read to compute an
+        index in the client.
 
         Only `message` and `redact_message` are written, each on its own path.
         Setting the message subdocument as a whole would replace it and wipe the
@@ -747,14 +794,12 @@ class MongoDBSessionRepository(SessionRepository):
         purpose: deriving them from SessionMessage.__dict__ would let a new SDK
         field into the schema without review. created_at is never named, and an
         update that does not name it leaves it alone, keeping value and type.
-
-        Note that message_id is not a unique key -- Strands derives it in memory
-        -- so a duplicated id matches its first occurrence only. See issue #78.
         """
+        ref = ref_of(session_message)
         matched = self._update_message_document(
             session_id,
             agent_id,
-            session_message.message_id,
+            ref,
             {
                 "message": session_message.message,
                 "redact_message": session_message.redact_message,
@@ -763,9 +808,7 @@ class MongoDBSessionRepository(SessionRepository):
         )
 
         if not matched:
-            raise self._missing_message_error(
-                session_id, agent_id, session_message.message_id
-            )
+            raise self._missing_message_error(session_id, agent_id, ref)
 
         logger.info(
             f"Updated message {session_message.message_id} for agent {agent_id}"
@@ -811,7 +854,7 @@ class MongoDBSessionRepository(SessionRepository):
             result = []
             for i, msg_data in enumerate(messages):
                 try:
-                    result.append(SessionMessage(**self._filter_message_data(msg_data)))
+                    result.append(self._to_session_message(msg_data))
                 except Exception as e:
                     logger.error(f"Failed to convert message {i}: {e}")
 
@@ -966,7 +1009,11 @@ class MongoDBSessionRepository(SessionRepository):
             raise
 
     def record_guardrail_event(
-        self, session_id: str, agent_id: str, message_id: int, event: Mapping[str, Any]
+        self,
+        session_id: str,
+        agent_id: str,
+        ref: MessageRef,
+        event: Mapping[str, Any],
     ) -> bool:
         """Record a guardrail intervention on its message and on the session.
 
@@ -987,29 +1034,34 @@ class MongoDBSessionRepository(SessionRepository):
         return self._update_message_document(
             session_id,
             agent_id,
-            message_id,
+            ref,
             {"guardrail_event": event},
             push={
-                "guardrail_events": self._session_guardrail_entry(
-                    agent_id, message_id, event
-                )
+                "guardrail_events": self._session_guardrail_entry(agent_id, ref, event)
             },
         )
 
     @staticmethod
     def _session_guardrail_entry(
-        agent_id: str, message_id: int, event: Mapping[str, Any]
+        agent_id: str, ref: MessageRef, event: Mapping[str, Any]
     ) -> dict[str, Any]:
         """Derive the session-level guardrail entry from the message-level one.
+
+        Carries the identity next to the index, when the message has one:
+        message_id alone would point an auditor at two messages the day the
+        index is duplicated, which is the whole reason for MessageRef.
 
         Shared with the in-memory double so the rule -- the full trace stays on
         the message -- cannot drift between the two implementations.
         """
-        return {
-            "message_id": message_id,
+        entry = {
+            "message_id": ref.message_id,
             "agent_id": agent_id,
             **{name: value for name, value in event.items() if name != "trace"},
         }
+        if ref.storage_id is not None:
+            entry[STORAGE_ID_FIELD] = ref.storage_id
+        return entry
 
     @staticmethod
     def _agent_config(agent_id: str, agent_data: Mapping[str, Any]) -> dict[str, Any]:
@@ -1083,11 +1135,13 @@ class MongoDBSessionRepository(SessionRepository):
             )
             raise
 
-    def get_last_message_id(self, session_id: str, agent_id: str) -> int | None:
-        """Read the message_id of the agent's last message, None when there is none.
+    def get_last_message_ref(self, session_id: str, agent_id: str) -> MessageRef | None:
+        """Reference the agent's last message, None when there is none.
 
-        The second place that resolves message identity, after
-        _update_message_document(). See #78.
+        The fallback for a manager that has not appended anything in this
+        process: the reference normally travels on the SessionMessage itself.
+        The identity comes along, so a write built from here names a message
+        and not an index -- see MessageRef.
         """
         try:
             # $slice keeps the whole history from travelling over the wire.
@@ -1100,10 +1154,10 @@ class MongoDBSessionRepository(SessionRepository):
                 return None
 
             messages = doc["agents"][agent_id].get("messages", [])
-            return messages[-1]["message_id"] if messages else None
+            return MessageRef.from_document(messages[-1]) if messages else None
         except PyMongoError as e:
             logger.error(
-                f"Failed to read the last message id of agent {agent_id} "
+                f"Failed to read the last message reference of agent {agent_id} "
                 f"in session {session_id}: {e}"
             )
             raise

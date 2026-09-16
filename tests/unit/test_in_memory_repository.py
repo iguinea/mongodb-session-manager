@@ -31,6 +31,11 @@ class TestInMemoryContract(SessionRepositoryContract):
         messages = store.session(session_id)["agents"]["a1"]["messages"]
         return [m for m in messages if m.get("message_id") == message_id]
 
+    def _push_legacy_message(self, store, session_id: str, message_id: int) -> None:
+        store.push_raw_message(
+            session_id, "a1", self.legacy_message_document(message_id)
+        )
+
     def _session_guardrail_events(self, store, session_id: str) -> list[dict[str, Any]]:
         return store.session(session_id)["guardrail_events"]
 

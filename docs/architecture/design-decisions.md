@@ -1233,11 +1233,12 @@ the branch: with metrics the config rides along in
 `update_message_fields()`, and without them it goes alone through
 `update_agent_fields()`. One write either way.
 
-The last message id comes from the parent's in-memory
-`_latest_agent_message`, falling back to `get_last_message_id()` only for a
-session restored in another process. That removed the read shown in earlier
-versions of this document, and with it a read-after-write that could attribute
-the metrics to the previous message on a lagging replica.
+The reference to the last message comes from the parent's in-memory
+`_latest_agent_message`, which carries the identity `create_message()` stamped
+on it, falling back to `get_last_message_ref()` only for a session restored in
+another process. That removed the read shown in earlier versions of this
+document, and with it a read-after-write that could attribute the metrics to the
+previous message on a lagging replica.
 
 **Why Last Message?**
 

@@ -53,6 +53,12 @@ class TestMongoDBContract(SessionRepositoryContract):
             if m.get("message_id") == message_id
         ]
 
+    def _push_legacy_message(self, store, session_id: str, message_id: int) -> None:
+        store.collection.update_one(
+            {"_id": session_id},
+            {"$push": {"agents.a1.messages": self.legacy_message_document(message_id)}},
+        )
+
     def _session_guardrail_events(self, store, session_id: str) -> list[dict[str, Any]]:
         doc = store.collection.find_one({"_id": session_id})
         return doc.get("guardrail_events", [])

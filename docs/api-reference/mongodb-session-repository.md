@@ -65,6 +65,7 @@ Session documents are stored with the following structure:
             "messages": [
                 {
                     "message_id": 1,
+                    "storage_id": "9f1c4b2e7a0d4e1fa3c85d6b2e7a0d4e",
                     "role": "user",
                     "content": "Hello!",
                     "created_at": ISODate("2024-01-26T10:30:50.000Z"),
@@ -72,6 +73,7 @@ Session documents are stored with the following structure:
                 },
                 {
                     "message_id": 2,
+                    "storage_id": "3c5dfcb905834110ba08b3ba92a7a543",
                     "role": "assistant",
                     "content": "Hi! How can I help you?",
                     "created_at": ISODate("2024-01-26T10:30:55.000Z"),
@@ -439,6 +441,35 @@ Same shape as `get_agent_config`, one entry per agent in the session. Returns `[
 
 ## Message Operations
 
+### Message identity
+
+`message_id` is an *index*, not an identity: Strands derives it in memory
+(`RepositorySessionManager.append_message`: `latest.message_id + 1`) and each manager
+restores its counter from the last stored message. Two managers restoring the same agent at
+once compute the same index, so the array can hold two messages numbered alike — and
+MongoDB's positional operator updates the first one that matches, which is how a redaction
+used to land on the wrong message ([issue #78](https://github.com/iguinea/mongodb-session-manager/issues/78)).
+
+Since v0.12.0 every message carries a `storage_id`: a uuid4 written once by
+`create_message()`, never derived, never rewritten. Writes name a message with a
+`MessageRef`:
+
+```python
+from mongodb_session_manager import MessageRef
+
+MessageRef(message_id=7, storage_id="9f1c...")  # names one message
+MessageRef(message_id=7)  # pre-v0.12.0 message: located by index
+```
+
+You rarely build one by hand. The identity travels on the `SessionMessage` — attached by
+`create_message()`, `read_message()` and `list_messages()` — and
+`get_last_message_ref()` returns it ready to use.
+
+!!! info "No migration needed"
+    Messages stored before v0.12.0 have no `storage_id` and keep being located by
+    `message_id`, exactly as they always were. The exposure of #78 ends for each
+    conversation as its agents append new messages.
+
 ### `create_message`
 
 ```python
@@ -453,7 +484,11 @@ def create_message(
 
 Create a new message for an agent.
 
-Appends a message to the agent's messages array with automatic timestamps.
+Appends a message to the agent's messages array with automatic timestamps and a
+`storage_id`: the message's stable identity, a uuid4 that does not come from its index.
+The same value is attached to the `SessionMessage` passed in, which Strands keeps for the
+rest of the turn and hands back for the redaction — that is what lets later writes name
+*this* message. See [Message identity](#message-identity).
 
 #### Parameters
 
@@ -542,12 +577,12 @@ def update_message(
 
 Update a message (typically for redaction).
 
-The message is located by `message_id` with MongoDB's positional operator (`$`), so the method performs **a single write and no reads**.
+The message is located by its identity with MongoDB's positional operator (`$`), so the method performs **a single write and no reads**. The identity comes from the `SessionMessage` itself — `create_message()` and the read methods attach it — so a redaction lands on the message this process appended even if another manager appended one with the same `message_id`.
 
 Only `message`, `redact_message` and `updated_at` are written, each on its own path. Fields that the session manager stores on the message but `SessionMessage` does not carry — `event_loop_metrics`, `guardrail_event` and the legacy counters — are **preserved**. `created_at` is never named, so it keeps its original value and type.
 
-!!! warning "`message_id` is not a unique key"
-    Strands derives it in memory, so two concurrent session managers on the same agent can produce duplicates. The positional operator then matches the **first** occurrence only. Tracked in [issue #78](https://github.com/iguinea/mongodb-session-manager/issues/78).
+!!! note "`message_id` is not a unique key"
+    Strands derives it in memory, so two concurrent session managers on the same agent can produce duplicates. Since v0.12.0 the selector uses `storage_id` instead ([issue #78](https://github.com/iguinea/mongodb-session-manager/issues/78)). A message stored before that has no `storage_id` and is still located by `message_id`, where a duplicate matches its **first** occurrence only.
 
 #### Parameters
 
@@ -587,7 +622,7 @@ def update_message_fields(
     self,
     session_id: str,
     agent_id: str,
-    message_id: int,
+    ref: MessageRef,
     set_operations: Mapping[str, Any],
     agent_set_operations: Mapping[str, Any] | None = None,
 ) -> bool
@@ -595,7 +630,7 @@ def update_message_fields(
 
 Write fields on one message — and optionally on its agent — in a **single write**.
 
-This is the public face of the only method in the project that builds the positional selector. `update_message()` and `record_guardrail_event()` go through the same primitive, so the message identity of [issue #78](https://github.com/iguinea/mongodb-session-manager/issues/78) lives in one place.
+This is the public face of the only method in the project that builds the positional selector. `update_message()` and `record_guardrail_event()` go through the same primitive, so [message identity](#message-identity) lives in one place.
 
 #### Parameters
 
@@ -603,7 +638,7 @@ This is the public face of the only method in the project that builds the positi
 
 - **agent_id** (`str`): ID of the agent.
 
-- **message_id** (`int`): Message to locate, server-side, with the positional operator.
+- **ref** (`MessageRef`): Message to locate, server-side, with the positional operator. Comes from the message itself — `get_last_message_ref()` or the `SessionMessage` — so a caller cannot name a message by index and lose its identity on the way.
 
 - **set_operations** (`Mapping[str, Any]`): Keys **relative to the message document**, such as `"event_loop_metrics.cycle_metrics"`.
 
@@ -619,26 +654,29 @@ This is the public face of the only method in the project that builds the positi
 #### Example
 
 ```python
-repo.update_message_fields(
-    "user-123",
-    "assistant-1",
-    message_id=7,
-    set_operations={"event_loop_metrics.accumulated_usage": {"totalTokens": 900}},
-    agent_set_operations={"agent_data.model": "claude-opus-5"},
-)
+# None when the agent has no messages yet, so there is nowhere to write.
+ref = repo.get_last_message_ref("user-123", "assistant-1")
+if ref is not None:
+    repo.update_message_fields(
+        "user-123",
+        "assistant-1",
+        ref,
+        set_operations={"event_loop_metrics.accumulated_usage": {"totalTokens": 900}},
+        agent_set_operations={"agent_data.model": "claude-opus-5"},
+    )
 ```
 
 ### `record_guardrail_event`
 
 ```python
 def record_guardrail_event(
-    self, session_id: str, agent_id: str, message_id: int, event: Mapping[str, Any]
+    self, session_id: str, agent_id: str, ref: MessageRef, event: Mapping[str, Any]
 ) -> bool
 ```
 
 Record a guardrail intervention on its message **and** on the session, in a single write.
 
-Only the message-level event is passed in. The session-level entry is *derived* from it: the same fields, plus `message_id` and `agent_id`, minus the full `trace`. The session array is read whole to audit a session and grows with every intervention, so the `GuardrailTrace` stays on the message, where it is read only when someone opens that message.
+Only the message-level event is passed in. The session-level entry is *derived* from it: the same fields, plus `message_id`, `storage_id` and `agent_id`, minus the full `trace`. The identity travels with the index because `message_id` alone would point an auditor at two messages when it is duplicated. The session array is read whole to audit a session and grows with every intervention, so the `GuardrailTrace` stays on the message, where it is read only when someone opens that message.
 
 #### Returns
 
@@ -652,15 +690,18 @@ def count_messages(self, session_id: str, agent_id: str) -> int
 
 Count the messages stored for one agent. Returns `0` when the agent is unknown.
 
-### `get_last_message_id`
+### `get_last_message_ref`
 
 ```python
-def get_last_message_id(self, session_id: str, agent_id: str) -> int | None
+def get_last_message_ref(self, session_id: str, agent_id: str) -> MessageRef | None
 ```
 
-Read the `message_id` of the agent's last message, or `None` when it has none.
+Reference the agent's last message, or `None` when it has none.
 
-Projects with `$slice: -1`, so only the last message travels over the wire. The session manager prefers its in-memory value and falls back here only for a session restored in another process.
+Projects with `$slice: -1`, so only the last message travels over the wire. The session manager prefers the reference carried by the message it has in memory and falls back here only for a session restored in another process.
+
+!!! warning "Breaking change in v0.12.0"
+    Replaces `get_last_message_id()`, which returned a bare `int`. The reference carries the `storage_id` too, so a write built from it names a message rather than an index.
 
 ### `list_messages`
 

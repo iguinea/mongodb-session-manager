@@ -82,6 +82,7 @@ Each document represents a complete session with all its agents, messages, and m
     "guardrail_events": [
         {
             "message_id": 3,
+            "storage_id": "3c5dfcb905834110ba08b3ba92a7a543",
             "agent_id": "support-agent",
             "action": "BLOCKED",
             "timestamp": ISODate("2024-01-22T15:00:00.000Z")
@@ -244,6 +245,7 @@ Session Document (Root)
         └── messages (array)
             └── message objects
                 ├── message_id (int)
+                ├── storage_id (string, uuid4 hex)
                 ├── role (string)
                 ├── content (string/array)
                 ├── created_at (ISODate)
@@ -269,6 +271,7 @@ Session Document (Root)
 | Agent | updated_at | ISODate | UTC timestamp | Yes |
 | Agent | messages | array | message objects | Yes |
 | Message | message_id | int | auto-increment | Yes |
+| Message | storage_id | string | uuid4 hex | Yes (since v0.12.0) |
 | Message | role | string | user/assistant/system | Yes |
 | Message | content | string/array | message content | Yes |
 | Message | created_at | ISODate | UTC timestamp | Yes |
@@ -534,6 +537,7 @@ def create_agent(self, session_id, session_agent, **kwargs):
 ```json
 {
     "message_id": 2,
+    "storage_id": "3c5dfcb905834110ba08b3ba92a7a543",
     "role": "assistant",
     "content": "Hello! How can I help you today?",
     "created_at": ISODate("2024-01-15T09:00:02.456Z"),
@@ -561,9 +565,22 @@ def create_agent(self, session_id, session_agent, **kwargs):
 ```
 
 **Type**: Integer
-**Purpose**: Unique identifier within the agent's message array
+**Purpose**: Position of the message in the conversation — what the history is ordered and read by
 **Generation**: Auto-incrementing (managed by application, not MongoDB)
-**Uniqueness**: Unique per agent (not globally unique)
+**Uniqueness**: **Not guaranteed.** Strands derives it in memory (`latest.message_id + 1`), so two managers restoring the same agent at once produce the same index. Identifying a message is `storage_id`'s job ([issue #78](https://github.com/iguinea/mongodb-session-manager/issues/78))
+
+#### storage_id
+```json
+{
+    "storage_id": "3c5dfcb905834110ba08b3ba92a7a543"
+}
+```
+
+**Type**: String (uuid4 hex)
+**Purpose**: Stable identity of the stored message — what every write names
+**Generation**: Minted once by `create_message()`, never derived, never rewritten
+**Uniqueness**: Unique per message
+**Compatibility**: Absent on messages stored before v0.12.0, which are still located by `message_id`
 
 **Why Not MongoDB ObjectId?**
 - Sequential numbering is more user-friendly
@@ -706,7 +723,8 @@ def update_message(self, session_id, agent_id, session_message, **kwargs):
     matched = self._update_message_document(
         session_id,
         agent_id,
-        session_message.message_id,
+        # Strands hands back the SessionMessage it appended, identity included.
+        ref_of(session_message),
         {
             "message": session_message.message,
             "redact_message": session_message.redact_message,
@@ -729,7 +747,7 @@ def _update_message_document(
     self,
     session_id,
     agent_id,
-    message_id,
+    ref,
     message_fields,
     *,
     extra_set=None,
@@ -742,12 +760,13 @@ def _update_message_document(
     }
     # ... extra_set, push and the three updated_at when touch_timestamps ...
 
+    # Which field names a message is MessageRef's rule: storage_id when the
+    # message has one, message_id when it predates the identity.
+    field, value = ref.locator()
+
     result = self.collection.update_one(
         # The positional $ resolves to the array element matched in the query.
-        {
-            "_id": session_id,
-            f"agents.{agent_id}.messages.message_id": message_id,
-        },
+        {"_id": session_id, f"agents.{agent_id}.messages.{field}": value},
         update,
     )
     return result.matched_count > 0
@@ -758,7 +777,7 @@ def _update_message_document(
 **Callers**: keys are relative to the message (`"guardrail_event"`); the repository owns the prefix
 **Field Preservation**: `event_loop_metrics` and `guardrail_event` survive the redaction; a `$set` of the whole subdocument replaced it and wiped them
 **Timestamp Preservation**: `created_at` is never named, so it keeps both its value and its type; `updated_at` is refreshed only when `touch_timestamps` is set, which annotations deliberately leave off
-**Caveat**: `message_id` is not a unique key (Strands derives it in memory), so a duplicated id matches its first occurrence only — see issue #78. Since the selector now lives in one method, fixing that is a local change
+**Message identity**: the element is named by `storage_id`, minted once by `create_message()`. `message_id` is an index Strands derives in memory, so two managers on the same agent can duplicate it and the positional `$` would match the wrong one ([issue #78](https://github.com/iguinea/mongodb-session-manager/issues/78)). Messages stored before v0.12.0 have no identity and fall back to `message_id`, which is why no migration is needed
 
 #### List Messages
 ```python
@@ -1092,6 +1111,7 @@ db.sessions.aggregate([
     "guardrail_events": [
         {
             "message_id": 3,
+            "storage_id": "3c5dfcb905834110ba08b3ba92a7a543",
             "agent_id": "support-agent",
             "action": "BLOCKED",
             "timestamp": ISODate("2024-01-22T15:00:00.000Z")
@@ -1108,7 +1128,8 @@ db.sessions.aggregate([
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `message_id` | Integer | The message_id of the redacted message |
+| `message_id` | Integer | Position of the redacted message in the conversation |
+| `storage_id` | String | Identity of the redacted message. Absent for messages stored before v0.12.0 |
 | `agent_id` | String | The agent that triggered the guardrail |
 | `action` | String | The guardrail action (default: `"BLOCKED"`, can be custom like `"ANONYMIZED"`) |
 | `timestamp` | ISODate | When the guardrail event was recorded |

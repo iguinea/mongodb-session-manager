@@ -1,10 +1,10 @@
 """Unit tests for MongoDBSessionManager."""
 
 import warnings
-from typing import ClassVar
 from unittest.mock import MagicMock, patch
 
 import pytest
+from strands.types.exceptions import SessionException
 from strands.types.session import SessionAgent, SessionMessage
 
 from mongodb_session_manager.mongodb_session_manager import (
@@ -75,15 +75,26 @@ def agent_in_session(fake_repo, manager_fake):
 
 @pytest.fixture
 def stored_message(fake_repo, agent_in_session):
-    """Give agent "a1" one stored message, the one a turn would annotate."""
-    fake_repo.create_message(
-        "test-session",
-        "a1",
-        SessionMessage(
-            message_id=5, message={"role": "assistant", "content": [{"text": "hi"}]}
-        ),
+    """Give agent "a1" one stored message, the one a turn would annotate.
+
+    The message is also registered as the agent's latest, which is what Strands
+    does for every message it appends or restores. A manager that has not seen
+    a message cannot claim the turn wrote it.
+    """
+    message = SessionMessage(
+        message_id=5, message={"role": "assistant", "content": [{"text": "hi"}]}
     )
+    fake_repo.create_message("test-session", "a1", message)
+    agent_in_session._latest_agent_message["a1"] = message
     return agent_in_session
+
+
+REDACTED: dict = {"role": "user", "content": [{"text": "***"}]}
+
+
+def guardrail_events(fake_repo):
+    """Return the session-level guardrail audit trail."""
+    return fake_repo.session("test-session")["guardrail_events"]
 
 
 @pytest.fixture
@@ -893,26 +904,18 @@ class TestCacheHitRateCalculation:
 class TestRedactLatestMessage:
     """Contra el doble: se comprueba el evento almacenado, no el comando emitido."""
 
-    REDACTED: ClassVar[dict] = {"role": "user", "content": [{"text": "***"}]}
-
     @staticmethod
     def _redact(manager, **kwargs):
         """Redact through the manager, stubbing the parent's own bookkeeping."""
         agent = MagicMock()
         agent.agent_id = "a1"
         with patch.object(MongoDBSessionManager.__bases__[0], "redact_latest_message"):
-            manager.redact_latest_message(
-                TestRedactLatestMessage.REDACTED, agent, **kwargs
-            )
+            manager.redact_latest_message(REDACTED, agent, **kwargs)
         return agent
 
     @staticmethod
     def _event_on_message(fake_repo):
         return fake_repo.message("test-session", "a1", 5)["guardrail_event"]
-
-    @staticmethod
-    def _events_on_session(fake_repo):
-        return fake_repo.session("test-session")["guardrail_events"]
 
     def test_redact_latest_message_calls_super(self, stored_message):
         agent = MagicMock()
@@ -920,8 +923,8 @@ class TestRedactLatestMessage:
         with patch.object(
             MongoDBSessionManager.__bases__[0], "redact_latest_message"
         ) as mock_super:
-            stored_message.redact_latest_message(self.REDACTED, agent)
-            mock_super.assert_called_once_with(self.REDACTED, agent)
+            stored_message.redact_latest_message(REDACTED, agent)
+            mock_super.assert_called_once_with(REDACTED, agent)
 
     def test_records_guardrail_event_on_message(self, stored_message, fake_repo):
         self._redact(stored_message)
@@ -933,7 +936,7 @@ class TestRedactLatestMessage:
     def test_records_guardrail_event_on_session(self, stored_message, fake_repo):
         self._redact(stored_message)
 
-        events = self._events_on_session(fake_repo)
+        events = guardrail_events(fake_repo)
         assert len(events) == 1
         assert events[0]["message_id"] == 5
         assert events[0]["agent_id"] == "a1"
@@ -944,11 +947,21 @@ class TestRedactLatestMessage:
 
         assert self._event_on_message(fake_repo)["action"] == "ANONYMIZED"
 
-    def test_no_messages_does_not_crash(self, agent_in_session, fake_repo):
-        """Sin mensaje que redactar no hay nada que anotar, y no puede reventar."""
-        self._redact(agent_in_session)
+    def test_no_messages_is_rejected_by_the_parent(self, agent_in_session, fake_repo):
+        """Sin mensaje que redactar, quien corta es la clase padre.
 
-        assert self._events_on_session(fake_repo) == []
+        Aquí no se parchea `super()`, porque el contrato real es que lanza: este
+        override nunca llega a anotar un evento sin mensaje. Fijarlo evita
+        defenderse de un caso que no ocurre —y creerse defendido.
+        """
+        agent = MagicMock()
+        agent.agent_id = "a1"
+        agent_in_session._latest_agent_message["a1"] = None
+
+        with pytest.raises(SessionException, match="No message to redact"):
+            agent_in_session.redact_latest_message(REDACTED, agent)
+
+        assert guardrail_events(fake_repo) == []
 
     def test_guardrail_trace_stores_enriched_event(self, stored_message, fake_repo):
         trace = {
@@ -981,7 +994,7 @@ class TestRedactLatestMessage:
 
         self._redact(stored_message, guardrail_trace=trace)
 
-        event = self._events_on_session(fake_repo)[0]
+        event = guardrail_events(fake_repo)[0]
         assert "trace" not in event
         assert "HATE/HIGH" in event["policies_triggered"]["contentPolicy"]
 
@@ -991,16 +1004,99 @@ class TestRedactLatestMessage:
         assert (
             self._event_on_message(fake_repo)["stop_reason"] == "guardrail_intervened"
         )
-        assert (
-            self._events_on_session(fake_repo)[0]["stop_reason"]
-            == "guardrail_intervened"
-        )
+        assert guardrail_events(fake_repo)[0]["stop_reason"] == "guardrail_intervened"
 
     def test_without_trace_is_backward_compatible(self, stored_message, fake_repo):
         """Una intervención pelada sigue siendo solo action y timestamp."""
         self._redact(stored_message)
 
         assert set(self._event_on_message(fake_repo).keys()) == {"action", "timestamp"}
+
+
+# ---------------------------------------------------------------------------
+# Message identity (#78)
+# ---------------------------------------------------------------------------
+
+
+class TestDuplicatedMessageIndex:
+    """Dos managers sobre el mismo agente pueden producir el mismo message_id.
+
+    Strands deriva el índice en memoria, así que dos managers que restauran el
+    agente a la vez calculan el mismo. Todo lo que este manager anota sobre su
+    turno —métricas, redacción y evento de guardarraíl— tiene que aterrizar en
+    el mensaje que él añadió, no en el que casualmente comparte índice y va
+    primero en el array. Es el caso de la issue #78.
+    """
+
+    @pytest.fixture
+    def duplicated(self, agent_in_session, fake_repo, syncable_agent):
+        """Otro manager añadió el mensaje 0; este añade el suyo, también 0."""
+        fake_repo.create_message(
+            "test-session",
+            "a1",
+            SessionMessage(
+                message_id=0,
+                message={"role": "user", "content": [{"text": "del otro manager"}]},
+            ),
+        )
+
+        agent = syncable_agent()
+        agent_in_session._latest_agent_message["a1"] = None
+        agent_in_session.append_message(
+            {"role": "user", "content": [{"text": "de este manager"}]}, agent
+        )
+
+        return agent_in_session, agent
+
+    @staticmethod
+    def _messages(fake_repo):
+        return fake_repo.session("test-session")["agents"]["a1"]["messages"]
+
+    def test_both_messages_share_the_index(self, duplicated, fake_repo):
+        """El escenario es real solo si los dos índices coinciden de verdad."""
+        first, second = self._messages(fake_repo)
+
+        assert first["message_id"] == second["message_id"] == 0
+        assert first["storage_id"] != second["storage_id"]
+
+    def test_metrics_annotate_its_own_message(self, duplicated, fake_repo):
+        manager, agent = duplicated
+
+        manager.sync_agent(agent)
+
+        first, second = self._messages(fake_repo)
+        assert "event_loop_metrics" not in first
+        assert second["event_loop_metrics"]["accumulated_usage"]["totalTokens"] == 700
+
+    def test_redaction_lands_on_its_own_message(self, duplicated, fake_repo):
+        """La cara grave del bug: redactar contenido inocente y dejar visible el otro."""
+        manager, agent = duplicated
+
+        manager.redact_latest_message(REDACTED, agent)
+
+        first, second = self._messages(fake_repo)
+        assert first["redact_message"] is None
+        assert second["redact_message"] == REDACTED
+
+    def test_guardrail_event_lands_on_its_own_message(self, duplicated, fake_repo):
+        manager, agent = duplicated
+
+        manager.redact_latest_message(REDACTED, agent)
+
+        first, second = self._messages(fake_repo)
+        assert "guardrail_event" not in first
+        assert second["guardrail_event"]["action"] == "BLOCKED"
+
+    def test_session_audit_points_at_its_own_message(self, duplicated, fake_repo):
+        """El array de sesión es lo que lee un auditor: debe decir cuál fue."""
+        manager, agent = duplicated
+
+        manager.redact_latest_message(REDACTED, agent)
+
+        _, second = self._messages(fake_repo)
+        event = guardrail_events(fake_repo)[0]
+        assert event["message_id"] == 0
+        assert event["storage_id"] == second["storage_id"]
 
 
 # ---------------------------------------------------------------------------
