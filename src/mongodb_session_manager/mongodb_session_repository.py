@@ -34,6 +34,11 @@ TIMEZONE_UTC_SUFFIX = "+00:00"
 # MongoDB's append-to-array update operator, used by every write that pushes.
 _PUSH = "$push"
 
+# Aggregation operators shared by the server-side domain reads (#58).
+_MATCH = "$match"
+_PROJECT = "$project"
+_IF_NULL = "$ifNull"
+
 # Fields stored on message documents that SessionMessage.__init__() does not accept.
 # Used to filter them out when reconstructing SessionMessage objects.
 _MESSAGE_EXCLUDED_FIELDS = frozenset(
@@ -626,25 +631,44 @@ class MongoDBSessionRepository(SessionRepository):
     def read_message(
         self, session_id: str, agent_id: str, message_id: int, **kwargs: Any
     ) -> SessionMessage | None:
-        """Read a Message from an Agent."""
+        """Read the first message with this Strands index.
+
+        ``message_id`` is not unique under concurrent managers (#78), so this
+        deliberately keeps the historical first-match behaviour. ``$filter``
+        performs the search in MongoDB and ``$arrayElemAt`` returns at most one
+        array element. A ``$elemMatch`` projection cannot target this nested
+        array (MongoDB error 31275).
+        """
         agent_path = self._agent_path(agent_id)
+        pipeline = [
+            {_MATCH: {"_id": session_id}},
+            {
+                _PROJECT: {
+                    "_id": 0,
+                    "message": {
+                        "$arrayElemAt": [
+                            {
+                                "$filter": {
+                                    "input": {
+                                        _IF_NULL: [f"${agent_path}.messages", []]
+                                    },
+                                    "as": "message",
+                                    "cond": {
+                                        "$eq": ["$$message.message_id", message_id]
+                                    },
+                                }
+                            },
+                            0,
+                        ]
+                    },
+                }
+            },
+        ]
         try:
-            doc = self.collection.find_one(
-                {"_id": session_id}, {f"{agent_path}.messages": 1}
-            )
-
-            if not self._agent_exists(doc, agent_id):
+            doc = next(iter(self.collection.aggregate(pipeline)), None)
+            if not doc or "message" not in doc:
                 return None
-
-            messages = doc["agents"][agent_id].get("messages", [])
-
-            # Find message by ID
-            for msg_data in messages:
-                if msg_data.get("message_id") == message_id:
-                    return self._to_session_message(msg_data)
-
-            logger.debug(f"Message {message_id} not found")
-            return None
+            return self._to_session_message(doc["message"])
 
         except PyMongoError as e:
             logger.error(f"Failed to read message {message_id}: {e}")
@@ -885,6 +909,55 @@ class MongoDBSessionRepository(SessionRepository):
             f"Updated message {session_message.message_id} for agent {agent_id}"
         )
 
+    @staticmethod
+    def _message_page_pipeline(
+        session_id: str, agent_path: str, limit: int | None, offset: int
+    ) -> list[dict[str, Any]]:
+        """Build the stable chronological page used by list_messages()."""
+        sort_order = {
+            "_missing_created_at": 1,
+            "message.created_at": 1,
+            "_array_index": 1,
+        }
+        missing_created_at = {
+            "$cond": [
+                {"$eq": [{_IF_NULL: ["$message.created_at", None]}, None]},
+                1,
+                0,
+            ]
+        }
+        pipeline: list[dict[str, Any]] = [
+            {_MATCH: {"_id": session_id}},
+            {
+                _PROJECT: {
+                    "_id": 0,
+                    "message": {_IF_NULL: [f"${agent_path}.messages", []]},
+                }
+            },
+            {
+                "$unwind": {
+                    "path": "$message",
+                    "includeArrayIndex": "_array_index",
+                }
+            },
+            {
+                _PROJECT: {
+                    "_id": 0,
+                    "message": 1,
+                    "_array_index": 1,
+                    "_missing_created_at": missing_created_at,
+                }
+            },
+            {"$sort": sort_order},
+        ]
+        if offset:
+            pipeline.append({"$skip": offset})
+        if limit is not None:
+            pipeline.append({"$limit": limit})
+        if offset or limit is not None:
+            pipeline.append({"$sort": dict(sort_order)})
+        return pipeline
+
     def list_messages(
         self,
         session_id: str,
@@ -893,40 +966,28 @@ class MongoDBSessionRepository(SessionRepository):
         offset: int = 0,
         **kwargs: Any,
     ) -> list[SessionMessage]:
-        """List Messages from an Agent with pagination support."""
+        """List messages in stable chronological order, paginated in MongoDB.
+
+        Sorting before ``$skip``/``$limit`` preserves the public contract when
+        physical append order differs from ``created_at``. The array index is a
+        deterministic tie-breaker, and missing timestamps sort last. The final
+        ``$sort`` is intentional: DocumentDB only guarantees aggregation result
+        order when sorting is the last pipeline stage.
+        """
         agent_path = self._agent_path(agent_id)
+        if offset < 0:
+            raise ValueError("offset must be greater than or equal to 0")
+        if limit is not None and limit < 0:
+            raise ValueError("limit must be greater than or equal to 0")
+        if limit == 0:
+            return []
+        pipeline = self._message_page_pipeline(session_id, agent_path, limit, offset)
+
         try:
-            doc = self.collection.find_one(
-                {"_id": session_id}, {f"{agent_path}.messages": 1}
-            )
-
-            if not doc or not self._agent_exists(doc, agent_id):
-                logger.debug(f"Agent {agent_id} not found in session {session_id}")
-                return []
-
-            messages = doc["agents"][agent_id].get("messages", [])
-
-            # Sort by created_at, oldest first. Messages without the field sort
-            # last as a group and are never compared against a datetime: mixing
-            # the two raises TypeError, which would leave the whole agent
-            # unlistable. create_message() always writes it, but documents
-            # written out of band may not have it, and update_message() no
-            # longer backfills it.
-            messages.sort(
-                key=lambda x: (x.get("created_at") is None, x.get("created_at") or 0)
-            )
-
-            # Apply pagination
-            if limit is not None:
-                messages = messages[offset : offset + limit]
-            else:
-                messages = messages[offset:]
-
-            # Convert to SessionMessage objects
             result = []
-            for i, msg_data in enumerate(messages):
+            for i, item in enumerate(self.collection.aggregate(pipeline)):
                 try:
-                    result.append(self._to_session_message(msg_data))
+                    result.append(self._to_session_message(item["message"]))
                 except Exception as e:
                     logger.error(f"Failed to convert message {i}: {e}")
 
@@ -1182,34 +1243,59 @@ class MongoDBSessionRepository(SessionRepository):
             raise
 
     def list_agent_configs(self, session_id: str) -> list[dict[str, Any]]:
-        """List the stored configuration of every agent in the session."""
+        """List every agent config without transferring state or messages."""
+        pipeline = [
+            {_MATCH: {"_id": session_id}},
+            {
+                _PROJECT: {
+                    "_id": 0,
+                    "configs": {
+                        "$map": {
+                            "input": {"$objectToArray": {_IF_NULL: ["$agents", {}]}},
+                            "as": "agent",
+                            "in": {
+                                "agent_id": "$$agent.k",
+                                "model": "$$agent.v.agent_data.model",
+                                "system_prompt": "$$agent.v.agent_data.system_prompt",
+                                "prompt_metadata": (
+                                    "$$agent.v.agent_data.prompt_metadata"
+                                ),
+                            },
+                        }
+                    },
+                }
+            },
+        ]
         try:
-            doc = self.collection.find_one({"_id": session_id}, {"agents": 1})
+            doc = next(iter(self.collection.aggregate(pipeline)), None)
 
-            if not doc or "agents" not in doc:
+            if not doc:
                 logger.debug(f"No agents found in session {session_id}")
                 return []
 
             return [
-                self._agent_config(agent_id, agent_obj.get("agent_data", {}))
-                for agent_id, agent_obj in doc["agents"].items()
+                self._agent_config(config["agent_id"], config)
+                for config in doc.get("configs", [])
             ]
         except PyMongoError as e:
             logger.error(f"Failed to list agents of session {session_id}: {e}")
             raise
 
     def count_messages(self, session_id: str, agent_id: str) -> int:
-        """Count the messages stored for one agent, 0 when the agent is unknown."""
+        """Count messages in MongoDB, returning 0 for an unknown agent."""
         agent_path = self._agent_path(agent_id)
+        pipeline = [
+            {_MATCH: {"_id": session_id}},
+            {
+                _PROJECT: {
+                    "_id": 0,
+                    "count": {"$size": {_IF_NULL: [f"${agent_path}.messages", []]}},
+                }
+            },
+        ]
         try:
-            doc = self.collection.find_one(
-                {"_id": session_id}, {f"{agent_path}.messages": 1}
-            )
-
-            if not self._agent_exists(doc, agent_id):
-                return 0
-
-            return len(doc["agents"][agent_id].get("messages", []))
+            doc = next(iter(self.collection.aggregate(pipeline)), None)
+            return doc["count"] if doc else 0
         except PyMongoError as e:
             logger.error(
                 f"Failed to count messages of agent {agent_id} "

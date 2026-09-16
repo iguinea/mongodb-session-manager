@@ -359,6 +359,12 @@ class InMemorySessionRepository(SessionRepository):
     ) -> list[SessionMessage]:
         """List an agent's messages, oldest first, with pagination."""
         agent = self._agent(session_id, agent_id)
+        if offset < 0:
+            raise ValueError("offset must be greater than or equal to 0")
+        if limit is not None and limit < 0:
+            raise ValueError("limit must be greater than or equal to 0")
+        if limit == 0:
+            return []
         if agent is None:
             return []
 

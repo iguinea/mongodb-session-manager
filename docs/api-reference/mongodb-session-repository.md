@@ -477,6 +477,10 @@ def list_agent_configs(self, session_id: str) -> list[dict[str, Any]]
 
 Same shape as `get_agent_config`, one entry per agent in the session. Returns `[]` when the session has no agents.
 
+The server converts the dynamic `agents` document with `$objectToArray` and
+`$map`. Only `agent_id`, `model`, `system_prompt` and `prompt_metadata` cross the
+wire; message arrays and agent state do not.
+
 ## Message Operations
 
 ### Message identity
@@ -567,9 +571,16 @@ def read_message(
 ) -> Optional[SessionMessage]
 ```
 
-Read a specific message by ID.
+Read the first message with this `message_id`.
 
-Retrieves a message from an agent's message array. Note that `event_loop_metrics` are filtered out before returning the `SessionMessage`.
+MongoDB searches the embedded array with `$filter` and returns at most one
+element with `$arrayElemAt`; the rest of the history does not cross the wire.
+The first physical match is deliberate because concurrent managers can produce
+duplicate `message_id` values. `event_loop_metrics` and other repository-only
+fields are filtered out before returning the `SessionMessage`.
+
+`$elemMatch` projection is not used: MongoDB rejects it on the nested path
+`agents.<id>.messages` with error 31275.
 
 #### Parameters
 
@@ -732,6 +743,9 @@ def count_messages(self, session_id: str, agent_id: str) -> int
 
 Count the messages stored for one agent. Returns `0` when the agent is unknown.
 
+The count is computed by MongoDB with `$size` and `$ifNull`; the message array is
+not returned to Python. A missing session, agent, or `messages` field yields 0.
+
 ### `get_last_message_ref`
 
 ```python
@@ -758,9 +772,17 @@ def list_messages(
 ) -> list[SessionMessage]
 ```
 
-List messages from an agent with pagination support.
+List messages from an agent with server-side pagination.
 
-Retrieves messages sorted chronologically (oldest first) with optional pagination. Note that `event_loop_metrics` are filtered out from the returned messages.
+MongoDB orders messages chronologically before applying `offset` and `limit`, so
+the response size is proportional to the requested page. Ordering is stable:
+the physical array index breaks equal timestamps, and messages whose
+`created_at` is null or absent come last. This preserves the previous Python
+sort semantics even when physical append order differs from chronological
+order. `event_loop_metrics` are filtered out from returned messages.
+
+A direct `$slice` is intentionally not used because it would paginate physical
+array order before sorting and could return a different page.
 
 #### Parameters
 
@@ -768,9 +790,9 @@ Retrieves messages sorted chronologically (oldest first) with optional paginatio
 
 - **agent_id** (`str`): ID of the agent.
 
-- **limit** (`Optional[int]`, default: `None`): Maximum number of messages to return. If `None`, returns all messages.
+- **limit** (`Optional[int]`, default: `None`): Maximum number of messages to return. If `None`, returns all messages. Must be non-negative.
 
-- **offset** (`int`, default: `0`): Number of messages to skip (for pagination).
+- **offset** (`int`, default: `0`): Number of messages to skip (for pagination). Must be non-negative.
 
 - **kwargs** (`Any`): Additional keyword arguments (reserved for future use).
 
@@ -780,6 +802,7 @@ Retrieves messages sorted chronologically (oldest first) with optional paginatio
 
 #### Raises
 
+- `ValueError`: If `limit` or `offset` is negative.
 - `PyMongoError`: If the database operation fails.
 
 #### Example

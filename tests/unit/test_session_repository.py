@@ -489,53 +489,66 @@ class TestMessageOperations:
         assert storage_id_of(sample_session_message) is None
 
     def test_read_message_returns_message(self, mock_repository, mock_mongo_collection):
-        mock_mongo_collection.find_one.return_value = {
-            "agents": {
-                "a1": {
-                    "messages": [
-                        {
-                            "message_id": 1,
-                            "message": {"role": "user", "content": [{"text": "Hi"}]},
-                            "created_at": datetime.now(UTC),
-                            "updated_at": datetime.now(UTC),
-                        }
-                    ]
+        mock_mongo_collection.aggregate.return_value = [
+            {
+                "message": {
+                    "message_id": 1,
+                    "message": {"role": "user", "content": [{"text": "Hi"}]},
+                    "created_at": datetime.now(UTC),
+                    "updated_at": datetime.now(UTC),
                 }
             }
-        }
+        ]
         result = mock_repository.read_message("s1", "a1", 1)
         assert result is not None
         assert result.message_id == 1
 
+        pipeline = mock_mongo_collection.aggregate.call_args.args[0]
+        assert pipeline == [
+            {"$match": {"_id": "s1"}},
+            {
+                "$project": {
+                    "_id": 0,
+                    "message": {
+                        "$arrayElemAt": [
+                            {
+                                "$filter": {
+                                    "input": {"$ifNull": ["$agents.a1.messages", []]},
+                                    "as": "message",
+                                    "cond": {"$eq": ["$$message.message_id", 1]},
+                                }
+                            },
+                            0,
+                        ]
+                    },
+                }
+            },
+        ]
+        mock_mongo_collection.find_one.assert_not_called()
+
     def test_read_message_returns_none_when_missing(
         self, mock_repository, mock_mongo_collection
     ):
-        mock_mongo_collection.find_one.return_value = {
-            "agents": {"a1": {"messages": []}}
-        }
+        mock_mongo_collection.aggregate.return_value = []
         assert mock_repository.read_message("s1", "a1", 99) is None
 
     def test_read_message_filters_metrics_fields(
         self, mock_repository, mock_mongo_collection
     ):
-        mock_mongo_collection.find_one.return_value = {
-            "agents": {
-                "a1": {
-                    "messages": [
-                        {
-                            "message_id": 1,
-                            "message": {"role": "user", "content": [{"text": "Hi"}]},
-                            "created_at": datetime.now(UTC),
-                            "updated_at": datetime.now(UTC),
-                            "event_loop_metrics": {"latencyMs": 100},
-                            "latency_ms": 100,
-                            "input_tokens": 50,
-                            "output_tokens": 30,
-                        }
-                    ]
+        mock_mongo_collection.aggregate.return_value = [
+            {
+                "message": {
+                    "message_id": 1,
+                    "message": {"role": "user", "content": [{"text": "Hi"}]},
+                    "created_at": datetime.now(UTC),
+                    "updated_at": datetime.now(UTC),
+                    "event_loop_metrics": {"latencyMs": 100},
+                    "latency_ms": 100,
+                    "input_tokens": 50,
+                    "output_tokens": 30,
                 }
             }
-        }
+        ]
         result = mock_repository.read_message("s1", "a1", 1)
         assert result is not None
 
@@ -696,53 +709,58 @@ class TestMessageOperations:
         Antes lo tapaba que cada redacción reescribiera `created_at`; desde que
         update_message() deja de reescribirlo, nada lo repara.
         """
-        mock_mongo_collection.find_one.return_value = {
-            "agents": {
-                "a1": {
-                    "messages": [
-                        {
-                            "message_id": 2,
-                            "message": {"role": "user", "content": [{"text": "b"}]},
-                            "created_at": datetime.now(UTC),
-                        },
-                        {
-                            "message_id": 1,
-                            "message": {"role": "user", "content": [{"text": "a"}]},
-                        },
-                    ]
+        mock_mongo_collection.aggregate.return_value = [
+            {
+                "message": {
+                    "message_id": 2,
+                    "message": {"role": "user", "content": [{"text": "b"}]},
+                    "created_at": datetime.now(UTC),
                 }
-            }
-        }
+            },
+            {
+                "message": {
+                    "message_id": 1,
+                    "message": {"role": "user", "content": [{"text": "a"}]},
+                }
+            },
+        ]
 
         result = mock_repository.list_messages("s1", "a1")
 
         # El que no tiene timestamp va al final, pero se lista.
         assert [m.message_id for m in result] == [2, 1]
 
-    def test_list_messages_returns_list(self, mock_repository, mock_mongo_collection):
-        mock_mongo_collection.find_one.return_value = {
-            "agents": {
-                "a1": {
-                    "messages": [
-                        {
-                            "message_id": 1,
-                            "message": {"role": "user", "content": [{"text": "Hi"}]},
-                            "created_at": datetime.now(UTC),
-                            "updated_at": datetime.now(UTC),
-                        },
-                        {
-                            "message_id": 2,
-                            "message": {
-                                "role": "assistant",
-                                "content": [{"text": "Hello"}],
-                            },
-                            "created_at": datetime.now(UTC),
-                            "updated_at": datetime.now(UTC),
-                        },
-                    ]
-                }
+        pipeline = mock_mongo_collection.aggregate.call_args.args[0]
+        assert pipeline[-1] == {
+            "$sort": {
+                "_missing_created_at": 1,
+                "message.created_at": 1,
+                "_array_index": 1,
             }
         }
+
+    def test_list_messages_returns_list(self, mock_repository, mock_mongo_collection):
+        mock_mongo_collection.aggregate.return_value = [
+            {
+                "message": {
+                    "message_id": 1,
+                    "message": {"role": "user", "content": [{"text": "Hi"}]},
+                    "created_at": datetime.now(UTC),
+                    "updated_at": datetime.now(UTC),
+                }
+            },
+            {
+                "message": {
+                    "message_id": 2,
+                    "message": {
+                        "role": "assistant",
+                        "content": [{"text": "Hello"}],
+                    },
+                    "created_at": datetime.now(UTC),
+                    "updated_at": datetime.now(UTC),
+                }
+            },
+        ]
         result = mock_repository.list_messages("s1", "a1")
         assert len(result) == 2
 
@@ -758,22 +776,28 @@ class TestMessageOperations:
             }
             for i in range(5)
         ]
-        mock_mongo_collection.find_one.return_value = {
-            "agents": {"a1": {"messages": messages}}
-        }
+        mock_mongo_collection.aggregate.return_value = [
+            {"message": message} for message in messages[1:3]
+        ]
         result = mock_repository.list_messages("s1", "a1", limit=2, offset=1)
         assert len(result) == 2
+
+        pipeline = mock_mongo_collection.aggregate.call_args.args[0]
+        assert {"$skip": 1} in pipeline
+        assert {"$limit": 2} in pipeline
+        assert pipeline[-1] == pipeline[-4]
+        mock_mongo_collection.find_one.assert_not_called()
 
     def test_list_messages_returns_empty_for_missing_session(
         self, mock_repository, mock_mongo_collection
     ):
-        mock_mongo_collection.find_one.return_value = None
+        mock_mongo_collection.aggregate.return_value = []
         assert mock_repository.list_messages("s1", "a1") == []
 
     def test_list_messages_returns_empty_for_missing_agent(
         self, mock_repository, mock_mongo_collection
     ):
-        mock_mongo_collection.find_one.return_value = {"agents": {}}
+        mock_mongo_collection.aggregate.return_value = []
         assert mock_repository.list_messages("s1", "missing") == []
 
 
@@ -862,24 +886,20 @@ class TestGuardrailEventFiltering:
     def test_read_message_filters_guardrail_event(
         self, mock_repository, mock_mongo_collection
     ):
-        mock_mongo_collection.find_one.return_value = {
-            "agents": {
-                "a1": {
-                    "messages": [
-                        {
-                            "message_id": 1,
-                            "message": {"role": "user", "content": [{"text": "Hi"}]},
-                            "created_at": datetime.now(UTC),
-                            "updated_at": datetime.now(UTC),
-                            "guardrail_event": {
-                                "action": "BLOCKED",
-                                "timestamp": datetime.now(UTC),
-                            },
-                        }
-                    ]
+        mock_mongo_collection.aggregate.return_value = [
+            {
+                "message": {
+                    "message_id": 1,
+                    "message": {"role": "user", "content": [{"text": "Hi"}]},
+                    "created_at": datetime.now(UTC),
+                    "updated_at": datetime.now(UTC),
+                    "guardrail_event": {
+                        "action": "BLOCKED",
+                        "timestamp": datetime.now(UTC),
+                    },
                 }
             }
-        }
+        ]
         result = mock_repository.read_message("s1", "a1", 1)
         assert result is not None
         assert result.message_id == 1
@@ -887,24 +907,20 @@ class TestGuardrailEventFiltering:
     def test_list_messages_filters_guardrail_event(
         self, mock_repository, mock_mongo_collection
     ):
-        mock_mongo_collection.find_one.return_value = {
-            "agents": {
-                "a1": {
-                    "messages": [
-                        {
-                            "message_id": 1,
-                            "message": {"role": "user", "content": [{"text": "Hi"}]},
-                            "created_at": datetime.now(UTC),
-                            "updated_at": datetime.now(UTC),
-                            "guardrail_event": {
-                                "action": "BLOCKED",
-                                "timestamp": datetime.now(UTC),
-                            },
-                        }
-                    ]
+        mock_mongo_collection.aggregate.return_value = [
+            {
+                "message": {
+                    "message_id": 1,
+                    "message": {"role": "user", "content": [{"text": "Hi"}]},
+                    "created_at": datetime.now(UTC),
+                    "updated_at": datetime.now(UTC),
+                    "guardrail_event": {
+                        "action": "BLOCKED",
+                        "timestamp": datetime.now(UTC),
+                    },
                 }
             }
-        }
+        ]
         result = mock_repository.list_messages("s1", "a1")
         assert len(result) == 1
         assert result[0].message_id == 1
@@ -1396,22 +1412,32 @@ class TestAgentConfigReads:
     def test_list_agent_configs_returns_one_entry_per_agent(
         self, mock_repository, mock_mongo_collection
     ):
-        mock_mongo_collection.find_one.return_value = {
-            "agents": {
-                "a1": {"agent_data": {"model": "m1"}},
-                "a2": {"agent_data": {"model": "m2"}},
+        mock_mongo_collection.aggregate.return_value = [
+            {
+                "configs": [
+                    {"agent_id": "a1", "model": "m1"},
+                    {"agent_id": "a2", "model": "m2"},
+                ]
             }
-        }
+        ]
 
         configs = mock_repository.list_agent_configs("s1")
 
         assert {c["agent_id"] for c in configs} == {"a1", "a2"}
         assert {c["model"] for c in configs} == {"m1", "m2"}
+        assert all(c["system_prompt"] is None for c in configs)
+
+        pipeline = mock_mongo_collection.aggregate.call_args.args[0]
+        assert "$objectToArray" in repr(pipeline)
+        assert "$map" in repr(pipeline)
+        assert "messages" not in repr(pipeline)
+        assert "state" not in repr(pipeline)
+        mock_mongo_collection.find_one.assert_not_called()
 
     def test_list_agent_configs_returns_empty_when_there_are_no_agents(
         self, mock_repository, mock_mongo_collection
     ):
-        mock_mongo_collection.find_one.return_value = None
+        mock_mongo_collection.aggregate.return_value = []
         assert mock_repository.list_agent_configs("s1") == []
 
 
@@ -1419,15 +1445,29 @@ class TestMessageReads:
     def test_count_messages_counts_the_array(
         self, mock_repository, mock_mongo_collection
     ):
-        mock_mongo_collection.find_one.return_value = {
-            "agents": {"a1": {"messages": [{"message_id": 0}, {"message_id": 1}]}}
-        }
+        mock_mongo_collection.aggregate.return_value = [{"count": 2}]
         assert mock_repository.count_messages("s1", "a1") == 2
+
+        pipeline = mock_mongo_collection.aggregate.call_args.args[0]
+        assert pipeline == [
+            {"$match": {"_id": "s1"}},
+            {
+                "$project": {
+                    "_id": 0,
+                    "count": {
+                        "$size": {
+                            "$ifNull": ["$agents.a1.messages", []],
+                        }
+                    },
+                }
+            },
+        ]
+        mock_mongo_collection.find_one.assert_not_called()
 
     def test_count_messages_returns_zero_for_an_unknown_agent(
         self, mock_repository, mock_mongo_collection
     ):
-        mock_mongo_collection.find_one.return_value = {"agents": {}}
+        mock_mongo_collection.aggregate.return_value = [{"count": 0}]
         assert mock_repository.count_messages("s1", "missing") == 0
 
     def test_get_last_message_ref_carries_the_identity(
@@ -1533,8 +1573,8 @@ class TestNamesInPathsCostNoRoundTrip:
 
         set_ops = mock_mongo_collection.update_one.call_args[0][1]["$set"]
         assert set_ops == {"metadata.user.name": "ana"}
-        projection = mock_mongo_collection.find_one.call_args[0][1]
-        assert projection == {"agents.a$b.messages": 1}
+        pipeline = mock_mongo_collection.aggregate.call_args.args[0]
+        assert "$agents.a$b.messages" in repr(pipeline)
 
     def test_a_non_string_metadata_key_still_becomes_its_text(
         self, mock_repository, mock_mongo_collection
