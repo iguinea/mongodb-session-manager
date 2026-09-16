@@ -1,7 +1,8 @@
 version: 2
 updates:
-  # Python / pip (uv compatible)
-  - package-ecosystem: "pip"
+  # Python / uv. El ecosistema `pip` solo tocaba las constraints de pyproject.toml
+  # y dejaba uv.lock atrás, así que sus PRs rompían el `uv sync --locked` del CI.
+  - package-ecosystem: "uv"
     directory: "/"
     schedule:
       interval: "weekly"
