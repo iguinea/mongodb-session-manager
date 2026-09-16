@@ -17,6 +17,7 @@ from pymongo.errors import PyMongoError
 from strands.session.session_repository import SessionRepository
 from strands.types.session import Session, SessionAgent, SessionMessage
 
+from .agent_content import LastPersistedAgents
 from .field_names import validate_agent_id, validate_field_paths
 from .message_identity import (
     STORAGE_ID_FIELD,
@@ -239,6 +240,8 @@ class MongoDBSessionRepository(SessionRepository):
         self.metadata_fields = metadata_fields
         # Config found by the last read_agent(); see pop_read_agent_config().
         self._last_read_agent_config: dict[tuple[str, str], dict[str, Any]] = {}
+        # What each agent looked like when last read or written; see update_agent().
+        self._persisted_agents = LastPersistedAgents()
         # Create indexes for timestamp ordering (only once per collection)
         self._ensure_indexes()
 
@@ -439,6 +442,7 @@ class MongoDBSessionRepository(SessionRepository):
             if result.matched_count == 0:
                 raise ValueError(f"Session {session_id} not found")
 
+            self._persisted_agents.remember(session_id, session_agent)
             logger.info(
                 f"Created agent {session_agent.agent_id} in session {session_id}"
             )
@@ -460,11 +464,13 @@ class MongoDBSessionRepository(SessionRepository):
 
             if not self._agent_exists(doc, agent_id):
                 logger.debug(f"Agent {agent_id} not found in session {session_id}")
+                self._persisted_agents.forget(session_id, agent_id)
                 return None
 
             agent_data = doc["agents"][agent_id]["agent_data"]
 
             session_agent = SessionAgent(**self._filter_agent_data(agent_data))
+            self._persisted_agents.remember(session_id, session_agent)
             self._last_read_agent_config = {
                 (session_id, agent_id): {
                     "model": agent_data.get("model"),
@@ -509,8 +515,19 @@ class MongoDBSessionRepository(SessionRepository):
         and prompt_metadata, which the session manager also stores there but
         SessionAgent does not carry. Every field is still replaced whole, so
         keys removed from the agent state do disappear.
+
+        An agent whose content, timestamps aside, is what this repository last
+        read or wrote is not written at all (#67): no round-trip, no updated_at
+        refreshed and no "not found" check. Strands sends exactly that on the
+        first sync of every manager and after every tool run.
         """
         agent_path = self._agent_path(session_agent.agent_id)
+        if self._persisted_agents.unchanged(session_id, session_agent):
+            logger.debug(
+                f"Agent {session_agent.agent_id} unchanged in session {session_id}"
+            )
+            return
+
         now = datetime.now(UTC)
         agent_data = session_agent.__dict__.copy()
         agent_data["created_at"] = self._parse_iso_datetime(session_agent.created_at)
@@ -538,6 +555,9 @@ class MongoDBSessionRepository(SessionRepository):
             if result.matched_count == 0:
                 raise ValueError(f"Session {session_id} not found")
 
+            # Only a write that landed counts as persisted: one that raised or
+            # matched nothing must be tried again by the next sync.
+            self._persisted_agents.remember(session_id, session_agent)
             logger.info(
                 f"Updated agent {session_agent.agent_id} in session {session_id}"
             )

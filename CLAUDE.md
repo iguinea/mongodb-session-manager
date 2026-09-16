@@ -61,6 +61,7 @@ cd playground/chat && make frontend                   # Port 8881
    - Domain reads: `get_agent_config()`, `list_agent_configs()`, `count_messages()`, `get_last_message_ref()`
    - `pop_read_agent_config()`: hands over, once, the config found by the last `read_agent()`. Public because `initialize()` calls it — a method reached from another class is interface, underscore or not
    - `update_agent()` writes each `SessionAgent` field on its own path, so the manager's config fields in `agent_data` survive
+   - `update_agent()` does not write an agent whose content (every `SessionAgent` field but `created_at`/`updated_at`) is what this repository last read, created or wrote: `agent_content.LastPersistedAgents`, shared with the in-memory double. It compares content, not Strands' versions, so a hook that replaces `agent.state` is still written. Saves the first sync of every manager and the post-tool sync (13 → 10 per reference turn) (#67)
    - `update_message()` locates the message with the positional `$` (no read first) and writes an allowlist of fields, so `event_loop_metrics` and `guardrail_event` survive a redaction
    - `collection` stays public and supported for ad-hoc queries
    - Smart connection lifecycle (owns vs borrowed client)

@@ -541,6 +541,8 @@ Both implementations ask `MessageRef.locator()` which field names a message, so 
 
 Names that MongoDB would read as syntax — an `agent_id` with a dot, a segment starting with `$`, an empty one — are rejected by both through the same rule in `mongodb_session_manager.field_names`, and at the same point: before the session is looked up and before an empty write returns early ([#79](https://github.com/iguinea/mongodb-session-manager/issues/79)). The contract runs every agent-scoped method with invalid ids, including the empty-write variants, and checks that the stored session document compares equal before and after.
 
+`update_agent()` skips an agent whose content is what was last read or written in both, through the same `LastPersistedAgents` in `mongodb_session_manager.agent_content` and at the same point: after the `agent_id` check, before the session is looked up ([#67](https://github.com/iguinea/mongodb-session-manager/issues/67)). Tests that depend on that decision use a real Strands `Agent` over the double (`tests/unit/test_agent_rewrites.py`), not the `mock_agent` fixture: a `MagicMock` bumps no version and only equals itself, so it can neither change an agent nor leave one unchanged.
+
 !!! warning "Not evidence about array indexes in a path"
     `_set_dotted()` only walks documents. On MongoDB, `tags.0` over an existing array writes its first element; the double replaces the array with `{"0": ...}`. No contract case relies on it.
 

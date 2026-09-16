@@ -110,6 +110,16 @@ def turn_factory(counting_client, unique_session_id, cleanup_session):
     return factory, collection, counter
 
 
+def scripted_agent(manager, agent_id: str, model_id: str, reply: str) -> Agent:
+    """Un agente sin tools que responde siempre `reply`."""
+    return Agent(
+        agent_id=agent_id,
+        model=ScriptedModel([list(text_stream(reply))], model_id),
+        system_prompt=SYSTEM_PROMPT,
+        session_manager=manager,
+    )
+
+
 def run_turn(factory, session_id: str, prompt: str) -> None:
     """Un turno completo: supervisor + sub-agente, con una llamada a tool."""
     supervisor_manager = factory.create_session_manager(session_id)
@@ -117,11 +127,8 @@ def run_turn(factory, session_id: str, prompt: str) -> None:
     @tool(name="info_suministro_agent", description="Consulta datos de suministro")
     def info_suministro_agent(query: str) -> str:
         sub_manager = factory.create_session_manager(session_id)
-        sub_agent = Agent(
-            agent_id="info_suministro_agent",
-            model=ScriptedModel([list(text_stream("Datos del suministro: OK"))], "sub"),
-            system_prompt=SYSTEM_PROMPT,
-            session_manager=sub_manager,
+        sub_agent = scripted_agent(
+            sub_manager, "info_suministro_agent", "sub", "Datos del suministro: OK"
         )
         result = str(sub_agent(query))
         sub_manager.close()
@@ -200,19 +207,20 @@ class TestTurnOperationBudget:
 
         Contra v0.9.1 el mismo escenario producía 42 operaciones: 21 updates,
         13 finds y 8 createIndexes. Con #54 bajó a 21 (15 updates, 6 finds y 0
-        createIndexes) y con #65 a 19.
+        createIndexes), con #65 a 19 y con #67 a 16.
 
-        El presupuesto de 13 se desglosa así, medido con este mismo listener
+        El presupuesto de 10 se desglosa así, medido con este mismo listener
         (6 mensajes en total: 4 del supervisor, 2 del sub-agente):
           6  create_message ($push, uno por mensaje)
-          3  update_agent: el primer sync de cada manager, más el del
-             supervisor tras ejecutar la tool (Strands sube la versión de
-             interrupt_state)
           4  métricas del último mensaje
 
         La configuración no viaja: cada manager la conoce desde read_agent()
-        (#65). Antes eran 2 escrituras más, de ~14 KB cada una. El presupuesto
-        de cada hito se sigue en la issue maestra #56.
+        (#65). Antes eran 2 escrituras más, de ~14 KB cada una. El estado del
+        agente tampoco (#67): ninguno de los dos cambia en el turno, y eran 3
+        update_agent, el primer sync de cada manager y el del supervisor tras
+        la tool, porque Strands sube la versión de interrupt_state sin cambiar
+        su contenido. El presupuesto de cada hito se sigue en la issue maestra
+        #56.
         """
         factory, _, counter = turn_factory
 
@@ -224,18 +232,64 @@ class TestTurnOperationBudget:
         counter.enabled = False
 
         counts = counter.counts()
-        assert counts["update"] <= 13, f"{counts['update']} updates: {counts}"
+        assert counts["update"] <= 10, f"{counts['update']} updates: {counts}"
         assert counts["createIndexes"] == 0, "los índices ya estaban asegurados"
         assert counts["find"] <= 6, f"{counts['find']} finds: {counts}"
         rewritten = [
             field
             for field in counter.set_fields
-            if field.endswith(".agent_data.system_prompt")
+            if field.endswith((".agent_data.system_prompt", ".agent_data.state"))
         ]
         assert not rewritten, (
-            "el turno caliente reescribió un system_prompt que no cambió; "
-            f"¿read_agent() dejó de traer la configuración? {rewritten}"
+            "el turno caliente reescribió configuración o estado que no cambió; "
+            f"¿read_agent() dejó de recordar lo leído? {rewritten}"
         )
+
+    def test_an_unchanged_agent_does_not_overwrite_another_manager(
+        self, turn_factory, unique_session_id
+    ):
+        """Dos requests sobre el mismo agente: la que no lo cambia no pisa a la otra.
+
+        Antes de #67 la segunda reescribía en su primer sync el estado que había
+        restaurado, y deshacía en silencio lo que la primera acababa de guardar.
+        """
+        factory, collection, _ = turn_factory
+        run_turn(factory, unique_session_id, "hola")
+
+        idle_manager = factory.create_session_manager(unique_session_id)
+        idle = scripted_agent(idle_manager, "info_suministro_agent", "sub", "ok")
+
+        busy_manager = factory.create_session_manager(unique_session_id)
+        busy = scripted_agent(busy_manager, "info_suministro_agent", "sub", "ok")
+        busy.state.set("contrato", "ES-001")
+        busy("guarda el contrato")
+
+        idle("otra pregunta")
+        idle_manager.close()
+        busy_manager.close()
+
+        agents = collection.find_one({"_id": unique_session_id})["agents"]
+        state = agents["info_suministro_agent"]["agent_data"]["state"]
+        assert state == {"contrato": "ES-001"}
+
+    def test_state_set_in_one_turn_is_restored_in_the_next(
+        self, turn_factory, unique_session_id
+    ):
+        """Guardarraíl: saltarse lo que no cambia no puede saltarse un cambio."""
+        factory, _, _ = turn_factory
+        run_turn(factory, unique_session_id, "hola")
+
+        manager = factory.create_session_manager(unique_session_id)
+        agent = scripted_agent(manager, "supervisor", "supervisor", "anotado")
+        agent.state.set("idioma", "euskera")
+        agent("recuerda mi idioma")
+        manager.close()
+
+        manager = factory.create_session_manager(unique_session_id)
+        restored = scripted_agent(manager, "supervisor", "supervisor", "ok")
+        manager.close()
+
+        assert restored.state.get("idioma") == "euskera"
 
     def test_root_updated_at_advances_with_the_turn(
         self, turn_factory, unique_session_id
