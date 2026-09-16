@@ -1,5 +1,14 @@
 # Changelog
 
+## [2026-09-16] PR #68 - Fix: no borrar la configuración del agente e hidratar su caché desde read_agent() (#65) (@iguinea)
+
+- Docs: plan para hidratar la caché de configuración del agente (#65)
+- Fix: update_agent ya no borra la configuración del agente (#65)
+- Update: hidratar la caché de configuración del agente desde read_agen…
+- Docs: documentar la hidratación y el arreglo de update_agent (#65)
+- Refactor: simplificar el traspaso de configuración y sus tests (#65)
+- Chore: versión 0.10.1 (#65)
+
 ## [0.10.1] - 2026-09-16
 
 ### Fixed
