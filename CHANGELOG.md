@@ -1,5 +1,12 @@
 # Changelog
 
+## [2026-09-16] PR #70 - Chore: aplicar los PRs de dependabot y arreglar los permisos del CI (@iguinea)
+
+- Fix: conceder security-events al job security del CI
+- Chore: subir boto3, uvloop, pytest-mock y pytest-asyncio
+- Chore: dependabot pasa del ecosistema pip al de uv
+- Fix: fijar setup-uv a v10.1.0 (no publica alias de major)
+
 ## [2026-09-16] PR #68 - Fix: no borrar la configuración del agente e hidratar su caché desde read_agent() (#65) (@iguinea)
 
 - Docs: plan para hidratar la caché de configuración del agente (#65)
