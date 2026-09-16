@@ -1,5 +1,10 @@
 # Changelog
 
+## [2026-09-16] PR #87 - Update: no reescribir un agente que no ha cambiado (#67) (@iguinea)
+
+- Update: no reescribir un agente que no ha cambiado (#67)
+- Docs: CHANGELOG y versión 0.14.0 (#67)
+
 ## [0.14.0] - 2026-09-16
 
 ### Changed
