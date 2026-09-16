@@ -961,3 +961,133 @@ class MongoDBSessionRepository(SessionRepository):
                 f"Failed to get application_name for session {session_id}: {e}"
             )
             raise
+
+    def record_guardrail_event(
+        self, session_id: str, agent_id: str, message_id: int, event: Mapping[str, Any]
+    ) -> bool:
+        """Record a guardrail intervention on its message and on the session.
+
+        The session-level entry is derived from the message one: the same fields
+        plus the identifiers needed to find the message again, minus the full
+        GuardrailTrace. The session array is read whole to audit a session and
+        grows with every intervention, so the trace stays on the message, where
+        it is read only when someone opens that message.
+
+        Both halves travel in a single write.
+
+        Args:
+            event: The guardrail event as stored on the message, trace included.
+
+        Returns:
+            True when the message was found.
+        """
+        session_event: dict[str, Any] = {
+            "message_id": message_id,
+            "agent_id": agent_id,
+            **{name: value for name, value in event.items() if name != "trace"},
+        }
+
+        return self._update_message_document(
+            session_id,
+            agent_id,
+            message_id,
+            {"guardrail_event": dict(event)},
+            push={"guardrail_events": session_event},
+        )
+
+    @staticmethod
+    def _agent_config(agent_id: str, agent_data: Mapping[str, Any]) -> dict[str, Any]:
+        """Shape the configuration a session stores for one agent."""
+        return {
+            "agent_id": agent_id,
+            "model": agent_data.get("model"),
+            "system_prompt": agent_data.get("system_prompt"),
+            "prompt_metadata": agent_data.get("prompt_metadata"),
+        }
+
+    def get_agent_config(self, session_id: str, agent_id: str) -> dict[str, Any] | None:
+        """Read the stored configuration of one agent, None when it does not exist.
+
+        Unlike _pop_read_agent_config(), this is a standalone read that consumes
+        nothing and also carries prompt_metadata.
+        """
+        try:
+            # Projecting agents.<id> would pull the agent subdocument with its
+            # whole messages array; only agent_data is needed here.
+            doc = self.collection.find_one(
+                {"_id": session_id}, {f"agents.{agent_id}.agent_data": 1}
+            )
+
+            if not self._agent_exists(doc, agent_id):
+                logger.debug(f"Agent {agent_id} not found in session {session_id}")
+                return None
+
+            return self._agent_config(
+                agent_id, doc["agents"][agent_id].get("agent_data", {})
+            )
+        except PyMongoError as e:
+            logger.error(
+                f"Failed to read config of agent {agent_id} "
+                f"in session {session_id}: {e}"
+            )
+            raise
+
+    def list_agent_configs(self, session_id: str) -> list[dict[str, Any]]:
+        """List the stored configuration of every agent in the session."""
+        try:
+            doc = self.collection.find_one({"_id": session_id}, {"agents": 1})
+
+            if not doc or "agents" not in doc:
+                logger.debug(f"No agents found in session {session_id}")
+                return []
+
+            return [
+                self._agent_config(agent_id, agent_obj.get("agent_data", {}))
+                for agent_id, agent_obj in doc["agents"].items()
+            ]
+        except PyMongoError as e:
+            logger.error(f"Failed to list agents of session {session_id}: {e}")
+            raise
+
+    def count_messages(self, session_id: str, agent_id: str) -> int:
+        """Count the messages stored for one agent, 0 when the agent is unknown."""
+        try:
+            doc = self.collection.find_one(
+                {"_id": session_id}, {f"agents.{agent_id}.messages": 1}
+            )
+
+            if not self._agent_exists(doc, agent_id):
+                return 0
+
+            return len(doc["agents"][agent_id].get("messages", []))
+        except PyMongoError as e:
+            logger.error(
+                f"Failed to count messages of agent {agent_id} "
+                f"in session {session_id}: {e}"
+            )
+            raise
+
+    def get_last_message_id(self, session_id: str, agent_id: str) -> int | None:
+        """Read the message_id of the agent's last message, None when there is none.
+
+        The second place that resolves message identity, after
+        _update_message_document(). See #78.
+        """
+        try:
+            # $slice keeps the whole history from travelling over the wire.
+            doc = self.collection.find_one(
+                {"_id": session_id},
+                {f"agents.{agent_id}.messages": {"$slice": -1}},
+            )
+
+            if not self._agent_exists(doc, agent_id):
+                return None
+
+            messages = doc["agents"][agent_id].get("messages", [])
+            return messages[-1]["message_id"] if messages else None
+        except PyMongoError as e:
+            logger.error(
+                f"Failed to read the last message id of agent {agent_id} "
+                f"in session {session_id}: {e}"
+            )
+            raise
