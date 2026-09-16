@@ -41,6 +41,8 @@ def __init__(
     metadata_fields: Optional[List[str]] = None,
     metadata_hook: Optional[Callable[[Dict[str, Any]], None]] = None,
     feedback_hook: Optional[Callable[[Dict[str, Any]], None]] = None,
+    application_name: Optional[str] = None,
+    session_repository: Optional[Any] = None,
     **kwargs: Any,
 ) -> None
 ```
@@ -64,6 +66,10 @@ Initialize MongoDB Session Manager with connection details and configuration.
 - **metadata_hook** (`Optional[Callable]`, default: `None`): Hook function to intercept metadata operations (update, get, delete). See [Hooks](#metadata-hooks) section for details.
 
 - **feedback_hook** (`Optional[Callable]`, default: `None`): Hook function to intercept feedback operations (add). See [Hooks](#feedback-hooks) section for details.
+
+- **application_name** (`Optional[str]`, default: `None`): Application name used to categorise sessions. Immutable: it is written when the session is created and read back with `get_application_name()`.
+
+- **session_repository** (`Optional[Any]`, default: `None`): Repository to store sessions in. Defaults to a `MongoDBSessionRepository` built from the arguments above. Pass your own to store elsewhere, or an in-memory double to test without MongoDB — see [Testing](../development/testing.md#testing-without-mongodb-the-in-memory-repository). When provided, the MongoDB-specific arguments are ignored.
 
 - **kwargs** (`Any`): Additional keyword arguments. MongoDB client options (e.g., `maxPoolSize`, `minPoolSize`) are passed to `MongoClient`. Other arguments are passed to the parent `RepositorySessionManager` class.
 

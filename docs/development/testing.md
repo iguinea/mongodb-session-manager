@@ -504,6 +504,42 @@ def test_concurrent_metadata_updates(mongodb_uri):
     manager.close()
 ```
 
+## Testing Without MongoDB: the In-Memory Repository
+
+`tests/support/in_memory_session_repository.py` is a double that stores sessions in a dict with the same document shape MongoDB uses. It exists so the session manager's tests can assert on **what ends up stored** instead of on which pymongo command was emitted.
+
+Inject it through the manager's `session_repository` argument:
+
+```python
+from tests.support.in_memory_session_repository import InMemorySessionRepository
+
+repo = InMemorySessionRepository()
+manager = MongoDBSessionManager(session_id="s1", session_repository=repo)
+
+manager.update_agent_config("a1", model="claude-opus-5")
+
+assert manager.get_agent_config("a1")["model"] == "claude-opus-5"
+```
+
+It exposes no `collection` attribute, on purpose: any code that reaches for the raw pymongo collection fails loudly here instead of passing silently.
+
+### Keeping the double honest
+
+A double that quietly drifts from the real repository is worse than no double. Three layers prevent it:
+
+| Layer | What it catches |
+|-------|-----------------|
+| Structural guard (`tests/unit/test_in_memory_repository.py`) | A method added to `MongoDBSessionRepository` and forgotten in the double |
+| Shared contract (`tests/support/repository_contract.py`) | Same behaviour, different semantics — the subtle case |
+| `Mock(spec=MongoDBSessionRepository)` in the remaining mock fixtures | Calls to methods that do not exist |
+
+The contract is a base class of assertions, subclassed twice: `tests/unit/test_in_memory_repository.py` runs it against the double, and `tests/integration/test_repository_contract.py` runs **the very same cases** against a real MongoDB. If you add a method to the repository, add its cases to the contract — then neither implementation can drift without turning the other suite red.
+
+Some behaviours are reproduced warts and all, because a double kinder than reality lies: the positional update matches only the first message with a given `message_id` ([#78](https://github.com/iguinea/mongodb-session-manager/issues/78)), and `update_agent()` writes field by field so it does not wipe the manager's config ([#65](https://github.com/iguinea/mongodb-session-manager/issues/65)).
+
+!!! warning "Not evidence about `agent_id` with `.` or `$`"
+    The double resolves dotted paths its own way, so it does not reproduce how MongoDB breaks on those identifiers ([#79](https://github.com/iguinea/mongodb-session-manager/issues/79)).
+
 ## Mocking MongoDB Connections
 
 ### Using pytest-mock

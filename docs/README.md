@@ -108,7 +108,7 @@ uv run python examples/example_name.py
 
 ## Version
 
-This documentation is for **MongoDB Session Manager v0.10.2**.
+This documentation is for **MongoDB Session Manager v0.11.0**.
 
 Last updated: 2026-09-16
 

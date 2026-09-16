@@ -1210,46 +1210,34 @@ def sync_agent(self, agent: Agent, **kwargs: Any) -> None:
     # First, sync agent state (parent class)
     super().sync_agent(agent, **kwargs)
 
-    # Extract metrics from agent's event loop
-    _latencyMs = agent.event_loop_metrics.accumulated_metrics["latencyMs"]
-    _inputTokens = agent.event_loop_metrics.accumulated_usage["inputTokens"]
-    _outputTokens = agent.event_loop_metrics.accumulated_usage["outputTokens"]
-    _totalTokens = agent.event_loop_metrics.accumulated_usage["totalTokens"]
+    # Metrics target the last message, the config targets the agent, but both
+    # land on the same session document, so they travel in a single write.
+    metrics_ops, message_id = self._build_metrics_update(agent)
+    config_ops, config_cache_entry = self._build_agent_config_update(agent)
 
-    # Only update if metrics present
-    if _latencyMs > 0:
-        # Fetch last message
-        doc = self.session_repository.collection.find_one(
-            {"_id": self.session_id},
-            {f"agents.{agent.agent_id}.messages": {"$slice": -1}},
-        )
-
-        if doc and "agents" in doc and agent.agent_id in doc["agents"]:
-            messages = doc["agents"][agent.agent_id].get("messages", [])
-            if messages:
-                last_message_id = messages[-1]["message_id"]
-
-                # Build update operation
-                update_data = {
-                    f"agents.{agent.agent_id}.messages.$.event_loop_metrics.accumulated_metrics": {
-                        "latencyMs": _latencyMs,
-                    },
-                    f"agents.{agent.agent_id}.messages.$.event_loop_metrics.accumulated_usage": {
-                        "inputTokens": _inputTokens,
-                        "outputTokens": _outputTokens,
-                        "totalTokens": _totalTokens,
-                    },
-                }
-
-                # Update last message with metrics
-                self.session_repository.collection.update_one(
-                    {
-                        "_id": self.session_id,
-                        f"agents.{agent.agent_id}.messages.message_id": last_message_id,
-                    },
-                    {"$set": update_data},
-                )
+    self._apply_sync_update(
+        agent,
+        metrics_ops,
+        config_ops,
+        message_id,
+        config_cache_entry if config_ops else None,
+    )
 ```
+
+The keys the manager builds are **relative** to the message
+(`"event_loop_metrics.accumulated_usage"`) or to the agent
+(`"agent_data.model"`). Where those documents live, and the positional selector
+that finds them, belong to the repository — the manager does not access
+`session_repository.collection` (issue #80). `_apply_sync_update()` then picks
+the branch: with metrics the config rides along in
+`update_message_fields()`, and without them it goes alone through
+`update_agent_fields()`. One write either way.
+
+The last message id comes from the parent's in-memory
+`_latest_agent_message`, falling back to `get_last_message_id()` only for a
+session restored in another process. That removed the read shown in earlier
+versions of this document, and with it a read-after-write that could attribute
+the metrics to the previous message on a lagging replica.
 
 **Why Last Message?**
 

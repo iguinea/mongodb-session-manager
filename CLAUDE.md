@@ -49,11 +49,17 @@ cd playground/chat && make frontend                   # Port 8881
    - `get_metadata_tool()`: Returns Strands tool for agent metadata management
    - Metadata/Feedback hooks for intercepting operations
    - Agent config persistence (model, system_prompt), written only when it changes; `initialize()` seeds the cache from `read_agent()`
+   - **Never touches `session_repository.collection`**: every data access goes through the repository. Accepts `session_repository=` to inject another store, or the in-memory double in tests
 
 2. **MongoDBSessionRepository** (`mongodb_session_repository.py`): Implements `SessionRepository` interface
    - All MongoDB CRUD operations for sessions, agents, messages
+   - `_update_message_document()` is the **only** place that builds the positional selector; `update_message()`, `update_message_fields()` and `record_guardrail_event()` all go through it (see #78)
+   - `update_message_fields()` / `update_agent_fields()`: take keys relative to the message or the agent, and own the dot-notation paths. The agent config rides along with the metrics in a single write
+   - `record_guardrail_event()`: derives the session-level event from the message one, minus the full `GuardrailTrace`
+   - Domain reads: `get_agent_config()`, `list_agent_configs()`, `count_messages()`, `get_last_message_id()`
    - `update_agent()` writes each `SessionAgent` field on its own path, so the manager's config fields in `agent_data` survive
    - `update_message()` locates the message by `message_id` with the positional `$` (no read first) and writes an allowlist of fields, so `event_loop_metrics` and `guardrail_event` survive a redaction
+   - `collection` stays public and supported for ad-hoc queries
    - Smart connection lifecycle (owns vs borrowed client)
 
 3. **MongoDBConnectionPool** (`mongodb_connection_pool.py`): Singleton for connection reuse
@@ -186,7 +192,7 @@ When releasing, update version in **three places**:
 2. `pyproject.toml` (`version`)
 3. `CHANGELOG.md` (add release entry)
 
-Current version: **0.10.2**
+Current version: **0.11.0**
 
 ## Workflow Rules
 

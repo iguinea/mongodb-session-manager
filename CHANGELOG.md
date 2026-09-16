@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.11.0] - 2026-09-16
+
+### Added
+- **El repositorio expone las operaciones que el session manager necesita de verdad**: `update_message_fields()` y `update_agent_fields()` para escribir, más `record_guardrail_event()`, `get_agent_config()`, `list_agent_configs()`, `count_messages()` y `get_last_message_id()`. Las claves que reciben son relativas al mensaje o al agente: quien conoce las rutas de MongoDB es el repositorio
+- **`MongoDBSessionManager` acepta `session_repository`**: permite inyectar un repositorio propio —o un doble— en lugar del de MongoDB, que es lo que hace testeable el manager sin base de datos
+
+### Changed
+- **El session manager ya no accede a `session_repository.collection`**: lo hacía en ocho métodos, construyendo a mano filtros con dot notation, operadores `$set`/`$push` y leyendo `matched_count`. Contradecía la regla de persistencia del proyecto y el propio diagrama de arquitectura, que nunca dibujó esa arista. Hoy `grep -rn "session_repository.collection" src/` no devuelve nada
+- **El mecanismo de escritura posicional deja de estar triplicado**: `update_message()`, las métricas del turno y el evento de guardarraíl construían por separado el mismo filtro `{"_id", "agents.<id>.messages.message_id"}` y el mismo prefijo `agents.<id>.messages.$.`. Ahora viven en un único método privado del repositorio, lo que convierte la identidad de mensaje de #78 en un cambio local en vez de una caza por tres ficheros
+- **La regla de que el `GuardrailTrace` completo no viaja al array de sesión** estaba duplicada en el manager, que construía los dos eventos a mano. Ahora el repositorio deriva el evento de sesión a partir del de mensaje
+
+### Notes
+- **Sin cambios de comportamiento**: ninguna firma pública cambia y `repo.collection` sigue siendo público y soportado para consultas ad hoc. Los diez tests de `update_message()` pasan sin editar ni uno, que era precisamente el criterio de que el refactor es estructural
+- El presupuesto de escrituras por turno no se mueve: `sync_agent()` sigue costando una sola escritura, con la configuración del agente viajando de polizón en la de métricas cuando las hay, y sola cuando no
+- Nuevo doble in-memory en `tests/support/`, con 18 casos de contrato que se ejecutan dos veces —contra el doble y contra MongoDB real— para que ambas implementaciones no puedan divergir en silencio
+
 ## [2026-09-16] PR #81 - Fix: update_message() localiza el mensaje por message_id y deja de borrar campos (#64) (@iguinea)
 
 - Fix: update_message() localiza el mensaje por message_id y deja de bo…
