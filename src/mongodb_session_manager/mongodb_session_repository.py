@@ -30,6 +30,9 @@ logger = logging.getLogger(__name__)
 
 TIMEZONE_UTC_SUFFIX = "+00:00"
 
+# MongoDB's append-to-array update operator, used by every write that pushes.
+_PUSH = "$push"
+
 # Fields stored on message documents that SessionMessage.__init__() does not accept.
 # Used to filter them out when reconstructing SessionMessage objects.
 _MESSAGE_EXCLUDED_FIELDS = frozenset(
@@ -570,7 +573,7 @@ class MongoDBSessionRepository(SessionRepository):
             result = self.collection.update_one(
                 {"_id": session_id},
                 {
-                    "$push": {f"{agent_path}.messages": message_data},
+                    _PUSH: {f"{agent_path}.messages": message_data},
                     "$set": {
                         f"{agent_path}.updated_at": now,
                         "updated_at": now,
@@ -723,7 +726,7 @@ class MongoDBSessionRepository(SessionRepository):
         if set_operations:
             update["$set"] = set_operations
         if push:
-            update["$push"] = dict(push)
+            update[_PUSH] = dict(push)
 
         # Which field names a message is MessageRef's rule, not this method's:
         # the in-memory double resolves it the same way over a list.
@@ -970,7 +973,7 @@ class MongoDBSessionRepository(SessionRepository):
             self.collection.update_one(
                 {"_id": session_id},
                 {
-                    "$push": {"feedbacks": feedback_doc},
+                    _PUSH: {"feedbacks": feedback_doc},
                     "$set": {"updated_at": now},
                 },
             )
