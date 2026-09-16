@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.14.0] - 2026-09-16
+
+### Changed
+- **Un agente que no ha cambiado ya no se reescribe** (#67). Strands llama a `update_agent()` en el primer sync de cada manager, porque aún no tiene versiones con las que comparar, y tras cada tool, porque `_interrupt_state.deactivate()` sube la versión aunque no hubiera ninguna interrupción. En los dos casos el agente trae exactamente lo que ya está guardado. Ahora `update_agent()` compara el `SessionAgent` recibido, sin contar `created_at` ni `updated_at`, con lo que el repositorio leyó, creó o escribió por última vez, y si es idéntico no hace el round-trip. Turno de referencia (supervisor, sub-agente y una tool) contra MongoDB: **13 → 10 updates**. En DocumentDB cada uno cuesta 40-55 ms
+- La regla vive en `mongodb_session_manager.agent_content` (`LastPersistedAgents`), y el repositorio de MongoDB y el doble in-memory la aplican en los mismos puntos. El contrato compartido lo comprueba contra las dos implementaciones
+- **Contrato público de `update_agent()`**: con contenido idéntico no toca el documento, no refresca ningún `updated_at` y no lanza «Session not found». Con contenido distinto se comporta como antes
+- **`agent_data.created_at` y `agent_data.updated_at` solo avanzan cuando cambia el estado del agente**. Antes Strands los regeneraba en cada sync, así que significaban «último sync». `agents.<id>.updated_at` y el `updated_at` raíz siguen avanzando con cada mensaje, y el Session Viewer lee esos
+
+### Fixed
+- **Una petición que no cambiaba el agente pisaba lo que otra acababa de guardar**. Cada manager reescribía en su primer sync y tras cada tool el estado que había restaurado, y deshacía en silencio el cambio concurrente de otro manager sobre el mismo agente. Ahora un manager solo escribe cuando su agente ha cambiado. La ventana no se cierra del todo: si los dos lo cambian, gana el último, como antes
+
+### Notes
+- **Se compara contenido, no versiones, así que no se pierde ningún cambio**: se persiste con `agent.state.set()`, con un hook que reasigna `agent.state` entero y con un conversation manager que migra su estado al restaurar. Los campos que añada una versión nueva de Strands se comparan igual
+- **Se descartó la propuesta original de la issue**, sembrar `_last_synced_internal_state` de Strands en `initialize()`. La revisión adversarial demostró que perdía justo esos dos casos, porque un `AgentState` nuevo nace en la misma versión, y que no ahorraba nada desde strands 1.34.0, que añade `model_state` a esa contabilidad. Detalle en `features/7_skip_unchanged_agent_writes/plan.md`
+- **Lo que no ve**: una escritura que no pasa por este repositorio (otro proceso, o `update_agent_fields()` sobre un campo del SDK). Un agente sin cambios no la sobrescribe
+- Una escritura que lanza o no casa con ninguna sesión no se da por guardada, y el siguiente sync la reintenta. El repositorio solo recuerda los agentes de la última sesión tocada: la factoría crea uno por manager, y uno reutilizado entre sesiones no acumula estado
+- `sync_bidi_agent()` también pasa por `update_agent()`, así que tampoco reescribe un agente bidi sin cambios
+- **Sin cambios de esquema ni migración**, y sin operadores nuevos para DocumentDB. Managers 0.13 y 0.14 conviven sobre la misma colección
+
 ## [2026-09-16] PR #86 - Fix: validar los nombres que acaban en rutas dot-notation (#79) (@iguinea)
 
 - Fix: validar los nombres que acaban en rutas dot-notation (#79)

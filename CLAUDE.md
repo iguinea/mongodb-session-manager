@@ -198,7 +198,7 @@ When releasing, update version in **three places**:
 2. `pyproject.toml` (`version`)
 3. `CHANGELOG.md` (add release entry)
 
-Current version: **0.13.0**
+Current version: **0.14.0**
 
 ## Workflow Rules
 
