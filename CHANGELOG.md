@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.16.0] - 2026-09-16
+
+### Changed
+- **Restaurar una sesión ya no transfiere dos veces el historial completo** (#57). `read_session()` proyecta únicamente la cabecera de la sesión y `read_agent()` únicamente `agents.<agent_id>.agent_data`; los mensajes siguen llegando por `list_messages()`, que conserva la paginación y el orden por `created_at`
+- La restauración de referencia con 5.000 mensajes baja de **64,24 ms / 13.570 KiB** a **23,96 ms / 4.523 KiB** en MongoDB 8.2.7 local. Los tests de integración inspeccionan los comandos reales enviados al servidor para fijar ambas proyecciones
+- `model` y `system_prompt` permanecen dentro de `agent_data`, así que la caché de configuración de Strands conserva su comportamiento
+
+### Notes
+- **Sin cambios de esquema ni migración**. La forma pública de las sesiones y agentes restaurados no cambia, y managers 0.15 y 0.16 pueden convivir sobre la misma colección
+- Se descartó aplicar `$slice` a `list_messages()`: el repositorio ordena por `created_at` antes de aplicar `offset`, mientras que `$slice` opera sobre el orden físico del array y cambiaría el contrato
+- Las proyecciones usan sintaxis compatible con Amazon DocumentDB, pero la latencia y la consistencia sobre réplicas deben validarse en un clúster DocumentDB; las pruebas de esta versión se ejecutaron contra MongoDB 8.2.7
+
 ## [2026-09-16] PR #88 - Fix: métricas de la invocación una sola vez, en su último mensaje (#66) (@iguinea)
 
 - Fix: métricas de la invocación una sola vez, en su último mensaje (#66)
