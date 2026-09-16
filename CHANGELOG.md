@@ -1,5 +1,9 @@
 # Changelog
 
+## [2026-09-16] PR #81 - Fix: update_message() localiza el mensaje por message_id y deja de borrar campos (#64) (@iguinea)
+
+- Fix: update_message() localiza el mensaje por message_id y deja de bo…
+
 ## [0.10.2] - 2026-09-16
 
 ### Fixed
