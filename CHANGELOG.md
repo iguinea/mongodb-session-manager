@@ -1,5 +1,9 @@
 # Changelog
 
+## [2026-09-16] PR #85 - Fix: identidad estable de mensaje para los updates posicionales (#78) (@iguinea)
+
+- Fix: identidad estable de mensaje para los updates posicionales (#78)
+
 ## [0.12.0] - 2026-09-16
 
 ### Fixed
