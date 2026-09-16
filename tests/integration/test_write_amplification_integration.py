@@ -15,11 +15,15 @@ import pytest
 from pymongo import MongoClient, monitoring
 from strands import Agent, tool
 from strands.models.model import Model
+from strands.types.session import Session, SessionAgent, SessionMessage
 
 from mongodb_session_manager.mongodb_session_factory import (
     MongoDBSessionManagerFactory,
 )
-from mongodb_session_manager.mongodb_session_repository import _reset_index_registry
+from mongodb_session_manager.mongodb_session_repository import (
+    MongoDBSessionRepository,
+    _reset_index_registry,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -193,6 +197,54 @@ def run_turn(factory, session_id: str, prompt: str) -> None:
     )
     supervisor(prompt)
     supervisor_manager.close()
+
+
+class TestRedactionCost:
+    def test_redaction_costs_one_write_and_no_read(
+        self, counting_client, unique_session_id, cleanup_session
+    ):
+        """Redactar cuesta una escritura y ninguna lectura (#64).
+
+        Antes se leía el historial completo del agente para calcular en el
+        cliente el índice del mensaje: un round-trip por redacción que además
+        crecía con la sesión.
+        """
+        client, counter = counting_client
+        repo = MongoDBSessionRepository(
+            client=client,
+            database_name="test_write_amplification",
+            collection_name="sessions",
+        )
+        cleanup_session(repo.collection, unique_session_id)
+        repo.create_session(
+            Session(session_id=unique_session_id, session_type="default")
+        )
+        repo.create_agent(
+            unique_session_id,
+            SessionAgent(agent_id="a1", state={}, conversation_manager_state={}),
+        )
+        original = {"role": "user", "content": [{"text": "sensitive"}]}
+        repo.create_message(
+            unique_session_id,
+            "a1",
+            SessionMessage(message_id=1, message=original),
+        )
+
+        counter.enabled = True
+        repo.update_message(
+            unique_session_id,
+            "a1",
+            SessionMessage(
+                message_id=1,
+                message=original,
+                redact_message={"role": "user", "content": [{"text": "***"}]},
+            ),
+        )
+        counter.enabled = False
+
+        counts = counter.counts()
+        assert counts["find"] == 0, f"la redacción leyó el historial: {counts}"
+        assert counts["update"] == 1, f"{counts['update']} updates: {counts}"
 
 
 class TestTurnOperationBudget:

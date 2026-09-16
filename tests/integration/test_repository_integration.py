@@ -1,5 +1,7 @@
 """Integration tests for MongoDBSessionRepository (requires MongoDB)."""
 
+from datetime import datetime
+
 import pytest
 from strands.types.session import Session, SessionAgent, SessionMessage
 
@@ -224,32 +226,121 @@ class TestMessageLifecycle:
         page = repo.list_messages(unique_session_id, "a1", limit=2, offset=1)
         assert len(page) == 2
 
-    def test_update_message(self, repo, unique_session_id):
-        session = Session(session_id=unique_session_id, session_type="default")
-        repo.create_session(session)
-
-        agent = SessionAgent(
-            agent_id="a1",
-            state={},
-            conversation_manager_state={},
+    def _seed_message(self, repo, session_id, text="original"):
+        """Sesión + agente `a1` + un mensaje con message_id 1."""
+        repo.create_session(Session(session_id=session_id, session_type="default"))
+        repo.create_agent(
+            session_id,
+            SessionAgent(agent_id="a1", state={}, conversation_manager_state={}),
         )
-        repo.create_agent(unique_session_id, agent)
-
-        msg = SessionMessage(
-            message_id=1,
-            message={"role": "user", "content": [{"text": "original"}]},
+        repo.create_message(
+            session_id,
+            "a1",
+            SessionMessage(
+                message_id=1,
+                message={"role": "user", "content": [{"text": text}]},
+            ),
         )
-        repo.create_message(unique_session_id, "a1", msg)
 
-        updated = SessionMessage(
-            message_id=1,
-            message={"role": "user", "content": [{"text": "redacted"}]},
+    @staticmethod
+    def _redaction(message_id=1, text="original"):
+        return SessionMessage(
+            message_id=message_id,
+            message={"role": "user", "content": [{"text": text}]},
             redact_message={"role": "user", "content": [{"text": "***"}]},
         )
-        repo.update_message(unique_session_id, "a1", updated)
+
+    def test_update_message(self, repo, unique_session_id):
+        self._seed_message(repo, unique_session_id)
+
+        repo.update_message(unique_session_id, "a1", self._redaction())
 
         result = repo.read_message(unique_session_id, "a1", 1)
         assert result is not None
+        assert result.redact_message is not None
+
+    def test_update_message_preserves_manager_fields(self, repo, unique_session_id):
+        """Redactar no borra lo que el session manager guarda en el mensaje.
+
+        event_loop_metrics y guardrail_event viven en el documento del mensaje,
+        pero SessionMessage no los conoce: el $set del subdocumento entero los
+        borraba en cada redacción.
+        """
+        self._seed_message(repo, unique_session_id, text="sensitive")
+        metrics = {"accumulated_usage": {"totalTokens": 1280}}
+        event = {"action": "BLOCKED"}
+        repo.collection.update_one(
+            {"_id": unique_session_id, "agents.a1.messages.message_id": 1},
+            {
+                "$set": {
+                    "agents.a1.messages.$.event_loop_metrics": metrics,
+                    "agents.a1.messages.$.guardrail_event": event,
+                }
+            },
+        )
+
+        repo.update_message(unique_session_id, "a1", self._redaction(text="sensitive"))
+
+        stored = repo.collection.find_one({"_id": unique_session_id})
+        message_doc = stored["agents"]["a1"]["messages"][0]
+        assert message_doc["event_loop_metrics"] == metrics
+        assert message_doc["guardrail_event"] == event
+        assert message_doc["redact_message"]["content"][0]["text"] == "***"
+
+    def test_update_message_preserves_created_at(self, repo, unique_session_id):
+        """Contrato: created_at conserva valor y tipo; updated_at avanza."""
+        self._seed_message(repo, unique_session_id)
+        before = repo.collection.find_one({"_id": unique_session_id})["agents"]["a1"][
+            "messages"
+        ][0]
+
+        repo.update_message(unique_session_id, "a1", self._redaction())
+
+        after = repo.collection.find_one({"_id": unique_session_id})["agents"]["a1"][
+            "messages"
+        ][0]
+        assert after["created_at"] == before["created_at"]
+        assert isinstance(after["created_at"], datetime)
+        assert after["updated_at"] >= before["updated_at"]
+
+    def test_update_message_raises_for_unknown_message(self, repo, unique_session_id):
+        self._seed_message(repo, unique_session_id)
+
+        with pytest.raises(ValueError, match="Message 99 not found"):
+            repo.update_message(unique_session_id, "a1", self._redaction(message_id=99))
+
+    def test_update_message_raises_for_unknown_agent(self, repo, unique_session_id):
+        self._seed_message(repo, unique_session_id)
+
+        with pytest.raises(ValueError, match="Agent ghost not found"):
+            repo.update_message(unique_session_id, "ghost", self._redaction())
+
+    def test_duplicate_message_id_updates_only_the_first(self, repo, unique_session_id):
+        """Contrato actual, no deseado: message_id no es una identidad única.
+
+        Strands deriva el id en memoria (`append_message`: latest.message_id + 1),
+        así que dos managers concurrentes pueden duplicarlo; el operador
+        posicional actualiza entonces solo el primer elemento que casa. Cuando
+        #78 dé a cada mensaje una identidad estable, este test debe fallar y
+        reescribirse.
+        """
+        self._seed_message(repo, unique_session_id, text="first")
+        repo.create_message(
+            unique_session_id,
+            "a1",
+            SessionMessage(
+                message_id=1,
+                message={"role": "user", "content": [{"text": "second"}]},
+            ),
+        )
+
+        repo.update_message(unique_session_id, "a1", self._redaction(text="first"))
+
+        messages = repo.collection.find_one({"_id": unique_session_id})["agents"]["a1"][
+            "messages"
+        ]
+        assert messages[0]["redact_message"] is not None
+        assert messages[1]["redact_message"] is None
 
 
 # ---------------------------------------------------------------------------

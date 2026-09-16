@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.10.2] - 2026-09-16
+
+### Fixed
+- **`update_message()` borraba los campos de extensión del mensaje**: escribía `agents.<id>.messages.<índice>` con el `SessionMessage` entero, y un `$set` sobre la ruta de un subdocumento lo *reemplaza*. Se llevaba por delante `event_loop_metrics`, `guardrail_event` y los contadores legados, que el session manager guarda ahí pero `SessionMessage` no puede transportar. Ahora se escribe un allowlist explícito (`message`, `redact_message`, `updated_at`), cada campo en su propia ruta
+- **Cada redacción costaba una lectura del historial completo del agente**: el índice del mensaje se calculaba en el cliente. Ahora se localiza en el servidor por `message_id` con el operador posicional `$`: una escritura, cero lecturas, y el selector deja de depender de que nadie reordene el array
+- **`list_messages()` podía dejar un agente permanentemente sin listar**: ordenaba con `x.get("created_at", "")`, así que un mensaje sin ese campo —escrito fuera de `create_message()`— hacía comparar `str` con `datetime` y lanzaba `TypeError`. Hasta ahora lo reparaba de rebote que cada redacción reescribiese `created_at`; al dejar de reescribirlo, nada lo repararía. Los mensajes sin timestamp se ordenan ahora al final como grupo, sin compararse nunca contra un `datetime`
+
+### Changed
+- `created_at` ya no se reescribe: un `$set` que no lo nombra lo deja intacto, con su valor y su tipo. Como efecto colateral, un documento legado **sin** `created_at` ya no se rellena de rebote al redactar — crear mensajes sin ese campo no está soportado
+- `update_message()` conserva los tres diagnósticos de error (sesión, agente o mensaje ausente). El filtro compuesto no los distingue por sí solo, así que cuando no casa —y solo entonces— se paga una lectura para decir cuál falta: reportar «mensaje no encontrado» con un agente inexistente sería engañoso. El camino feliz sigue siendo una sola escritura y ninguna lectura
+
+### Notes
+- Esto **no** hace `update_message()` inmune a la concurrencia. `message_id` no es una clave única —Strands lo deriva en memoria—, así que un id duplicado casa solo con su primera aparición (#78). La condición de carrera que describía #64 no era reproducible con las operaciones actuales del repositorio: el único operador sobre el array es un `$push` al final, que no desplaza los índices ya leídos
+- El `guardrail_event` de la propia redacción ya sobrevivía antes de este cambio, porque `_record_guardrail_event()` corre *después* de `redact_latest_message()`. Lo que se recupera es un evento *anterior* del mismo mensaje y las métricas acumuladas del turno
+
 ## [2026-09-16] PR #77 - Chore: subir pymongo, uvicorn, pytest-cov, pydantic-settings y strands-agents-tools (@iguinea)
 
 - Chore: subir pymongo, uvicorn, pytest-cov, pydantic-settings y las tools

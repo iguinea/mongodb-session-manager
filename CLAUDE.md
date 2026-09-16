@@ -53,6 +53,7 @@ cd playground/chat && make frontend                   # Port 8881
 2. **MongoDBSessionRepository** (`mongodb_session_repository.py`): Implements `SessionRepository` interface
    - All MongoDB CRUD operations for sessions, agents, messages
    - `update_agent()` writes each `SessionAgent` field on its own path, so the manager's config fields in `agent_data` survive
+   - `update_message()` locates the message by `message_id` with the positional `$` (no read first) and writes an allowlist of fields, so `event_loop_metrics` and `guardrail_event` survive a redaction
    - Smart connection lifecycle (owns vs borrowed client)
 
 3. **MongoDBConnectionPool** (`mongodb_connection_pool.py`): Singleton for connection reuse
@@ -185,7 +186,7 @@ When releasing, update version in **three places**:
 2. `pyproject.toml` (`version`)
 3. `CHANGELOG.md` (add release entry)
 
-Current version: **0.10.1**
+Current version: **0.10.2**
 
 ## Workflow Rules
 

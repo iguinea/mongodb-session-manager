@@ -1093,14 +1093,14 @@ def update_agent(self, session_id, session_agent, **kwargs):
 **Same Pattern for Messages**:
 
 ```python
-# In update_message
-for i, msg in enumerate(messages):
-    if msg.get("message_id") == session_message.message_id:
-        message_index = i
-        # Preserve created_at
-        message_data["created_at"] = msg.get("created_at", datetime.now(UTC))
-        message_data["updated_at"] = datetime.now(UTC)
-        break
+# In update_message, created_at is simply never named: a $set that does not
+# mention a field leaves it alone, so the timestamp keeps its value and its
+# type with no read-before-write.
+set_operations = {
+    f"agents.{agent_id}.messages.$.message": session_message.message,
+    f"agents.{agent_id}.messages.$.redact_message": session_message.redact_message,
+    f"agents.{agent_id}.messages.$.updated_at": datetime.now(UTC),
+}
 ```
 
 **Why Preserve?**

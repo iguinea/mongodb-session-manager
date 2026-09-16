@@ -492,7 +492,12 @@ def update_message(
 
 Update a message (typically for redaction).
 
-Updates an existing message while preserving its original `created_at` timestamp and updating `updated_at`.
+The message is located by `message_id` with MongoDB's positional operator (`$`), so the method performs **a single write and no reads**.
+
+Only `message`, `redact_message` and `updated_at` are written, each on its own path. Fields that the session manager stores on the message but `SessionMessage` does not carry — `event_loop_metrics`, `guardrail_event` and the legacy counters — are **preserved**. `created_at` is never named, so it keeps its original value and type.
+
+!!! warning "`message_id` is not a unique key"
+    Strands derives it in memory, so two concurrent session managers on the same agent can produce duplicates. The positional operator then matches the **first** occurrence only. Tracked in [issue #78](https://github.com/iguinea/mongodb-session-manager/issues/78).
 
 #### Parameters
 
@@ -515,10 +520,13 @@ Updates an existing message while preserving its original `created_at` timestamp
 # Read message
 message = repo.read_message("user-123", "assistant-1", message_id=2)
 
-# Modify content (e.g., for redaction)
-message.content = "[Content removed for privacy]"
+# Redact it: to_message() returns redact_message when it is set
+message.redact_message = {
+    "role": "user",
+    "content": [{"text": "[Content removed for privacy]"}],
+}
 
-# Update in database
+# Update in database (metrics and guardrail_event are preserved)
 repo.update_message("user-123", "assistant-1", message)
 ```
 
