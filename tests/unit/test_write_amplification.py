@@ -288,7 +288,7 @@ def _manager_over_mock_repo():
     contrato que defiende la optimización. Lo que `super().sync_agent()` escriba
     por su cuenta no entra en la cuenta.
     """
-    mock_repo = MagicMock()
+    mock_repo = MagicMock(spec=MongoDBSessionRepository)
     mock_repo.read_session.return_value = None
     mock_repo.update_message_fields.return_value = True
     mock_repo.update_agent_fields.return_value = True

@@ -590,7 +590,6 @@ def update_message_fields(
     message_id: int,
     set_operations: Mapping[str, Any],
     agent_set_operations: Mapping[str, Any] | None = None,
-    touch_timestamps: bool = False,
 ) -> bool
 ```
 
@@ -610,7 +609,8 @@ This is the public face of the only method in the project that builds the positi
 
 - **agent_set_operations** (`Mapping[str, Any] | None`): Keys relative to the agent document. They travel in the **same round-trip**: on DocumentDB every write costs 40-55 ms regardless of size, so what drives latency is the number of round-trips, not the bytes.
 
-- **touch_timestamps** (`bool`): Refresh `updated_at` on message, agent and session. Off by default: annotating a turn that already happened is not conversational activity, and moving the session clock for it would misreport session duration to its consumers.
+!!! note "This method never moves the session clock"
+    Refreshing `updated_at` is a decision of the private primitive, not of its callers: a redaction is a visible change to the session, but annotating a turn that already happened is not, and moving the clock for it would misreport session duration to its consumers.
 
 #### Returns
 

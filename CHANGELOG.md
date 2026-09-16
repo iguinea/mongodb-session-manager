@@ -4,7 +4,7 @@
 
 ### Added
 - **El repositorio expone las operaciones que el session manager necesita de verdad**: `update_message_fields()` y `update_agent_fields()` para escribir, más `record_guardrail_event()`, `get_agent_config()`, `list_agent_configs()`, `count_messages()` y `get_last_message_id()`. Las claves que reciben son relativas al mensaje o al agente: quien conoce las rutas de MongoDB es el repositorio
-- **`MongoDBSessionManager` acepta `session_repository`**: permite inyectar un repositorio propio —o un doble— en lugar del de MongoDB, que es lo que hace testeable el manager sin base de datos
+- **`MongoDBSessionManager` acepta `session_repository`**: sirve para sentar un doble en lugar del repositorio de MongoDB, que es lo que hace testeable el manager sin base de datos. **No es un punto de extensión declarado**: el contrato esperado no se publica como `Protocol`, solo existe como casos ejecutables en `tests/support/repository_contract.py`, así que sustituir el almacén es posible pero no está soportado
 
 ### Changed
 - **El session manager ya no accede a `session_repository.collection`**: lo hacía en ocho métodos, construyendo a mano filtros con dot notation, operadores `$set`/`$push` y leyendo `matched_count`. Contradecía la regla de persistencia del proyecto y el propio diagrama de arquitectura, que nunca dibujó esa arista. Hoy `grep -rn "session_repository.collection" src/` no devuelve nada

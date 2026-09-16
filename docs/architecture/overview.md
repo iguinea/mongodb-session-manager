@@ -200,7 +200,7 @@ list_messages(session_id, agent_id, limit, offset, **kwargs) -> List[SessionMess
 # Keys are relative to the message or to the agent; the repository owns the
 # dot-notation paths and the positional selector.
 update_message_fields(session_id, agent_id, message_id, set_operations,
-                      agent_set_operations=None, touch_timestamps=False) -> bool
+                      agent_set_operations=None) -> bool
 update_agent_fields(session_id, agent_id, set_operations) -> bool
 record_guardrail_event(session_id, agent_id, message_id, event) -> bool
 

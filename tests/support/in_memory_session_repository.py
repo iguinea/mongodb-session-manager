@@ -36,7 +36,6 @@ from strands.session.session_repository import SessionRepository
 from strands.types.session import Session, SessionAgent, SessionMessage
 
 from mongodb_session_manager.mongodb_session_repository import (
-    _AGENT_CONFIG_FIELDS,
     MongoDBSessionRepository,
 )
 
@@ -173,10 +172,9 @@ class InMemorySessionRepository(SessionRepository):
             return None
 
         agent_data = agent["agent_data"]
-        filtered = {
-            k: v for k, v in agent_data.items() if k not in _AGENT_CONFIG_FIELDS
-        }
-        session_agent = SessionAgent(**copy.deepcopy(filtered))
+        session_agent = SessionAgent(
+            **copy.deepcopy(MongoDBSessionRepository._filter_agent_data(agent_data))
+        )
         self._last_read_agent_config = {
             (session_id, agent_id): {
                 "model": agent_data.get("model"),
@@ -257,7 +255,7 @@ class InMemorySessionRepository(SessionRepository):
         **kwargs: Any,
     ) -> None:
         """Update a message, writing only the allowlisted fields."""
-        matched = self.update_message_fields(
+        matched = self._update_message_document(
             session_id,
             agent_id,
             session_message.message_id,
@@ -290,48 +288,53 @@ class InMemorySessionRepository(SessionRepository):
         if agent is None:
             return []
 
-        messages = copy.deepcopy(agent["messages"])
-        messages.sort(
-            key=lambda x: (x.get("created_at") is None, x.get("created_at") or 0)
+        # Sort and paginate over references, then copy only the page: a deepcopy
+        # of the whole history to return N messages is work nobody asked for.
+        messages = sorted(
+            agent["messages"],
+            key=lambda x: (x.get("created_at") is None, x.get("created_at") or 0),
         )
-        messages = (
+        page = (
             messages[offset : offset + limit]
             if limit is not None
             else messages[offset:]
         )
         return [
-            SessionMessage(**MongoDBSessionRepository._filter_message_data(msg))
-            for msg in messages
+            SessionMessage(
+                **MongoDBSessionRepository._filter_message_data(copy.deepcopy(msg))
+            )
+            for msg in page
         ]
 
     # -- Write primitives --------------------------------------------------
 
-    def update_message_fields(
+    def _update_message_document(
         self,
         session_id: str,
         agent_id: str,
         message_id: int,
-        set_operations: dict[str, Any],
-        agent_set_operations: dict[str, Any] | None = None,
+        message_fields: dict[str, Any],
+        *,
+        agent_fields: dict[str, Any] | None = None,
+        push: dict[str, Any] | None = None,
         touch_timestamps: bool = False,
     ) -> bool:
-        """Write fields on one message, and optionally on its agent, in one go."""
-        if not set_operations and not agent_set_operations and not touch_timestamps:
-            return False
-
-        agent = self._agent(session_id, agent_id)
-        if agent is None:
+        """Mirror of the repository's positional primitive, over a dict."""
+        if not message_fields and not agent_fields and not push:
             return False
 
         msg = self._find_message(session_id, agent_id, message_id)
         if msg is None:
             return False
+        # _find_message already proved both exist.
+        agent = self._sessions[session_id]["agents"][agent_id]
 
-        for path, value in set_operations.items():
+        for path, value in message_fields.items():
             _set_dotted(msg, path, copy.deepcopy(value))
-        if agent_set_operations:
-            for path, value in agent_set_operations.items():
-                _set_dotted(agent, path, copy.deepcopy(value))
+        for path, value in (agent_fields or {}).items():
+            _set_dotted(agent, path, copy.deepcopy(value))
+        for array, entry in (push or {}).items():
+            self._sessions[session_id][array].append(copy.deepcopy(entry))
 
         if touch_timestamps:
             now = datetime.now(UTC)
@@ -340,6 +343,23 @@ class InMemorySessionRepository(SessionRepository):
             self._sessions[session_id]["updated_at"] = now
 
         return True
+
+    def update_message_fields(
+        self,
+        session_id: str,
+        agent_id: str,
+        message_id: int,
+        set_operations: dict[str, Any],
+        agent_set_operations: dict[str, Any] | None = None,
+    ) -> bool:
+        """Write fields on one message, and optionally on its agent, in one go."""
+        return self._update_message_document(
+            session_id,
+            agent_id,
+            message_id,
+            set_operations,
+            agent_fields=agent_set_operations,
+        )
 
     def update_agent_fields(
         self, session_id: str, agent_id: str, set_operations: dict[str, Any]
@@ -361,20 +381,17 @@ class InMemorySessionRepository(SessionRepository):
         self, session_id: str, agent_id: str, message_id: int, event: dict[str, Any]
     ) -> bool:
         """Record a guardrail intervention on its message and on the session."""
-        session_event: dict[str, Any] = {
-            "message_id": message_id,
-            "agent_id": agent_id,
-            **{name: value for name, value in event.items() if name != "trace"},
-        }
-
-        matched = self.update_message_fields(
-            session_id, agent_id, message_id, {"guardrail_event": dict(event)}
+        return self._update_message_document(
+            session_id,
+            agent_id,
+            message_id,
+            {"guardrail_event": event},
+            push={
+                "guardrail_events": MongoDBSessionRepository._session_guardrail_entry(
+                    agent_id, message_id, event
+                )
+            },
         )
-        if matched:
-            self._sessions[session_id]["guardrail_events"].append(
-                copy.deepcopy(session_event)
-            )
-        return matched
 
     # -- Domain reads ------------------------------------------------------
 

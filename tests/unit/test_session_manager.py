@@ -11,15 +11,20 @@ from mongodb_session_manager.mongodb_session_manager import (
     MongoDBSessionManager,
     create_mongodb_session_manager,
 )
+from mongodb_session_manager.mongodb_session_repository import MongoDBSessionRepository
 from tests.support.in_memory_session_repository import InMemorySessionRepository
 
 
 @pytest.fixture
 def mock_repo():
-    """Create a MagicMock repository."""
-    repo = MagicMock()
+    """Repository double limited to the real repository's public surface.
+
+    The `spec=` is load-bearing: `collection` is an *instance* attribute, so it
+    does not exist on the spec. Any raw pymongo access reintroduced in the
+    manager raises AttributeError here instead of passing silently.
+    """
+    repo = MagicMock(spec=MongoDBSessionRepository)
     repo.read_session.return_value = None
-    repo.collection = MagicMock()
     return repo
 
 

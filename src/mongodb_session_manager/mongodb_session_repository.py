@@ -287,6 +287,11 @@ class MongoDBSessionRepository(SessionRepository):
         """Filter out fields that SessionMessage.__init__() does not accept."""
         return {k: v for k, v in msg_data.items() if k not in _MESSAGE_EXCLUDED_FIELDS}
 
+    @staticmethod
+    def _filter_agent_data(agent_data: Mapping[str, Any]) -> dict:
+        """Filter out fields that SessionAgent.__init__() does not accept."""
+        return {k: v for k, v in agent_data.items() if k not in _AGENT_CONFIG_FIELDS}
+
     def create_session(self, session: Session, **kwargs: Any) -> Session:
         """Create a new Session in MongoDB.
 
@@ -404,11 +409,7 @@ class MongoDBSessionRepository(SessionRepository):
 
             agent_data = doc["agents"][agent_id]["agent_data"]
 
-            filtered_agent_data = {
-                k: v for k, v in agent_data.items() if k not in _AGENT_CONFIG_FIELDS
-            }
-
-            session_agent = SessionAgent(**filtered_agent_data)
+            session_agent = SessionAgent(**self._filter_agent_data(agent_data))
             self._last_read_agent_config = {
                 (session_id, agent_id): {
                     "model": agent_data.get("model"),
@@ -583,7 +584,7 @@ class MongoDBSessionRepository(SessionRepository):
         message_id: int,
         message_fields: Mapping[str, Any],
         *,
-        extra_set: Mapping[str, Any] | None = None,
+        agent_fields: Mapping[str, Any] | None = None,
         push: Mapping[str, Any] | None = None,
         touch_timestamps: bool = False,
     ) -> bool:
@@ -599,13 +600,15 @@ class MongoDBSessionRepository(SessionRepository):
             message_fields: Keys relative to the message document
                 ("guardrail_event", "event_loop_metrics.cycle_metrics"). The
                 positional prefix is this method's business, not the caller's.
-            extra_set: Absolute paths that must land in the same round-trip.
+            agent_fields: Keys relative to the agent document, to land in the
+                same round-trip.
             push: Absolute paths to $push onto. Stays private precisely because
                 these keys are not prefixed by anything the repository owns.
             touch_timestamps: Refresh updated_at on message, agent and session.
-                Off by default: annotating a turn that already happened is not
-                conversational activity, and moving the session clock for it
-                would misreport session duration to its consumers.
+                Private on purpose: a redaction is a visible change to the
+                session, but annotating a turn that already happened is not, and
+                moving the session clock for it would misreport session duration
+                to its consumers.
 
         Returns:
             True when the filter matched a document. A no-match is not an error
@@ -618,8 +621,13 @@ class MongoDBSessionRepository(SessionRepository):
             f"{message_prefix}.{name}": value for name, value in message_fields.items()
         }
 
-        if extra_set:
-            set_operations.update(extra_set)
+        if agent_fields:
+            set_operations.update(
+                {
+                    f"agents.{agent_id}.{name}": value
+                    for name, value in agent_fields.items()
+                }
+            )
 
         if touch_timestamps:
             now = datetime.now(UTC)
@@ -662,7 +670,6 @@ class MongoDBSessionRepository(SessionRepository):
         message_id: int,
         set_operations: Mapping[str, Any],
         agent_set_operations: Mapping[str, Any] | None = None,
-        touch_timestamps: bool = False,
     ) -> bool:
         """Write fields on one message, and optionally on its agent, in one write.
 
@@ -676,20 +683,12 @@ class MongoDBSessionRepository(SessionRepository):
         Returns:
             True when the filter matched a document.
         """
-        extra_set = None
-        if agent_set_operations:
-            extra_set = {
-                f"agents.{agent_id}.{name}": value
-                for name, value in agent_set_operations.items()
-            }
-
         return self._update_message_document(
             session_id,
             agent_id,
             message_id,
             set_operations,
-            extra_set=extra_set,
-            touch_timestamps=touch_timestamps,
+            agent_fields=agent_set_operations,
         )
 
     def update_agent_fields(
@@ -981,19 +980,32 @@ class MongoDBSessionRepository(SessionRepository):
         Returns:
             True when the message was found.
         """
-        session_event: dict[str, Any] = {
-            "message_id": message_id,
-            "agent_id": agent_id,
-            **{name: value for name, value in event.items() if name != "trace"},
-        }
-
         return self._update_message_document(
             session_id,
             agent_id,
             message_id,
-            {"guardrail_event": dict(event)},
-            push={"guardrail_events": session_event},
+            {"guardrail_event": event},
+            push={
+                "guardrail_events": self._session_guardrail_entry(
+                    agent_id, message_id, event
+                )
+            },
         )
+
+    @staticmethod
+    def _session_guardrail_entry(
+        agent_id: str, message_id: int, event: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Derive the session-level guardrail entry from the message-level one.
+
+        Shared with the in-memory double so the rule -- the full trace stays on
+        the message -- cannot drift between the two implementations.
+        """
+        return {
+            "message_id": message_id,
+            "agent_id": agent_id,
+            **{name: value for name, value in event.items() if name != "trace"},
+        }
 
     @staticmethod
     def _agent_config(agent_id: str, agent_data: Mapping[str, Any]) -> dict[str, Any]:

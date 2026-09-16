@@ -725,13 +725,20 @@ the turn metrics and the guardrail event — so the positional selector exists i
 exactly one place:
 
 ```python
-def _update_message_document(self, session_id, agent_id, message_id,
-                             message_fields, *, extra_set=None, push=None,
-                             touch_timestamps=False):
+def _update_message_document(
+    self,
+    session_id,
+    agent_id,
+    message_id,
+    message_fields,
+    *,
+    extra_set=None,
+    push=None,
+    touch_timestamps=False,
+):
     message_prefix = f"agents.{agent_id}.messages.$"
     set_operations = {
-        f"{message_prefix}.{name}": value
-        for name, value in message_fields.items()
+        f"{message_prefix}.{name}": value for name, value in message_fields.items()
     }
     # ... extra_set, push and the three updated_at when touch_timestamps ...
 

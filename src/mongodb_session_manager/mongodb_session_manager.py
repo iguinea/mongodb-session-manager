@@ -387,12 +387,10 @@ class MongoDBSessionManager(RepositorySessionManager):
         metrics_ops, message_id = self._build_metrics_update(agent)
         config_ops, config_cache_entry = self._build_agent_config_update(agent)
 
+        # _build_agent_config_update() returns ({}, None) together, so the cache
+        # entry is already None whenever there are no config operations.
         self._apply_sync_update(
-            agent,
-            metrics_ops,
-            config_ops,
-            message_id,
-            config_cache_entry if config_ops else None,
+            agent, metrics_ops, config_ops, message_id, config_cache_entry
         )
 
     def _build_metrics_update(self, agent: Agent) -> tuple:
@@ -481,6 +479,10 @@ class MongoDBSessionManager(RepositorySessionManager):
         if not message_operations and not agent_operations:
             return
 
+        # Their only producer, _metrics_set_operations(), returns both or
+        # neither, so the second half is unreachable today. It stays as a cheap
+        # guard: message keys without an id would write a positional path with
+        # no positional clause, which MongoDB rejects with an opaque error.
         if message_operations and message_id is not None:
             matched = self.session_repository.update_message_fields(
                 self.session_id,

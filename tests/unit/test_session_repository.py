@@ -1006,8 +1006,12 @@ class TestUpdateMessageFields:
     def test_touch_timestamps_refreshes_the_three_levels(
         self, mock_repository, mock_mongo_collection
     ):
-        """Una redacción sí es un cambio visible de la sesión."""
-        mock_repository.update_message_fields(
+        """Una redacción sí es un cambio visible de la sesión.
+
+        El flag vive solo en el primitivo privado: ningún llamante externo tiene
+        por qué decidir si una escritura mueve el reloj de la sesión.
+        """
+        mock_repository._update_message_document(
             "s1", "a1", 1, {"message": {}}, touch_timestamps=True
         )
 
