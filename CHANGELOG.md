@@ -1,5 +1,9 @@
 # Changelog
 
+## [2026-09-16] PR #77 - Chore: subir pymongo, uvicorn, pytest-cov, pydantic-settings y strands-agents-tools (@iguinea)
+
+- Chore: subir pymongo, uvicorn, pytest-cov, pydantic-settings y las tools
+
 ## [2026-09-16] PR #70 - Chore: aplicar los PRs de dependabot y arreglar los permisos del CI (@iguinea)
 
 - Fix: conceder security-events al job security del CI
