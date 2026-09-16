@@ -16,7 +16,8 @@ kinder than the real thing lies:
   has none, and falls back to `message_id`, where a duplicate matches only its
   first occurrence.
 - `update_agent()` writes field by field, so it does not wipe the config the
-  manager keeps under `agent_data` (see issue #65).
+  manager keeps under `agent_data` (see issue #65), and skips an agent whose
+  content is what it last read or wrote, with the same rule (#67).
 
 Names MongoDB would read as syntax -- an `agent_id` with a dot, a segment
 starting with `$`, an empty one -- are rejected here exactly as there, with the
@@ -40,6 +41,7 @@ from typing import Any
 from strands.session.session_repository import SessionRepository
 from strands.types.session import Session, SessionAgent, SessionMessage
 
+from mongodb_session_manager.agent_content import LastPersistedAgents
 from mongodb_session_manager.field_names import (
     validate_agent_id,
     validate_field_paths,
@@ -98,6 +100,7 @@ class InMemorySessionRepository(SessionRepository):
         self.application_name = application_name
         self._sessions: dict[str, dict[str, Any]] = {}
         self._last_read_agent_config: dict[tuple[str, str], dict[str, Any]] = {}
+        self._persisted_agents = LastPersistedAgents()
 
     # -- Test helpers ------------------------------------------------------
 
@@ -218,6 +221,7 @@ class InMemorySessionRepository(SessionRepository):
             "updated_at": now,
         }
         session["updated_at"] = now
+        self._persisted_agents.remember(session_id, session_agent)
 
     def read_agent(
         self, session_id: str, agent_id: str, **kwargs: Any
@@ -225,12 +229,14 @@ class InMemorySessionRepository(SessionRepository):
         """Read an agent, remembering its stored config for the manager."""
         agent = self._agent(session_id, agent_id)
         if agent is None:
+            self._persisted_agents.forget(session_id, agent_id)
             return None
 
         agent_data = agent["agent_data"]
         session_agent = SessionAgent(
             **copy.deepcopy(MongoDBSessionRepository._filter_agent_data(agent_data))
         )
+        self._persisted_agents.remember(session_id, session_agent)
         self._last_read_agent_config = {
             (session_id, agent_id): {
                 "model": agent_data.get("model"),
@@ -248,7 +254,15 @@ class InMemorySessionRepository(SessionRepository):
     def update_agent(
         self, session_id: str, session_agent: SessionAgent, **kwargs: Any
     ) -> None:
-        """Update an agent field by field, preserving the manager's config."""
+        """Update an agent field by field, preserving the manager's config.
+
+        Skipped, like on MongoDB, when the content is what was last read or
+        written: after the agent_id check, before the session is looked up.
+        """
+        validate_agent_id(session_agent.agent_id)
+        if self._persisted_agents.unchanged(session_id, session_agent):
+            return
+
         agent = self._agent(session_id, session_agent.agent_id)
         if agent is None:
             raise ValueError(f"Session {session_id} not found")
@@ -268,6 +282,7 @@ class InMemorySessionRepository(SessionRepository):
             agent["agent_data"][name] = copy.deepcopy(value)
         agent["updated_at"] = now
         self._sessions[session_id]["updated_at"] = now
+        self._persisted_agents.remember(session_id, session_agent)
 
     # -- Message -----------------------------------------------------------
 

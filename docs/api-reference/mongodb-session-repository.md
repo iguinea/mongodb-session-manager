@@ -381,6 +381,10 @@ Update an existing agent, preserving timestamps and the stored agent config.
 
 Each `SessionAgent` field is written on its own path (`agents.<agent_id>.agent_data.<field>`), so the `model`, `system_prompt` and `prompt_metadata` that the session manager stores in `agent_data` survive the update. Every field is still replaced whole: keys removed from the agent state disappear. The agent's `created_at` is left untouched, and `updated_at` is set to the current time on the agent and at the session root.
 
+**An unchanged agent is not written** ([#67](https://github.com/iguinea/mongodb-session-manager/issues/67)). The repository remembers the content of every agent it reads (`read_agent`), creates (`create_agent`) or successfully updates, for the last session it touched (one repository per session manager, as the factory builds them, never needs more). When `update_agent` receives an agent whose fields, `created_at` and `updated_at` aside, are equal to that content, it returns without a round-trip: nothing in the document changes, no `updated_at` is refreshed, and a missing session is not reported. Strands sends exactly that on the first sync of every session manager and after every tool run, where it bumps the interrupt state's version without changing its content; in the reference turn (supervisor, sub-agent and one tool) it saves 3 of 13 writes.
+
+The comparison is on content, not on versions, so no change is lost however the agent got there: `agent.state.set()`, a hook that replaces `agent.state` whole, or a conversation manager that migrates its state on restore are all written. Fields a newer Strands adds are compared too. What the repository cannot see is a write that did not go through it — another process, or `update_agent_fields` on an SDK field — and an agent that has not changed will not overwrite it. A write that raises or matches no session is not remembered, so the next sync retries it.
+
 #### Parameters
 
 - **session_id** (`str`): ID of the session containing the agent.
@@ -391,7 +395,7 @@ Each `SessionAgent` field is written on its own path (`agents.<agent_id>.agent_d
 
 #### Raises
 
-- `ValueError`: If the session does not exist.
+- `ValueError`: If the session does not exist and the agent has changed.
 - `PyMongoError`: If the database operation fails.
 
 #### Example

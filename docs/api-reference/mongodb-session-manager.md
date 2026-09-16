@@ -257,7 +257,7 @@ def sync_agent(self, agent: Agent, **kwargs: Any) -> None
 Synchronize agent data and automatically capture event loop metrics and agent configuration.
 
 This method performs three key operations:
-1. Saves the current agent state to MongoDB
+1. Saves the current agent state to MongoDB, when it differs from what the repository last read or wrote for that agent (see [`update_agent`](mongodb-session-repository.md#update_agent))
 2. Captures and persists agent configuration (model, system_prompt)
 3. Captures and stores event loop metrics (latency, token usage) from the agent's most recent interaction
 

@@ -18,7 +18,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from pymongo.errors import PyMongoError
-from strands.types.session import SessionMessage
+from strands.interrupt import _InterruptState
+from strands.types.session import SessionAgent, SessionMessage
 
 from mongodb_session_manager.message_identity import MessageRef, attach_storage_id
 from mongodb_session_manager.mongodb_session_manager import MongoDBSessionManager
@@ -224,6 +225,84 @@ class TestUpdateAgentDoesNotRead:
         set_keys = collection.update_one.call_args[0][1]["$set"].keys()
         agent_id = sample_session_agent.agent_id
         assert f"agents.{agent_id}.created_at" not in set_keys
+
+
+# ---------------------------------------------------------------------------
+# 3b. update_agent: un agente sin cambios no viaja (issue #67)
+# ---------------------------------------------------------------------------
+
+
+def repository_with_stored_agent():
+    """Repositorio sobre un cliente falso que ya ha leído el agente a1 con state {}.
+
+    Devuelve (repositorio, colección), con los contadores a cero.
+    """
+    client, collection = make_client()
+    with patch.object(MongoDBSessionRepository, "_ensure_indexes"):
+        repo = MongoDBSessionRepository(
+            client=client, database_name="db", collection_name="coll"
+        )
+    collection.find_one.return_value = {
+        "agents": {
+            "a1": {
+                "agent_data": {
+                    "agent_id": "a1",
+                    "state": {},
+                    "conversation_manager_state": {},
+                    "_internal_state": {},
+                }
+            }
+        }
+    }
+    repo.read_agent("s1", "a1")
+    collection.reset_mock()
+    return repo, collection
+
+
+class TestUpdateAgentSkipsUnchangedContent:
+    def test_unchanged_agent_costs_no_round_trip(self):
+        """El primer sync de cada manager reescribía lo que acababa de leer."""
+        repo, collection = repository_with_stored_agent()
+
+        repo.update_agent("s1", SessionAgent("a1", {}, {}))
+
+        assert collection.update_one.call_count == 0
+
+    def test_a_failed_write_is_not_remembered(self):
+        """Si la escritura lanza, lo persistido sigue siendo lo leído: se reintenta."""
+        repo, collection = repository_with_stored_agent()
+        changed = SessionAgent("a1", {"k": "v"}, {})
+        collection.update_one.side_effect = PyMongoError("boom")
+        with pytest.raises(PyMongoError):
+            repo.update_agent("s1", changed)
+
+        collection.update_one.side_effect = None
+        repo.update_agent("s1", changed)
+
+        assert collection.update_one.call_count == 2
+
+    def test_an_unmatched_write_is_not_remembered(self):
+        """Sin documento no hay nada persistido que recordar: se reintenta."""
+        repo, collection = repository_with_stored_agent()
+        changed = SessionAgent("a1", {"k": "v"}, {})
+        collection.update_one.return_value = MagicMock(matched_count=0)
+        with pytest.raises(ValueError, match="not found"):
+            repo.update_agent("s1", changed)
+
+        collection.update_one.return_value = MagicMock(matched_count=1)
+        repo.update_agent("s1", changed)
+
+        assert collection.update_one.call_count == 2
+
+    def test_an_agent_no_longer_found_is_forgotten(self):
+        """Si otra lectura ya no lo encuentra, no se da nada por persistido."""
+        repo, collection = repository_with_stored_agent()
+        collection.find_one.return_value = {"agents": {}}
+        assert repo.read_agent("s1", "a1") is None
+
+        repo.update_agent("s1", SessionAgent("a1", {}, {}))
+
+        assert collection.update_one.call_count == 1
 
 
 # ---------------------------------------------------------------------------
@@ -481,12 +560,17 @@ class TestRootUpdatedAtInvariant:
 
 
 def persisted_agent():
-    """Agente guardado en un turno anterior, con su configuración y dos mensajes."""
+    """Agente guardado en un turno anterior, con su configuración y dos mensajes.
+
+    Lleva el `_internal_state` que Strands escribe, para que el agente
+    restaurado sea, campo a campo, el mismo que se leyó (#67).
+    """
     return {
         "agent_data": {
             "agent_id": "a1",
             "state": {},
             "conversation_manager_state": {},
+            "_internal_state": {"interrupt_state": _InterruptState().to_dict()},
             "model": "m1",
             "system_prompt": "p1",
         },
@@ -517,6 +601,9 @@ def restored_manager(mock_agent, stored_agents, system_prompt="p1"):
     agent = mock_agent(
         agent_id="a1", latency_ms=0, model_id="m1", system_prompt=system_prompt
     )
+    # Real, not a mock: update_agent() compares what the agent would write with
+    # what was read, and a MagicMock only ever equals itself.
+    agent._interrupt_state = _InterruptState()
     agent.conversation_manager.restore_from_session.return_value = None
     agent.conversation_manager.removed_message_count = 0
     agent.conversation_manager.get_state.return_value = {}
@@ -587,17 +674,18 @@ class TestAgentConfigHydratedOnRestore:
 
 class TestTurnWriteBudget:
     def test_warm_turn_stays_within_budget(self, mock_agent):
-        """Un turno de 4 mensajes sobre una sesión existente: 9 escrituras.
+        """Un turno de 4 mensajes sobre una sesión existente: 8 escrituras.
 
         Es el turno de referencia: un manager por request sobre una sesión que
-        ya existe. Presupuesto de 9:
+        ya existe. Presupuesto de 8:
           4  create_message ($push, uno por mensaje)
-          1  update_agent (primer sync del manager)
           4  métricas (del segundo mensaje en adelante, más el cierre)
 
         La configuración no se escribe: el agente se restaura con la misma que
         ya estaba persistida (issue #65). Antes costaba una escritura más, y
-        era la mayor del turno.
+        era la mayor del turno. El estado tampoco: el primer sync del manager
+        lleva justo lo que read_agent() acaba de leer (issue #67), y antes
+        costaba otra.
         """
         mgr, agent, collection = restored_manager(mock_agent, {"a1": persisted_agent()})
 
@@ -616,7 +704,7 @@ class TestTurnWriteBudget:
 
         updates = collection.update_one.call_count
         finds = collection.find_one.call_count
-        assert updates <= 9, f"{updates} updates en un turno caliente de 4 mensajes"
+        assert updates <= 8, f"{updates} updates en un turno caliente de 4 mensajes"
         assert finds == 0, f"{finds} finds evitables en el camino caliente"
 
     def test_turn_with_tool_call_stays_within_budget(self, mock_agent):

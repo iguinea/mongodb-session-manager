@@ -12,6 +12,7 @@ implementation can drift without a red test on the other side.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 
@@ -21,8 +22,21 @@ from strands.types.session import Session, SessionAgent, SessionMessage, Session
 from mongodb_session_manager.message_identity import MessageRef, ref_of, storage_id_of
 
 
-def _agent(agent_id: str) -> SessionAgent:
-    return SessionAgent(agent_id=agent_id, state={}, conversation_manager_state={})
+def _agent(agent_id: str, state: dict[str, Any] | None = None) -> SessionAgent:
+    return SessionAgent(
+        agent_id=agent_id, state=state or {}, conversation_manager_state={}
+    )
+
+
+def _resynced(read: SessionAgent) -> SessionAgent:
+    """Rebuild a read agent the way Strands' sync does: same dicts, fresh timestamps.
+
+    The dicts are shared on purpose, as they are in the live Agent. The read
+    SessionAgent itself cannot be passed back: its timestamps come out of the
+    store as datetimes, and update_agent() expects the ISO strings Strands sends.
+    """
+    now = datetime.now(UTC).isoformat()
+    return replace(read, created_at=now, updated_at=now)
 
 
 def _message(message_id: int = 0) -> SessionMessage:
@@ -301,6 +315,62 @@ class SessionRepositoryContract:
             store.update_message_fields(populated, "ghost", MessageRef(0), {"x": 1})
             is False
         )
+
+    # -- update_agent: an unchanged agent is not rewritten (#67) -----------
+
+    def test_update_agent_with_the_created_content_writes_nothing(
+        self, store, populated
+    ):
+        """The first sync of a new agent carries what create_agent() stored.
+
+        Nothing moves, updated_at included: a skipped write is not a write.
+        """
+        before = self._raw_session(store, populated)
+
+        store.update_agent(populated, _agent("a1"))
+
+        assert self._raw_session(store, populated) == before
+
+    def test_update_agent_with_the_read_content_writes_nothing(self, store, populated):
+        """The first sync of a restored agent carries what read_agent() returned."""
+        read = store.read_agent(populated, "a1")
+        before = self._raw_session(store, populated)
+
+        store.update_agent(populated, _resynced(read))
+
+        assert self._raw_session(store, populated) == before
+
+    def test_update_agent_writes_a_changed_agent(self, store, populated):
+        store.update_agent(populated, _agent("a1", state={"k": "v"}))
+
+        assert self._stored_agent_state(store, populated) == {"k": "v"}
+
+    def test_update_agent_compares_with_the_last_write(self, store, populated):
+        """Going back to the created content is a change once something else was written."""
+        store.update_agent(populated, _agent("a1", state={"k": "v"}))
+
+        store.update_agent(populated, _agent("a1"))
+
+        assert self._stored_agent_state(store, populated) == {}
+
+    def test_a_read_agent_mutated_in_place_is_written(self, store, populated):
+        """What is remembered is a copy, not the dicts Strands keeps live."""
+        read = store.read_agent(populated, "a1")
+        read.state["k"] = "v"
+
+        store.update_agent(populated, _resynced(read))
+
+        assert self._stored_agent_state(store, populated) == {"k": "v"}
+
+    def test_update_agent_without_session_still_raises(self, store, populated):
+        """What is remembered belongs to one session: another one is not found."""
+        with pytest.raises(ValueError, match="not found"):
+            store.update_agent("nope", _agent("a1"))
+
+    def _stored_agent_state(self, store, session_id: str) -> dict[str, Any]:
+        return self._raw_session(store, session_id)["agents"]["a1"]["agent_data"][
+            "state"
+        ]
 
     # -- record_guardrail_event -------------------------------------------
 

@@ -437,7 +437,7 @@ Agents are stored in an object (not array) keyed by `agent_id`:
 **Purpose**: Complete agent configuration and state
 **Format**: Defined by Strands SDK, except `model`, `system_prompt` and `prompt_metadata`
 
-**Update semantics**: `update_agent()` writes each SDK field on its own path (`agents.<id>.agent_data.<field>`), so the session manager's `model`, `system_prompt` and `prompt_metadata` survive every SDK sync. Each SDK field is still replaced whole: keys removed from `state` disappear from the document. `read_agent()` hands the SDK fields to Strands and keeps `model` and `system_prompt` for the session manager, which uses them to avoid rewriting an unchanged config.
+**Update semantics**: `update_agent()` writes each SDK field on its own path (`agents.<id>.agent_data.<field>`), so the session manager's `model`, `system_prompt` and `prompt_metadata` survive every SDK sync. Each SDK field is still replaced whole: keys removed from `state` disappear from the document. `read_agent()` hands the SDK fields to Strands and keeps `model` and `system_prompt` for the session manager, which uses them to avoid rewriting an unchanged config. An agent whose SDK fields are what the repository last read or wrote is not written at all ([#67](https://github.com/iguinea/mongodb-session-manager/issues/67)); see [`update_agent`](../api-reference/mongodb-session-repository.md#update_agent).
 
 **Key Subfields**:
 - `agent_id`: Unique identifier for this agent
@@ -446,7 +446,7 @@ Agents are stored in an object (not array) keyed by `agent_id`:
 - `prompt_metadata`: Prompt lineage data (prompt_id, prompt_name, prompt_version, deployment_id, deployment_name). Optional, set via `set_prompt_metadata()` or `update_agent_config()`.
 - `state`: Key-value store for agent state
 - `conversation_manager_state`: Internal SDK state
-- `created_at`, `updated_at`: Timestamps in ISO string format (from SDK)
+- `created_at`, `updated_at`: Timestamps stamped by the SDK on every `SessionAgent` it builds, so both record when the agent's state was last written, not when it was created or last used. Since [#67](https://github.com/iguinea/mongodb-session-manager/issues/67) they only move when the state, the conversation manager state or the internal state changes. For activity, read `agents.<id>.updated_at` or the root `updated_at`, which every message refreshes
 
 **State Object**:
 The `state` object is a flexible key-value store where agents can persist any data:
