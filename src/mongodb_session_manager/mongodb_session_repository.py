@@ -547,6 +547,34 @@ class MongoDBSessionRepository(SessionRepository):
             logger.error(f"Failed to read message {message_id}: {e}")
             raise
 
+    def _missing_message_error(
+        self, session_id: str, agent_id: str, message_id: int
+    ) -> ValueError:
+        """Say which of session, agent or message is missing after a no-match.
+
+        The compound filter of update_message() cannot tell them apart, and
+        reporting a missing message when the agent does not even exist would be
+        a misleading diagnostic.
+
+        Existence is checked with counts, not with find_one: projecting
+        agents.<id> would pull the agent subdocument with its whole messages
+        array, which is the very read this method's caller exists to avoid.
+        These are bounded by _id equality and limit=1, so they cost the same on
+        a session of three messages and on one of three thousand. They only ever
+        run on the path that is already raising.
+        """
+        if self.collection.count_documents({"_id": session_id}, limit=1) == 0:
+            return ValueError(f"Session {session_id} not found")
+
+        agent_filter = {"_id": session_id, f"agents.{agent_id}": {"$exists": True}}
+        if self.collection.count_documents(agent_filter, limit=1) == 0:
+            return ValueError(f"Agent {agent_id} not found in session {session_id}")
+
+        return ValueError(
+            f"Message {message_id} not found in agent {agent_id} "
+            f"of session {session_id}"
+        )
+
     def update_message(
         self,
         session_id: str,
@@ -554,50 +582,47 @@ class MongoDBSessionRepository(SessionRepository):
         session_message: SessionMessage,
         **kwargs: Any,
     ) -> None:
-        """Update a Message (usually for redaction)."""
+        """Update a Message (usually for redaction).
 
-        message_data = session_message.__dict__.copy()
+        The message is located by message_id with the positional operator, so
+        the happy path is a single write: the whole history no longer has to be
+        read to compute an index in the client.
+
+        Only `message` and `redact_message` are written, each on its own path.
+        Setting the message subdocument as a whole would replace it and wipe the
+        fields the session manager keeps there but SessionMessage does not carry
+        (event_loop_metrics, guardrail_event). They are listed by hand on
+        purpose: deriving them from SessionMessage.__dict__ would let a new SDK
+        field into the schema without review. created_at is never named, and an
+        update that does not name it leaves it alone, keeping value and type.
+
+        Note that message_id is not a unique key -- Strands derives it in memory
+        -- so a duplicated id matches its first occurrence only. See issue #78.
+        """
+        now = datetime.now(UTC)
+        message_prefix = f"agents.{agent_id}.messages.$"
+
+        set_operations: dict[str, Any] = {
+            f"{message_prefix}.message": session_message.message,
+            f"{message_prefix}.redact_message": session_message.redact_message,
+            f"{message_prefix}.updated_at": now,
+            f"agents.{agent_id}.updated_at": now,
+            "updated_at": now,
+        }
 
         try:
-            # First, get the current messages to find the index
-            doc = self.collection.find_one(
-                {"_id": session_id}, {f"agents.{agent_id}.messages": 1}
-            )
-
-            if not self._agent_exists(doc, agent_id):
-                raise ValueError(f"Agent {agent_id} not found in session {session_id}")
-
-            messages = doc["agents"][agent_id].get("messages", [])
-
-            # Find the message index
-            message_index = -1
-            for i, msg in enumerate(messages):
-                if msg.get("message_id") == session_message.message_id:
-                    message_index = i
-                    # Preserve created_at timestamp
-                    message_data["created_at"] = msg.get(
-                        "created_at", datetime.now(UTC)
-                    )
-                    message_data["updated_at"] = datetime.now(UTC)
-                    break
-
-            if message_index == -1:
-                raise ValueError(f"Message {session_message.message_id} not found")
-
-            # Update the specific message
             result = self.collection.update_one(
-                {"_id": session_id},
                 {
-                    "$set": {
-                        f"agents.{agent_id}.messages.{message_index}": message_data,
-                        f"agents.{agent_id}.updated_at": datetime.now(UTC),
-                        "updated_at": datetime.now(UTC),
-                    }
+                    "_id": session_id,
+                    f"agents.{agent_id}.messages.message_id": session_message.message_id,
                 },
+                {"$set": set_operations},
             )
 
             if result.matched_count == 0:
-                raise ValueError(f"Session {session_id} not found")
+                raise self._missing_message_error(
+                    session_id, agent_id, session_message.message_id
+                )
 
             logger.info(
                 f"Updated message {session_message.message_id} for agent {agent_id}"
@@ -627,8 +652,15 @@ class MongoDBSessionRepository(SessionRepository):
 
             messages = doc["agents"][agent_id].get("messages", [])
 
-            # Sort messages by created_at (oldest first - chronological order)
-            messages.sort(key=lambda x: x.get("created_at", ""), reverse=False)
+            # Sort by created_at, oldest first. Messages without the field sort
+            # last as a group and are never compared against a datetime: mixing
+            # the two raises TypeError, which would leave the whole agent
+            # unlistable. create_message() always writes it, but documents
+            # written out of band may not have it, and update_message() no
+            # longer backfills it.
+            messages.sort(
+                key=lambda x: (x.get("created_at") is None, x.get("created_at") or 0)
+            )
 
             # Apply pagination
             if limit is not None:

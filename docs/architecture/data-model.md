@@ -701,31 +701,34 @@ def create_message(self, session_id, agent_id, session_message, **kwargs):
 #### Update Message (Redaction)
 ```python
 def update_message(self, session_id, agent_id, session_message, **kwargs):
-    # Find message index in array
-    messages = # ... fetch messages ...
-    for i, msg in enumerate(messages):
-        if msg.get("message_id") == session_message.message_id:
-            message_index = i
-            # Preserve created_at
-            message_data["created_at"] = msg.get("created_at")
-            message_data["updated_at"] = datetime.now(UTC)
-            break
+    now = datetime.now(UTC)
+    message_prefix = f"agents.{agent_id}.messages.$"
 
-    # Update specific message
+    # The fields are listed by hand on purpose: deriving them from
+    # SessionMessage.__dict__ would let a new SDK field into the schema.
+    set_operations = {
+        f"{message_prefix}.message": session_message.message,
+        f"{message_prefix}.redact_message": session_message.redact_message,
+        f"{message_prefix}.updated_at": now,
+        f"agents.{agent_id}.updated_at": now,
+        "updated_at": now,
+    }
+
     self.collection.update_one(
-        {"_id": session_id},
+        # The positional $ resolves to the array element matched in the query.
         {
-            "$set": {
-                f"agents.{agent_id}.messages.{message_index}": message_data,
-                f"agents.{agent_id}.updated_at": datetime.now(UTC),
-                "updated_at": datetime.now(UTC),
-            }
+            "_id": session_id,
+            f"agents.{agent_id}.messages.message_id": session_message.message_id,
         },
+        {"$set": set_operations},
     )
 ```
 
-**Operation**: `$set` with array index
-**Timestamp Preservation**: `created_at` preserved, `updated_at` refreshed
+**Operation**: `$set` with the positional operator `$`, one path per field
+**Reads**: none — the message is located server-side instead of by an index computed in the client
+**Field Preservation**: `event_loop_metrics` and `guardrail_event` survive the redaction; a `$set` of the whole subdocument replaced it and wiped them
+**Timestamp Preservation**: `created_at` is never named, so it keeps both its value and its type; `updated_at` is refreshed
+**Caveat**: `message_id` is not a unique key (Strands derives it in memory), so a duplicated id matches its first occurrence only — see issue #78
 
 #### List Messages
 ```python

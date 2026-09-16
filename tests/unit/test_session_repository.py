@@ -467,40 +467,167 @@ class TestMessageOperations:
         result = mock_repository.read_message("s1", "a1", 1)
         assert result is not None
 
-    def test_update_message(self, mock_repository, mock_mongo_collection):
-        mock_mongo_collection.find_one.return_value = {
-            "agents": {
-                "a1": {
-                    "messages": [
-                        {
-                            "message_id": 1,
-                            "message": {"role": "user", "content": [{"text": "old"}]},
-                            "created_at": datetime.now(UTC),
-                            "updated_at": datetime.now(UTC),
-                        }
-                    ]
-                }
-            }
-        }
+    def test_update_message(
+        self, mock_repository, mock_mongo_collection, sample_session_message
+    ):
+        mock_repository.update_message("s1", "a1", sample_session_message)
+        assert mock_mongo_collection.update_one.call_count == 1
+
+    def test_update_message_does_not_read_first(
+        self, mock_repository, mock_mongo_collection, sample_session_message
+    ):
+        """El mensaje se localiza en el servidor, sin leer el historial.
+
+        Leer el array para calcular el índice costaba un round-trip por
+        redacción y ataba la escritura a una posición que solo es válida
+        mientras nadie reordene el array.
+        """
+        mock_repository.update_message("s1", "a1", sample_session_message)
+        assert mock_mongo_collection.find_one.call_count == 0
+
+    def test_update_message_matches_by_message_id(
+        self, mock_repository, mock_mongo_collection
+    ):
         msg = SessionMessage(
-            message_id=1,
+            message_id=7,
             message={"role": "user", "content": [{"text": "redacted"}]},
         )
         mock_repository.update_message("s1", "a1", msg)
-        assert mock_mongo_collection.update_one.called
+
+        query = mock_mongo_collection.update_one.call_args[0][0]
+        assert query["_id"] == "s1"
+        assert query["agents.a1.messages.message_id"] == 7
+
+    def test_update_message_uses_positional_paths(
+        self, mock_repository, mock_mongo_collection, sample_session_message
+    ):
+        """Cada campo va por su ruta posicional, nunca por un índice."""
+        mock_repository.update_message("s1", "a1", sample_session_message)
+
+        set_data = mock_mongo_collection.update_one.call_args[0][1]["$set"]
+        message_keys = [k for k in set_data if k.startswith("agents.a1.messages.")]
+        assert message_keys
+        for key in message_keys:
+            assert key.startswith("agents.a1.messages.$.")
+        assert (
+            set_data["agents.a1.messages.$.message"] == sample_session_message.message
+        )
+        # created_at pertenece a create_message; message_id es la clave de filtro.
+        assert "agents.a1.messages.$.created_at" not in set_data
+        assert "agents.a1.messages.$.message_id" not in set_data
+
+    def test_update_message_ignores_unknown_attributes(
+        self, mock_repository, mock_mongo_collection, sample_session_message
+    ):
+        """Solo se escriben los campos listados, no lo que traiga el objeto.
+
+        SessionMessage no usa slots: un atributo suelto —o un campo nuevo del
+        SDK— no puede entrar en el esquema sin una decisión consciente, y menos
+        aún pisar los campos de extensión que este método debe preservar.
+        """
+        setattr(  # noqa: B010
+            sample_session_message, "event_loop_metrics", {"should": "not be written"}
+        )
+
+        mock_repository.update_message("s1", "a1", sample_session_message)
+
+        set_data = mock_mongo_collection.update_one.call_args[0][1]["$set"]
+        assert "agents.a1.messages.$.event_loop_metrics" not in set_data
 
     def test_update_message_raises_when_not_found(
         self, mock_repository, mock_mongo_collection
     ):
-        mock_mongo_collection.find_one.return_value = {
-            "agents": {"a1": {"messages": []}}
-        }
+        mock_mongo_collection.update_one.return_value = MagicMock(
+            matched_count=0, modified_count=0
+        )
+        # El diagnóstico comprueba existencia: sesión y agente están, el mensaje no.
+        mock_mongo_collection.count_documents.return_value = 1
         msg = SessionMessage(
             message_id=99,
             message={"role": "user", "content": [{"text": "x"}]},
         )
         with pytest.raises(ValueError, match="Message 99 not found"):
             mock_repository.update_message("s1", "a1", msg)
+
+    def test_update_message_names_the_missing_agent(
+        self, mock_repository, mock_mongo_collection, sample_session_message
+    ):
+        """Un agente ausente no puede reportarse como «mensaje no encontrado».
+
+        El filtro compuesto deja los tres casos sin casar, así que el camino de
+        error comprueba existencia para dar el diagnóstico correcto.
+        """
+        mock_mongo_collection.update_one.return_value = MagicMock(
+            matched_count=0, modified_count=0
+        )
+        # La sesión existe; el agente no.
+        mock_mongo_collection.count_documents.side_effect = [1, 0]
+
+        with pytest.raises(ValueError, match="Agent a1 not found in session s1"):
+            mock_repository.update_message("s1", "a1", sample_session_message)
+
+    def test_update_message_diagnosis_does_not_read_the_history(
+        self, mock_repository, mock_mongo_collection, sample_session_message
+    ):
+        """El diagnóstico no puede releer el historial que este método evita.
+
+        Proyectar `agents.<id>` traería el subdocumento del agente entero, con
+        su array de mensajes: justo la lectura que el cambio elimina.
+        """
+        mock_mongo_collection.update_one.return_value = MagicMock(
+            matched_count=0, modified_count=0
+        )
+        mock_mongo_collection.count_documents.return_value = 1
+
+        with pytest.raises(ValueError):
+            mock_repository.update_message("s1", "a1", sample_session_message)
+
+        assert mock_mongo_collection.find_one.call_count == 0
+        for call in mock_mongo_collection.count_documents.call_args_list:
+            assert call.kwargs.get("limit") == 1
+
+    def test_update_message_names_the_missing_session(
+        self, mock_repository, mock_mongo_collection, sample_session_message
+    ):
+        mock_mongo_collection.update_one.return_value = MagicMock(
+            matched_count=0, modified_count=0
+        )
+        mock_mongo_collection.count_documents.return_value = 0
+
+        with pytest.raises(ValueError, match="Session s1 not found"):
+            mock_repository.update_message("s1", "a1", sample_session_message)
+
+    def test_list_messages_tolerates_missing_created_at(
+        self, mock_repository, mock_mongo_collection
+    ):
+        """Un mensaje sin created_at no puede dejar al agente sin listar.
+
+        Ordenar mezclando `datetime` con el `""` por defecto lanza TypeError.
+        Antes lo tapaba que cada redacción reescribiera `created_at`; desde que
+        update_message() deja de reescribirlo, nada lo repara.
+        """
+        mock_mongo_collection.find_one.return_value = {
+            "agents": {
+                "a1": {
+                    "messages": [
+                        {
+                            "message_id": 2,
+                            "message": {"role": "user", "content": [{"text": "b"}]},
+                            "created_at": datetime.now(UTC),
+                        },
+                        {
+                            "message_id": 1,
+                            "message": {"role": "user", "content": [{"text": "a"}]},
+                        },
+                    ]
+                }
+            }
+        }
+
+        result = mock_repository.list_messages("s1", "a1")
+
+        # El que no tiene timestamp va al final, pero se lista.
+        assert [m.message_id for m in result] == [2, 1]
 
     def test_list_messages_returns_list(self, mock_repository, mock_mongo_collection):
         mock_mongo_collection.find_one.return_value = {
@@ -695,23 +822,6 @@ class TestGuardrailEventFiltering:
     def test_update_message_with_redact_message(
         self, mock_repository, mock_mongo_collection
     ):
-        mock_mongo_collection.find_one.return_value = {
-            "agents": {
-                "a1": {
-                    "messages": [
-                        {
-                            "message_id": 1,
-                            "message": {
-                                "role": "user",
-                                "content": [{"text": "original"}],
-                            },
-                            "created_at": datetime.now(UTC),
-                            "updated_at": datetime.now(UTC),
-                        }
-                    ]
-                }
-            }
-        }
         msg = SessionMessage(
             message_id=1,
             message={"role": "user", "content": [{"text": "original"}]},
@@ -719,10 +829,8 @@ class TestGuardrailEventFiltering:
         )
         mock_repository.update_message("s1", "a1", msg)
         assert mock_mongo_collection.update_one.called
-        update_call = mock_mongo_collection.update_one.call_args
-        set_data = update_call[0][1]["$set"]
-        msg_key = "agents.a1.messages.0"
-        assert set_data[msg_key]["redact_message"] == {
+        set_data = mock_mongo_collection.update_one.call_args[0][1]["$set"]
+        assert set_data["agents.a1.messages.$.redact_message"] == {
             "role": "user",
             "content": [{"text": "***"}],
         }
