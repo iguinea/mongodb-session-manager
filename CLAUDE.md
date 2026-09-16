@@ -59,6 +59,7 @@ cd playground/chat && make frontend                   # Port 8881
    - `update_message_fields()` / `update_agent_fields()`: take keys relative to the message or the agent, and own the dot-notation paths. The agent config rides along with the metrics in a single write
    - `record_guardrail_event()`: derives the session-level event from the message one, minus the full `GuardrailTrace`
    - Domain reads: `get_agent_config()`, `list_agent_configs()`, `count_messages()`, `get_last_message_ref()`
+   - Restore reads use narrow projections: `read_session()` fetches only the four `Session` header fields and `read_agent()` only `agent_data`; `list_messages()` is the single read that transfers history. It still sorts by `created_at` before applying `offset`, so it must not be replaced with a server-side `$slice` without changing that contract (#57)
    - `pop_read_agent_config()`: hands over, once, the config found by the last `read_agent()`. Public because `initialize()` calls it — a method reached from another class is interface, underscore or not
    - `update_agent()` writes each `SessionAgent` field on its own path, so the manager's config fields in `agent_data` survive
    - `update_agent()` does not write an agent whose content (every `SessionAgent` field but `created_at`/`updated_at`) is what this repository last read, created or wrote: `agent_content.LastPersistedAgents`, shared with the in-memory double. It compares content, not Strands' versions, so a hook that replaces `agent.state` is still written. Saves the first sync of every manager and the post-tool sync (13 → 10 per reference turn) (#67)
@@ -198,7 +199,7 @@ When releasing, update version in **three places**:
 2. `pyproject.toml` (`version`)
 3. `CHANGELOG.md` (add release entry)
 
-Current version: **0.15.0**
+Current version: **0.16.0**
 
 ## Workflow Rules
 

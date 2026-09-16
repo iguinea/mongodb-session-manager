@@ -1,13 +1,37 @@
 """Integration tests for MongoDBSessionRepository (requires MongoDB)."""
 
 from datetime import datetime
+from typing import Any
 
 import pytest
+from pymongo import MongoClient, monitoring
 from strands.types.session import Session, SessionAgent, SessionMessage
 
 from mongodb_session_manager.mongodb_session_repository import MongoDBSessionRepository
 
 pytestmark = pytest.mark.integration
+
+
+class ProjectionRecorder(monitoring.CommandListener):
+    """Capture the projections that a real MongoDB receives in find commands."""
+
+    def __init__(self) -> None:
+        self.projections: list[dict[str, Any]] = []
+        self.enabled = False
+
+    def started(self, event: Any) -> None:
+        if self.enabled and event.command_name == "find":
+            self.projections.append(dict(event.command.get("projection", {})))
+
+    def succeeded(self, event: Any) -> None:
+        # The assertion concerns the projection sent in started(); the listener
+        # interface still requires a success callback.
+        pass
+
+    def failed(self, event: Any) -> None:
+        # A failed command has already exposed its projection in started() and
+        # the repository call propagates the error to the test.
+        pass
 
 
 @pytest.fixture
@@ -24,6 +48,23 @@ def repo(mongodb_connection, unique_session_id, cleanup_session):
     r.close()
 
 
+@pytest.fixture
+def projection_repo(mongodb_connection, unique_session_id, cleanup_session):
+    """Repository whose client records the find command sent over the wire."""
+    recorder = ProjectionRecorder()
+    client = MongoClient(mongodb_connection, event_listeners=[recorder])
+    repository = MongoDBSessionRepository(
+        client=client,
+        database_name="test_db",
+        collection_name="test_sessions",
+        application_name="integration-test",
+    )
+    cleanup_session(repository.collection, unique_session_id)
+    yield repository, recorder
+    repository.close()
+    client.close()
+
+
 # ---------------------------------------------------------------------------
 # Session lifecycle
 # ---------------------------------------------------------------------------
@@ -38,6 +79,25 @@ class TestSessionLifecycle:
         assert result is not None
         assert result.session_id == unique_session_id
         assert result.session_type == "chat"
+
+    def test_read_session_projects_only_the_header_on_mongodb(
+        self, projection_repo, unique_session_id
+    ):
+        repo, recorder = projection_repo
+        repo.create_session(Session(session_id=unique_session_id, session_type="chat"))
+        recorder.enabled = True
+
+        result = repo.read_session(unique_session_id)
+
+        assert result is not None
+        assert recorder.projections == [
+            {
+                "session_id": 1,
+                "session_type": 1,
+                "created_at": 1,
+                "updated_at": 1,
+            }
+        ]
 
     def test_password_generated(self, repo, unique_session_id):
         session = Session(session_id=unique_session_id, session_type="default")
@@ -93,6 +153,48 @@ class TestAgentLifecycle:
         result = repo.read_agent(unique_session_id, "agent-1")
         assert result is not None
         assert result.agent_id == "agent-1"
+
+    def test_read_agent_projects_agent_data_and_keeps_config_on_mongodb(
+        self, projection_repo, unique_session_id
+    ):
+        repo, recorder = projection_repo
+        repo.create_session(Session(session_id=unique_session_id, session_type="chat"))
+        repo.create_agent(
+            unique_session_id,
+            SessionAgent(
+                agent_id="agent-1",
+                state={"key": "value"},
+                conversation_manager_state={},
+            ),
+        )
+        repo.collection.update_one(
+            {"_id": unique_session_id},
+            {
+                "$set": {
+                    "agents.agent-1.agent_data.model": "model-1",
+                    "agents.agent-1.agent_data.system_prompt": "prompt-1",
+                }
+            },
+        )
+        repo.create_message(
+            unique_session_id,
+            "agent-1",
+            SessionMessage(
+                message_id=0,
+                message={"role": "user", "content": [{"text": "hello"}]},
+            ),
+        )
+        recorder.enabled = True
+
+        result = repo.read_agent(unique_session_id, "agent-1")
+
+        assert result is not None
+        assert result.state == {"key": "value"}
+        assert repo.pop_read_agent_config(unique_session_id, "agent-1") == {
+            "model": "model-1",
+            "system_prompt": "prompt-1",
+        }
+        assert recorder.projections == [{"agents.agent-1.agent_data": 1}]
 
     def test_update_preserves_created_at(self, repo, unique_session_id):
         session = Session(session_id=unique_session_id, session_type="default")

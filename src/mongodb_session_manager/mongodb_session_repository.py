@@ -389,9 +389,17 @@ class MongoDBSessionRepository(SessionRepository):
         return session
 
     def read_session(self, session_id: str, **kwargs: Any) -> Session | None:
-        """Read a Session from MongoDB."""
+        """Read a Session header from MongoDB without its embedded history."""
         try:
-            doc = self.collection.find_one({"_id": session_id})
+            doc = self.collection.find_one(
+                {"_id": session_id},
+                {
+                    "session_id": 1,
+                    "session_type": 1,
+                    "created_at": 1,
+                    "updated_at": 1,
+                },
+            )
             if not doc:
                 logger.debug(f"Session not found: {session_id}")
                 return None
@@ -457,10 +465,12 @@ class MongoDBSessionRepository(SessionRepository):
         """Read an Agent from a Session."""
         agent_path = self._agent_path(agent_id)
         try:
-            # Any narrower projection must keep agent_data.model and
-            # agent_data.system_prompt: the session manager relies on them to
-            # know which config is already persisted.
-            doc = self.collection.find_one({"_id": session_id}, {agent_path: 1})
+            # Only agent_data is restored here; list_messages() fetches the
+            # history separately. Keep model and system_prompt inside this
+            # projection: the manager uses them to seed its config cache.
+            doc = self.collection.find_one(
+                {"_id": session_id}, {f"{agent_path}.agent_data": 1}
+            )
 
             if not self._agent_exists(doc, agent_id):
                 logger.debug(f"Agent {agent_id} not found in session {session_id}")
