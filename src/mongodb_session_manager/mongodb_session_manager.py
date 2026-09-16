@@ -132,6 +132,7 @@ class MongoDBSessionManager(RepositorySessionManager):
         metadata_hook: Callable[[dict[str, Any]], None] | None = None,
         feedback_hook: Callable[[dict[str, Any]], None] | None = None,
         application_name: str | None = None,
+        session_repository: Any | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialize Itzulbira Session Manager.
@@ -146,6 +147,9 @@ class MongoDBSessionManager(RepositorySessionManager):
             metadata_hook: Hook to be called when metadata is updated, deleted or retrieved
             feedback_hook: Hook to be called when feedback is added
             application_name: Application name for session categorization (immutable after creation)
+            session_repository: Repository to store sessions in. Defaults to a
+                MongoDB one built from the arguments above; pass your own to
+                store elsewhere, or an in-memory double to test without MongoDB.
             **kwargs: Additional arguments passed to parent class and MongoClient
         """
         # Support deprecated camelCase parameter names (metadataHook, feedbackHook)
@@ -173,16 +177,19 @@ class MongoDBSessionManager(RepositorySessionManager):
             else:
                 parent_kwargs[key] = value
 
-        # Create MongoDB repository with optional client
-        self.session_repository = MongoDBSessionRepository(
-            connection_string=connection_string,
-            database_name=database_name,
-            collection_name=collection_name,
-            client=client,
-            metadata_fields=metadata_fields,
-            application_name=application_name,
-            **mongo_kwargs,
-        )
+        # Create MongoDB repository with optional client, unless one was injected
+        if session_repository is not None:
+            self.session_repository = session_repository
+        else:
+            self.session_repository = MongoDBSessionRepository(
+                connection_string=connection_string,
+                database_name=database_name,
+                collection_name=collection_name,
+                client=client,
+                metadata_fields=metadata_fields,
+                application_name=application_name,
+                **mongo_kwargs,
+            )
 
         # Initialize parent class with repository
         super().__init__(
@@ -266,44 +273,29 @@ class MongoDBSessionManager(RepositorySessionManager):
         stop_reason: str | None = None,
         guardrail_trace: dict[str, Any] | None = None,
     ) -> None:
-        """Record guardrail intervention at message and session level."""
-        now = datetime.now(UTC)
+        """Record guardrail intervention at message and session level.
+
+        Only the message-level event is built here. Deriving the session-level
+        one -- same fields, plus the identifiers, minus the full trace -- is the
+        repository's job, so that rule lives in a single place.
+        """
         policies_triggered = self._extract_guardrail_summary(guardrail_trace)
 
-        # Shared optional fields (present only when truthy)
-        optional: dict[str, Any] = {}
-        if stop_reason:
-            optional["stop_reason"] = stop_reason
-        if policies_triggered:
-            optional["policies_triggered"] = policies_triggered
-
+        # Optional fields are present only when truthy, which is what keeps a
+        # plain interception stored as just action and timestamp.
         guardrail_event: dict[str, Any] = {
             "action": action,
-            "timestamp": now,
-            **optional,
+            "timestamp": datetime.now(UTC),
         }
+        if stop_reason:
+            guardrail_event["stop_reason"] = stop_reason
+        if policies_triggered:
+            guardrail_event["policies_triggered"] = policies_triggered
         if guardrail_trace:
             guardrail_event["trace"] = guardrail_trace
 
-        session_event: dict[str, Any] = {
-            "message_id": message_id,
-            "agent_id": agent.agent_id,
-            "action": action,
-            "timestamp": now,
-            **optional,
-        }
-
-        self.session_repository.collection.update_one(
-            {
-                "_id": self.session_id,
-                f"agents.{agent.agent_id}.messages.message_id": message_id,
-            },
-            {
-                "$set": {
-                    f"agents.{agent.agent_id}.messages.$.guardrail_event": guardrail_event
-                },
-                "$push": {"guardrail_events": session_event},
-            },
+        self.session_repository.record_guardrail_event(
+            self.session_id, agent.agent_id, message_id, guardrail_event
         )
 
     # Policy extraction rules: (policy_name, list_path, format_fields)
@@ -389,7 +381,7 @@ class MongoDBSessionManager(RepositorySessionManager):
         super().sync_agent(agent, **kwargs)
 
         # Metrics and agent config land on the same session document, so they
-        # are combined into a single update_one. On DocumentDB every write costs
+        # are combined into a single write. On DocumentDB every write costs
         # 40-55 ms regardless of its size, so the number of round-trips is what
         # drives latency, not the number of bytes.
         metrics_ops, message_id = self._build_metrics_update(agent)
@@ -397,8 +389,9 @@ class MongoDBSessionManager(RepositorySessionManager):
 
         self._apply_sync_update(
             agent,
-            {**metrics_ops, **config_ops},
-            message_id if metrics_ops else None,
+            metrics_ops,
+            config_ops,
+            message_id,
             config_cache_entry if config_ops else None,
         )
 
@@ -446,50 +439,64 @@ class MongoDBSessionManager(RepositorySessionManager):
         cycle_data: dict,
         tool_usage: dict,
     ) -> tuple:
-        """Build the $set operations for the metrics of the last message."""
+        """Build the field updates for the metrics of the last message.
+
+        Keys are relative to the message document; where that message lives is
+        the repository's business.
+        """
         last_message_id = self._get_last_message_id(agent)
         if last_message_id is None:
             return {}, None
 
-        prefix = f"agents.{agent.agent_id}.messages.$.event_loop_metrics"
         return {
-            f"{prefix}.accumulated_metrics": metrics_data,
-            f"{prefix}.accumulated_usage": usage_data,
-            f"{prefix}.cycle_metrics": cycle_data,
-            f"{prefix}.tool_usage": tool_usage,
+            "event_loop_metrics.accumulated_metrics": metrics_data,
+            "event_loop_metrics.accumulated_usage": usage_data,
+            "event_loop_metrics.cycle_metrics": cycle_data,
+            "event_loop_metrics.tool_usage": tool_usage,
         }, last_message_id
 
     def _apply_sync_update(
         self,
         agent: Agent,
-        set_operations: dict,
+        message_operations: dict,
+        agent_operations: dict,
         message_id: int | None,
         config_cache_entry: tuple | None,
     ) -> None:
         """Apply the agent's sync write, if there is anything to write.
 
+        Exactly one write either way: when there are metrics the agent config
+        rides along with them, and when there are none it goes on its own. The
+        two branches are what used to be a filter built with or without the
+        positional clause.
+
         Args:
             agent: Agent being synced.
-            set_operations: Combined $set operations.
-            message_id: Message the positional operator should match, if the
-                operations target a message.
+            message_operations: Fields to write on the last message.
+            agent_operations: Fields to write on the agent itself.
+            message_id: Message the metrics belong to, when there are metrics.
             config_cache_entry: Agent config to remember as persisted, recorded
                 only once the write is known to have matched.
         """
-        if not set_operations:
+        if not message_operations and not agent_operations:
             return
 
-        query: dict[str, Any] = {"_id": self.session_id}
-        if message_id is not None:
-            query[f"agents.{agent.agent_id}.messages.message_id"] = message_id
+        if message_operations and message_id is not None:
+            matched = self.session_repository.update_message_fields(
+                self.session_id,
+                agent.agent_id,
+                message_id,
+                message_operations,
+                agent_set_operations=agent_operations or None,
+            )
+        else:
+            matched = self.session_repository.update_agent_fields(
+                self.session_id, agent.agent_id, agent_operations
+            )
 
-        result = self.session_repository.collection.update_one(
-            query, {"$set": set_operations}
-        )
-
-        if result.matched_count == 0:
+        if not matched:
             # Silent no-op otherwise: the agent config would also be lost, since
-            # both halves travel in the same update.
+            # both halves travel in the same write.
             logger.warning(
                 f"Sync update matched no document for agent {agent.agent_id} "
                 f"in session {self.session_id} (message_id={message_id})"
@@ -529,14 +536,9 @@ class MongoDBSessionManager(RepositorySessionManager):
 
         # No message tracked yet (e.g. a restored session that has not appended
         # anything in this process): fall back to reading it.
-        doc = self.session_repository.collection.find_one(
-            {"_id": self.session_id},
-            {f"agents.{agent.agent_id}.messages": {"$slice": -1}},
+        return self.session_repository.get_last_message_id(
+            self.session_id, agent.agent_id
         )
-        if not MongoDBSessionRepository._agent_exists(doc, agent.agent_id):
-            return None
-        messages = doc["agents"][agent.agent_id].get("messages", [])
-        return messages[-1]["message_id"] if messages else None
 
     def _update_last_message_metrics(
         self,
@@ -550,7 +552,7 @@ class MongoDBSessionManager(RepositorySessionManager):
         set_operations, last_message_id = self._metrics_set_operations(
             agent, usage_data, metrics_data, cycle_data, tool_usage
         )
-        self._apply_sync_update(agent, set_operations, last_message_id, None)
+        self._apply_sync_update(agent, set_operations, {}, last_message_id, None)
 
     def _build_agent_config_update(self, agent: Agent) -> tuple:
         """Build the $set operations for the agent configuration.
@@ -570,13 +572,12 @@ class MongoDBSessionManager(RepositorySessionManager):
         if self._agent_config_cache.get(agent.agent_id) == cache_entry:
             return {}, None
 
+        # Keys are relative to the agent document.
         set_operations = {}
         if model_id:
-            set_operations[f"agents.{agent.agent_id}.agent_data.model"] = model_id
+            set_operations["agent_data.model"] = model_id
         if system_prompt:
-            set_operations[f"agents.{agent.agent_id}.agent_data.system_prompt"] = (
-                system_prompt
-            )
+            set_operations["agent_data.system_prompt"] = system_prompt
 
         if not set_operations:
             return {}, None
@@ -589,7 +590,7 @@ class MongoDBSessionManager(RepositorySessionManager):
     def _capture_agent_config(self, agent: Agent) -> None:
         """Capture and store agent configuration (model and system_prompt)."""
         set_operations, cache_entry = self._build_agent_config_update(agent)
-        self._apply_sync_update(agent, set_operations, None, cache_entry)
+        self._apply_sync_update(agent, {}, set_operations, None, cache_entry)
 
     def _extract_model_id(self, agent: Agent) -> str | None:
         """Extract model identifier string from agent."""
@@ -809,22 +810,7 @@ class MongoDBSessionManager(RepositorySessionManager):
                 print(f"System prompt: {config.get('system_prompt')}")
         """
         try:
-            doc = self.session_repository.collection.find_one(
-                {"_id": self.session_id}, {f"agents.{agent_id}.agent_data": 1}
-            )
-
-            if not MongoDBSessionRepository._agent_exists(doc, agent_id):
-                logger.debug(f"Agent {agent_id} not found in session {self.session_id}")
-                return None
-
-            agent_data = doc["agents"][agent_id].get("agent_data", {})
-
-            return {
-                "agent_id": agent_id,
-                "model": agent_data.get("model"),
-                "system_prompt": agent_data.get("system_prompt"),
-                "prompt_metadata": agent_data.get("prompt_metadata"),
-            }
+            return self.session_repository.get_agent_config(self.session_id, agent_id)
         except Exception as e:
             logger.error(f"Failed to get agent config for {agent_id}: {e}")
             return None
@@ -863,27 +849,23 @@ class MongoDBSessionManager(RepositorySessionManager):
                 system_prompt="You are an expert coder"
             )
         """
-        # Build update dict
+        # Field names are relative to the agent; the repository owns the paths.
         update_fields = {}
         if model is not None:
-            update_fields[f"agents.{agent_id}.agent_data.model"] = model
+            update_fields["agent_data.model"] = model
         if system_prompt is not None:
-            update_fields[f"agents.{agent_id}.agent_data.system_prompt"] = system_prompt
+            update_fields["agent_data.system_prompt"] = system_prompt
         if prompt_metadata is not None:
-            update_fields[f"agents.{agent_id}.agent_data.prompt_metadata"] = (
-                prompt_metadata
-            )
+            update_fields["agent_data.prompt_metadata"] = prompt_metadata
 
         if not update_fields:
             logger.warning(f"No fields to update for agent {agent_id}")
             return
 
         try:
-            result = self.session_repository.collection.update_one(
-                {"_id": self.session_id}, {"$set": update_fields}
-            )
-
-            if result.matched_count == 0:
+            if not self.session_repository.update_agent_fields(
+                self.session_id, agent_id, update_fields
+            ):
                 raise ValueError(f"Session {self.session_id} not found")
 
             logger.info(
@@ -910,15 +892,9 @@ class MongoDBSessionManager(RepositorySessionManager):
         Raises:
             ValueError: If session not found
         """
-        result = self.session_repository.collection.update_one(
-            {"_id": self.session_id},
-            {
-                "$set": {
-                    f"agents.{agent_id}.agent_data.prompt_metadata": prompt_metadata
-                }
-            },
-        )
-        if result.matched_count == 0:
+        if not self.session_repository.update_agent_fields(
+            self.session_id, agent_id, {"agent_data.prompt_metadata": prompt_metadata}
+        ):
             raise ValueError(f"Session {self.session_id} not found")
         logger.info(
             f"Set prompt metadata for agent {agent_id}: "
@@ -940,27 +916,7 @@ class MongoDBSessionManager(RepositorySessionManager):
                 print(f"  System Prompt: {agent.get('system_prompt', 'N/A')}")
         """
         try:
-            doc = self.session_repository.collection.find_one(
-                {"_id": self.session_id}, {"agents": 1}
-            )
-
-            if not doc or "agents" not in doc:
-                logger.debug(f"No agents found in session {self.session_id}")
-                return []
-
-            agents_list = []
-            for agent_id, agent_obj in doc["agents"].items():
-                agent_data = agent_obj.get("agent_data", {})
-                agents_list.append(
-                    {
-                        "agent_id": agent_id,
-                        "model": agent_data.get("model"),
-                        "system_prompt": agent_data.get("system_prompt"),
-                        "prompt_metadata": agent_data.get("prompt_metadata"),
-                    }
-                )
-
-            return agents_list
+            return self.session_repository.list_agent_configs(self.session_id)
         except Exception as e:
             logger.error(f"Failed to list agents for session {self.session_id}: {e}")
             return []
@@ -980,12 +936,7 @@ class MongoDBSessionManager(RepositorySessionManager):
                 print("This is the first interaction")
         """
         try:
-            doc = self.session_repository.collection.find_one(
-                {"_id": self.session_id}, {f"agents.{agent_id}.messages": 1}
-            )
-            if MongoDBSessionRepository._agent_exists(doc, agent_id):
-                return len(doc["agents"][agent_id].get("messages", []))
-            return 0
+            return self.session_repository.count_messages(self.session_id, agent_id)
         except Exception as e:
             logger.error(f"Failed to get message count for {agent_id}: {e}")
             return 0

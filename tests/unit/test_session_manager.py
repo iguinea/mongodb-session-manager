@@ -1,14 +1,17 @@
 """Unit tests for MongoDBSessionManager."""
 
 import warnings
+from typing import ClassVar
 from unittest.mock import MagicMock, patch
 
 import pytest
+from strands.types.session import SessionAgent, SessionMessage
 
 from mongodb_session_manager.mongodb_session_manager import (
     MongoDBSessionManager,
     create_mongodb_session_manager,
 )
+from tests.support.in_memory_session_repository import InMemorySessionRepository
 
 
 @pytest.fixture
@@ -34,6 +37,62 @@ def manager(mock_repo):
             collection_name="test_coll",
         )
     return mgr
+
+
+@pytest.fixture
+def fake_repo():
+    """In-memory repository, to exercise the manager without MongoDB."""
+    return InMemorySessionRepository()
+
+
+@pytest.fixture
+def manager_fake(fake_repo):
+    """Manager backed by the in-memory double.
+
+    Assertions land on what ends up stored, instead of on which pymongo command
+    was emitted. The double exposes no `collection`, so a raw access
+    reintroduced in the manager fails here instead of passing silently.
+    """
+    return MongoDBSessionManager(
+        session_id="test-session", session_repository=fake_repo
+    )
+
+
+@pytest.fixture
+def agent_in_session(fake_repo, manager_fake):
+    """Add an agent "a1" to the session the manager created on construction."""
+    fake_repo.create_agent(
+        "test-session",
+        SessionAgent(agent_id="a1", state={}, conversation_manager_state={}),
+    )
+    return manager_fake
+
+
+@pytest.fixture
+def stored_message(fake_repo, agent_in_session):
+    """Give agent "a1" one stored message, the one a turn would annotate."""
+    fake_repo.create_message(
+        "test-session",
+        "a1",
+        SessionMessage(
+            message_id=5, message={"role": "assistant", "content": [{"text": "hi"}]}
+        ),
+    )
+    return agent_in_session
+
+
+@pytest.fixture
+def syncable_agent(mock_agent):
+    """Build an agent the parent class can sync without tripping over mocks."""
+
+    def _build(**kwargs):
+        agent = mock_agent(agent_id="a1", **kwargs)
+        agent.state._get_version.return_value = 1
+        agent._interrupt_state._get_version.return_value = 1
+        agent.conversation_manager.get_state.return_value = {}
+        return agent
+
+    return _build
 
 
 # ---------------------------------------------------------------------------
@@ -163,39 +222,42 @@ class TestSessionManagerInit:
 
 
 class TestSyncAgent:
-    def test_extracts_usage_data(self, manager, mock_agent):
-        agent = mock_agent(input_tokens=500, output_tokens=200, total_tokens=700)
-        manager.session_repository.collection.find_one.return_value = {
-            "agents": {"test-agent": {"messages": [{"message_id": 1}]}}
-        }
-        manager.sync_agent(agent)
-        update_call = manager.session_repository.collection.update_one.call_args_list
-        # Should have at least one update (metrics) + agent config update
-        assert len(update_call) >= 1
+    """Contra el doble: se comprueba dónde acaban las métricas, no la ruta escrita."""
 
-    def test_skips_metrics_when_latency_zero(self, manager, mock_agent):
-        agent = mock_agent(latency_ms=0)
-        manager.sync_agent(agent)
-        # Only agent config capture should happen, no metrics update
-        # The collection update_one should only be called for config capture
-        calls = manager.session_repository.collection.update_one.call_args_list
-        # Verify no metrics update (which uses $ positional operator)
-        for c in calls:
-            set_data = c[0][1].get("$set", {})
-            assert not any("event_loop_metrics" in k for k in set_data)
+    def test_stores_usage_on_the_last_message(
+        self, stored_message, fake_repo, syncable_agent
+    ):
+        stored_message.sync_agent(
+            syncable_agent(input_tokens=500, output_tokens=200, total_tokens=700)
+        )
 
-    def test_captures_cycle_metrics(self, manager, mock_agent):
-        agent = mock_agent(cycle_count=3, total_duration=4.5, average_cycle_time=1.5)
-        manager.session_repository.collection.find_one.return_value = {
-            "agents": {"test-agent": {"messages": [{"message_id": 1}]}}
-        }
-        manager.sync_agent(agent)
-        update_call = manager.session_repository.collection.update_one.call_args_list[0]
-        set_data = update_call[0][1]["$set"]
-        cycle_key = "agents.test-agent.messages.$.event_loop_metrics.cycle_metrics"
-        assert set_data[cycle_key]["cycle_count"] == 3
+        usage = fake_repo.message("test-session", "a1", 5)["event_loop_metrics"][
+            "accumulated_usage"
+        ]
+        assert usage["inputTokens"] == 500
+        assert usage["outputTokens"] == 200
+        assert usage["totalTokens"] == 700
 
-    def test_captures_tool_usage(self, manager, mock_agent):
+    def test_skips_metrics_when_latency_zero(
+        self, stored_message, fake_repo, syncable_agent
+    ):
+        """Sin latencia no hubo turno que medir."""
+        stored_message.sync_agent(syncable_agent(latency_ms=0))
+
+        assert "event_loop_metrics" not in fake_repo.message("test-session", "a1", 5)
+
+    def test_captures_cycle_metrics(self, stored_message, fake_repo, syncable_agent):
+        stored_message.sync_agent(
+            syncable_agent(cycle_count=3, total_duration=4.5, average_cycle_time=1.5)
+        )
+
+        cycles = fake_repo.message("test-session", "a1", 5)["event_loop_metrics"][
+            "cycle_metrics"
+        ]
+        assert cycles["cycle_count"] == 3
+        assert cycles["total_duration"] == pytest.approx(4.5)
+
+    def test_captures_tool_usage(self, stored_message, fake_repo, syncable_agent):
         tool_usage = {
             "search": {
                 "execution_stats": {
@@ -208,53 +270,51 @@ class TestSyncAgent:
                 }
             }
         }
-        agent = mock_agent(tool_usage=tool_usage)
-        manager.session_repository.collection.find_one.return_value = {
-            "agents": {"test-agent": {"messages": [{"message_id": 1}]}}
-        }
-        manager.sync_agent(agent)
-        update_call = manager.session_repository.collection.update_one.call_args_list[0]
-        set_data = update_call[0][1]["$set"]
-        tool_key = "agents.test-agent.messages.$.event_loop_metrics.tool_usage"
-        assert "search" in set_data[tool_key]
-        assert set_data[tool_key]["search"]["call_count"] == 5
 
-    def test_captures_agent_config_model(self, manager, mock_agent):
-        agent = mock_agent(model_id="claude-3-sonnet", latency_ms=0)
-        manager.sync_agent(agent)
-        calls = manager.session_repository.collection.update_one.call_args_list
-        # Find the config capture call
-        config_call = None
-        for c in calls:
-            set_data = c[0][1].get("$set", {})
-            if any("agent_data.model" in k for k in set_data):
-                config_call = c
-                break
-        assert config_call is not None
+        stored_message.sync_agent(syncable_agent(tool_usage=tool_usage))
 
-    def test_captures_agent_config_system_prompt(self, manager, mock_agent):
-        agent = mock_agent(system_prompt="You are helpful", latency_ms=0)
-        manager.sync_agent(agent)
-        calls = manager.session_repository.collection.update_one.call_args_list
-        config_call = None
-        for c in calls:
-            set_data = c[0][1].get("$set", {})
-            if any("agent_data.system_prompt" in k for k in set_data):
-                config_call = c
-                break
-        assert config_call is not None
+        stored = fake_repo.message("test-session", "a1", 5)["event_loop_metrics"][
+            "tool_usage"
+        ]
+        assert stored["search"]["call_count"] == 5
+        assert stored["search"]["success_rate"] == pytest.approx(0.8)
 
-    def test_no_update_when_no_agents(self, manager, mock_agent):
-        agent = mock_agent()
-        manager.session_repository.collection.find_one.return_value = None
-        manager.sync_agent(agent)
+    def test_captures_agent_config_model(self, stored_message, syncable_agent):
+        stored_message.sync_agent(
+            syncable_agent(model_id="claude-3-sonnet", latency_ms=0)
+        )
 
-    def test_no_update_when_no_messages(self, manager, mock_agent):
-        agent = mock_agent()
-        manager.session_repository.collection.find_one.return_value = {
-            "agents": {"test-agent": {"messages": []}}
-        }
-        manager.sync_agent(agent)
+        assert stored_message.get_agent_config("a1")["model"] == "claude-3-sonnet"
+
+    def test_captures_agent_config_system_prompt(self, stored_message, syncable_agent):
+        stored_message.sync_agent(
+            syncable_agent(system_prompt="You are helpful", latency_ms=0)
+        )
+
+        assert (
+            stored_message.get_agent_config("a1")["system_prompt"] == "You are helpful"
+        )
+
+    def test_metrics_and_config_land_together(
+        self, stored_message, fake_repo, syncable_agent
+    ):
+        """Ambas mitades viajan en la misma escritura, así que ambas deben estar."""
+        stored_message.sync_agent(
+            syncable_agent(latency_ms=100, model_id="m1", system_prompt="p")
+        )
+
+        assert "event_loop_metrics" in fake_repo.message("test-session", "a1", 5)
+        assert stored_message.get_agent_config("a1")["model"] == "m1"
+
+    def test_agent_without_messages_records_no_metrics(
+        self, agent_in_session, fake_repo, syncable_agent
+    ):
+        """Sin mensajes no hay dónde anotar las métricas, y no puede reventar."""
+        agent_in_session.sync_agent(syncable_agent(latency_ms=100, model_id="m1"))
+
+        assert fake_repo.count_messages("test-session", "a1") == 0
+        # La configuración sí se persiste: va por su propia rama de escritura.
+        assert agent_in_session.get_agent_config("a1")["model"] == "m1"
 
 
 # ---------------------------------------------------------------------------
@@ -570,123 +630,54 @@ class TestParseJsonParam:
 
 
 class TestAgentConfigOperations:
-    def test_get_agent_config(self, manager, mock_repo):
-        mock_repo.collection.find_one.return_value = {
-            "agents": {
-                "a1": {"agent_data": {"model": "claude-3", "system_prompt": "helpful"}}
-            }
-        }
-        result = manager.get_agent_config("a1")
+    """Contra el doble in-memory: se comprueba el efecto, no el comando emitido."""
+
+    def test_get_agent_config(self, agent_in_session, fake_repo):
+        fake_repo.update_agent_fields(
+            "test-session",
+            "a1",
+            {"agent_data.model": "claude-3", "agent_data.system_prompt": "helpful"},
+        )
+
+        result = agent_in_session.get_agent_config("a1")
+
         assert result["model"] == "claude-3"
         assert result["system_prompt"] == "helpful"
 
-    def test_get_agent_config_returns_none(self, manager, mock_repo):
-        mock_repo.collection.find_one.return_value = {"agents": {}}
-        assert manager.get_agent_config("missing") is None
+    def test_get_agent_config_returns_none(self, agent_in_session):
+        assert agent_in_session.get_agent_config("missing") is None
 
-    def test_update_agent_config(self, manager, mock_repo):
-        mock_repo.collection.update_one.return_value = MagicMock(matched_count=1)
-        manager.update_agent_config("a1", model="new-model")
-        mock_repo.collection.update_one.assert_called()
+    def test_update_agent_config_persists_the_model(self, agent_in_session):
+        agent_in_session.update_agent_config("a1", model="new-model")
 
-    def test_update_agent_config_raises_when_session_missing(self, manager, mock_repo):
-        mock_repo.collection.update_one.return_value = MagicMock(matched_count=0)
-        with pytest.raises(ValueError, match="Session test-session not found"):
-            manager.update_agent_config("a1", model="x")
+        assert agent_in_session.get_agent_config("a1")["model"] == "new-model"
 
-    def test_list_agents(self, manager, mock_repo):
-        mock_repo.collection.find_one.return_value = {
-            "agents": {
-                "a1": {"agent_data": {"model": "m1"}},
-                "a2": {"agent_data": {"model": "m2"}},
-            }
-        }
-        result = manager.list_agents()
-        assert len(result) == 2
+    def test_update_agent_config_writes_only_what_it_is_given(self, agent_in_session):
+        """Actualizar el modelo no puede borrar el system_prompt."""
+        agent_in_session.update_agent_config("a1", system_prompt="original")
+        agent_in_session.update_agent_config("a1", model="new-model")
 
-    def test_get_agent_config_includes_prompt_metadata(self, manager, mock_repo):
-        mock_repo.collection.find_one.return_value = {
-            "agents": {
-                "a1": {
-                    "agent_data": {
-                        "model": "claude-3",
-                        "system_prompt": "helpful",
-                        "prompt_metadata": {
-                            "prompt_id": "p1",
-                            "prompt_name": "Support",
-                            "prompt_version": "1.0.0",
-                            "deployment_id": "d1",
-                            "deployment_name": "prod",
-                            "temperature": 0.7,
-                        },
-                    }
-                }
-            }
-        }
-        result = manager.get_agent_config("a1")
-        assert result["prompt_metadata"]["prompt_id"] == "p1"
-        assert result["prompt_metadata"]["prompt_version"] == "1.0.0"
-        assert result["prompt_metadata"]["temperature"] == pytest.approx(0.7)
+        config = agent_in_session.get_agent_config("a1")
+        assert config["model"] == "new-model"
+        assert config["system_prompt"] == "original"
 
-    def test_get_agent_config_prompt_metadata_none_when_absent(
-        self, manager, mock_repo
+    def test_update_agent_config_raises_when_session_missing(
+        self, agent_in_session, fake_repo
     ):
-        mock_repo.collection.find_one.return_value = {
-            "agents": {
-                "a1": {"agent_data": {"model": "claude-3", "system_prompt": "helpful"}}
-            }
-        }
-        result = manager.get_agent_config("a1")
-        assert result["prompt_metadata"] is None
+        fake_repo._sessions.clear()
 
-    def test_update_agent_config_with_prompt_metadata(self, manager, mock_repo):
-        mock_repo.collection.update_one.return_value = MagicMock(matched_count=1)
-        metadata = {
-            "prompt_id": "p1",
-            "prompt_name": "Support",
-            "prompt_version": "1.0.0",
-            "deployment_id": "d1",
-            "deployment_name": "prod",
-            "temperature": 0.5,
-        }
-        manager.update_agent_config("a1", prompt_metadata=metadata)
-        call_args = mock_repo.collection.update_one.call_args
-        set_data = call_args[0][1]["$set"]
-        assert set_data["agents.a1.agent_data.prompt_metadata"] == metadata
+        with pytest.raises(ValueError, match="Session test-session not found"):
+            agent_in_session.update_agent_config("a1", model="x")
 
-    def test_list_agents_includes_prompt_metadata(self, manager, mock_repo):
-        mock_repo.collection.find_one.return_value = {
-            "agents": {
-                "a1": {
-                    "agent_data": {
-                        "model": "m1",
-                        "prompt_metadata": {"prompt_id": "p1"},
-                    }
-                },
-                "a2": {"agent_data": {"model": "m2"}},
-            }
-        }
-        result = manager.list_agents()
-        a1 = next(a for a in result if a["agent_id"] == "a1")
-        a2 = next(a for a in result if a["agent_id"] == "a2")
-        assert a1["prompt_metadata"]["prompt_id"] == "p1"
-        assert a2["prompt_metadata"] is None
+    def test_list_agents(self, agent_in_session, fake_repo):
+        fake_repo.create_agent(
+            "test-session",
+            SessionAgent(agent_id="a2", state={}, conversation_manager_state={}),
+        )
 
-    def test_get_message_count(self, manager, mock_repo):
-        mock_repo.collection.find_one.return_value = {
-            "agents": {"a1": {"messages": [{"id": 1}, {"id": 2}, {"id": 3}]}}
-        }
-        assert manager.get_message_count("a1") == 3
+        assert len(agent_in_session.list_agents()) == 2
 
-
-# ---------------------------------------------------------------------------
-# set_prompt_metadata
-# ---------------------------------------------------------------------------
-
-
-class TestSetPromptMetadata:
-    def test_set_prompt_metadata_happy_path(self, manager, mock_repo):
-        mock_repo.collection.update_one.return_value = MagicMock(matched_count=1)
+    def test_get_agent_config_includes_prompt_metadata(self, agent_in_session):
         metadata = {
             "prompt_id": "p1",
             "prompt_name": "Support",
@@ -695,15 +686,103 @@ class TestSetPromptMetadata:
             "deployment_name": "prod",
             "temperature": 0.7,
         }
-        manager.set_prompt_metadata("a1", metadata)
-        call_args = mock_repo.collection.update_one.call_args
-        set_data = call_args[0][1]["$set"]
-        assert set_data["agents.a1.agent_data.prompt_metadata"] == metadata
+        agent_in_session.update_agent_config("a1", prompt_metadata=metadata)
 
-    def test_set_prompt_metadata_raises_when_session_missing(self, manager, mock_repo):
-        mock_repo.collection.update_one.return_value = MagicMock(matched_count=0)
+        result = agent_in_session.get_agent_config("a1")
+
+        assert result["prompt_metadata"]["prompt_id"] == "p1"
+        assert result["prompt_metadata"]["prompt_version"] == "1.0.0"
+        assert result["prompt_metadata"]["temperature"] == pytest.approx(0.7)
+
+    def test_get_agent_config_prompt_metadata_none_when_absent(self, agent_in_session):
+        agent_in_session.update_agent_config("a1", model="claude-3")
+
+        assert agent_in_session.get_agent_config("a1")["prompt_metadata"] is None
+
+    def test_update_agent_config_with_prompt_metadata(self, agent_in_session):
+        metadata = {
+            "prompt_id": "p1",
+            "prompt_name": "Support",
+            "prompt_version": "1.0.0",
+            "deployment_id": "d1",
+            "deployment_name": "prod",
+            "temperature": 0.5,
+        }
+
+        agent_in_session.update_agent_config("a1", prompt_metadata=metadata)
+
+        assert agent_in_session.get_agent_config("a1")["prompt_metadata"] == metadata
+
+    def test_list_agents_includes_prompt_metadata(self, agent_in_session, fake_repo):
+        fake_repo.create_agent(
+            "test-session",
+            SessionAgent(agent_id="a2", state={}, conversation_manager_state={}),
+        )
+        agent_in_session.update_agent_config("a1", prompt_metadata={"prompt_id": "p1"})
+
+        result = agent_in_session.list_agents()
+
+        a1 = next(a for a in result if a["agent_id"] == "a1")
+        a2 = next(a for a in result if a["agent_id"] == "a2")
+        assert a1["prompt_metadata"]["prompt_id"] == "p1"
+        assert a2["prompt_metadata"] is None
+
+    def test_get_message_count(self, agent_in_session, fake_repo):
+        for index in range(3):
+            fake_repo.create_message(
+                "test-session",
+                "a1",
+                SessionMessage(
+                    message_id=index,
+                    message={"role": "user", "content": [{"text": "hi"}]},
+                ),
+            )
+
+        assert agent_in_session.get_message_count("a1") == 3
+
+    def test_get_message_count_is_zero_for_an_unknown_agent(self, agent_in_session):
+        assert agent_in_session.get_message_count("ghost") == 0
+
+
+# ---------------------------------------------------------------------------
+# set_prompt_metadata
+# ---------------------------------------------------------------------------
+
+
+class TestSetPromptMetadata:
+    def test_set_prompt_metadata_happy_path(self, agent_in_session):
+        metadata = {
+            "prompt_id": "p1",
+            "prompt_name": "Support",
+            "prompt_version": "1.0.0",
+            "deployment_id": "d1",
+            "deployment_name": "prod",
+            "temperature": 0.7,
+        }
+
+        agent_in_session.set_prompt_metadata("a1", metadata)
+
+        assert agent_in_session.get_agent_config("a1")["prompt_metadata"] == metadata
+
+    def test_set_prompt_metadata_preserves_the_agent_config(self, agent_in_session):
+        """Estampar el linaje del prompt no puede tocar modelo ni system_prompt."""
+        agent_in_session.update_agent_config(
+            "a1", model="claude-opus-5", system_prompt="original"
+        )
+
+        agent_in_session.set_prompt_metadata("a1", {"prompt_id": "p1"})
+
+        config = agent_in_session.get_agent_config("a1")
+        assert config["model"] == "claude-opus-5"
+        assert config["system_prompt"] == "original"
+
+    def test_set_prompt_metadata_raises_when_session_missing(
+        self, agent_in_session, fake_repo
+    ):
+        fake_repo._sessions.clear()
+
         with pytest.raises(ValueError, match="Session test-session not found"):
-            manager.set_prompt_metadata("a1", {"prompt_id": "p1"})
+            agent_in_session.set_prompt_metadata("a1", {"prompt_id": "p1"})
 
 
 # ---------------------------------------------------------------------------
@@ -807,115 +886,66 @@ class TestCacheHitRateCalculation:
 
 
 class TestRedactLatestMessage:
-    def test_redact_latest_message_calls_super(self, manager, mock_repo):
+    """Contra el doble: se comprueba el evento almacenado, no el comando emitido."""
+
+    REDACTED: ClassVar[dict] = {"role": "user", "content": [{"text": "***"}]}
+
+    @staticmethod
+    def _redact(manager, **kwargs):
+        """Redact through the manager, stubbing the parent's own bookkeeping."""
         agent = MagicMock()
-        agent.agent_id = "test-agent"
-        mock_repo.collection.find_one.return_value = {
-            "agents": {"test-agent": {"messages": [{"message_id": 1}]}}
-        }
-        redact_msg = {"role": "user", "content": [{"text": "***"}]}
+        agent.agent_id = "a1"
+        with patch.object(MongoDBSessionManager.__bases__[0], "redact_latest_message"):
+            manager.redact_latest_message(
+                TestRedactLatestMessage.REDACTED, agent, **kwargs
+            )
+        return agent
+
+    @staticmethod
+    def _event_on_message(fake_repo):
+        return fake_repo.message("test-session", "a1", 5)["guardrail_event"]
+
+    @staticmethod
+    def _events_on_session(fake_repo):
+        return fake_repo.session("test-session")["guardrail_events"]
+
+    def test_redact_latest_message_calls_super(self, stored_message):
+        agent = MagicMock()
+        agent.agent_id = "a1"
         with patch.object(
             MongoDBSessionManager.__bases__[0], "redact_latest_message"
         ) as mock_super:
-            manager.redact_latest_message(redact_msg, agent)
-            mock_super.assert_called_once_with(redact_msg, agent)
+            stored_message.redact_latest_message(self.REDACTED, agent)
+            mock_super.assert_called_once_with(self.REDACTED, agent)
 
-    def test_redact_latest_message_records_guardrail_event_on_message(
-        self, manager, mock_repo
-    ):
-        agent = MagicMock()
-        agent.agent_id = "test-agent"
-        mock_repo.collection.find_one.return_value = {
-            "agents": {"test-agent": {"messages": [{"message_id": 5}]}}
-        }
-        with patch.object(MongoDBSessionManager.__bases__[0], "redact_latest_message"):
-            manager.redact_latest_message(
-                {"role": "user", "content": [{"text": "***"}]}, agent
-            )
-        # Find the update_one call that sets guardrail_event on the message
-        calls = mock_repo.collection.update_one.call_args_list
-        guardrail_msg_call = None
-        for c in calls:
-            set_data = c[0][1].get("$set", {})
-            if any("guardrail_event" in k for k in set_data):
-                guardrail_msg_call = c
-                break
-        assert guardrail_msg_call is not None
-        set_data = guardrail_msg_call[0][1]["$set"]
-        key = "agents.test-agent.messages.$.guardrail_event"
-        assert set_data[key]["action"] == "BLOCKED"
-        assert "timestamp" in set_data[key]
+    def test_records_guardrail_event_on_message(self, stored_message, fake_repo):
+        self._redact(stored_message)
 
-    def test_redact_latest_message_records_guardrail_event_on_session(
-        self, manager, mock_repo
-    ):
-        agent = MagicMock()
-        agent.agent_id = "test-agent"
-        mock_repo.collection.find_one.return_value = {
-            "agents": {"test-agent": {"messages": [{"message_id": 5}]}}
-        }
-        with patch.object(MongoDBSessionManager.__bases__[0], "redact_latest_message"):
-            manager.redact_latest_message(
-                {"role": "user", "content": [{"text": "***"}]}, agent
-            )
-        # The $push to guardrail_events is in the same update_one as $set
-        calls = mock_repo.collection.update_one.call_args_list
-        push_call = None
-        for c in calls:
-            push_data = c[0][1].get("$push", {})
-            if "guardrail_events" in push_data:
-                push_call = c
-                break
-        assert push_call is not None
-        event = push_call[0][1]["$push"]["guardrail_events"]
-        assert event["message_id"] == 5
-        assert event["agent_id"] == "test-agent"
+        event = self._event_on_message(fake_repo)
         assert event["action"] == "BLOCKED"
-        # Verify it's the same call that also sets guardrail_event on the message
-        assert "$set" in push_call[0][1]
+        assert "timestamp" in event
 
-    def test_redact_latest_message_custom_action(self, manager, mock_repo):
-        agent = MagicMock()
-        agent.agent_id = "test-agent"
-        mock_repo.collection.find_one.return_value = {
-            "agents": {"test-agent": {"messages": [{"message_id": 1}]}}
-        }
-        with patch.object(MongoDBSessionManager.__bases__[0], "redact_latest_message"):
-            manager.redact_latest_message(
-                {"role": "user", "content": [{"text": "***"}]},
-                agent,
-                action="ANONYMIZED",
-            )
-        calls = mock_repo.collection.update_one.call_args_list
-        # Check the message-level guardrail_event has custom action
-        for c in calls:
-            set_data = c[0][1].get("$set", {})
-            for k, v in set_data.items():
-                if "guardrail_event" in k:
-                    assert v["action"] == "ANONYMIZED"
-                    return
-        pytest.fail("guardrail_event with custom action not found")
+    def test_records_guardrail_event_on_session(self, stored_message, fake_repo):
+        self._redact(stored_message)
 
-    def test_redact_latest_message_no_messages_does_not_crash(self, manager, mock_repo):
-        agent = MagicMock()
-        agent.agent_id = "test-agent"
-        mock_repo.collection.find_one.return_value = {
-            "agents": {"test-agent": {"messages": []}}
-        }
-        with patch.object(MongoDBSessionManager.__bases__[0], "redact_latest_message"):
-            # Should not raise
-            manager.redact_latest_message(
-                {"role": "user", "content": [{"text": "***"}]}, agent
-            )
+        events = self._events_on_session(fake_repo)
+        assert len(events) == 1
+        assert events[0]["message_id"] == 5
+        assert events[0]["agent_id"] == "a1"
+        assert events[0]["action"] == "BLOCKED"
 
-    def test_redact_with_guardrail_trace_stores_enriched_event(
-        self, manager, mock_repo
-    ):
-        agent = MagicMock()
-        agent.agent_id = "test-agent"
-        mock_repo.collection.find_one.return_value = {
-            "agents": {"test-agent": {"messages": [{"message_id": 5}]}}
-        }
+    def test_custom_action(self, stored_message, fake_repo):
+        self._redact(stored_message, action="ANONYMIZED")
+
+        assert self._event_on_message(fake_repo)["action"] == "ANONYMIZED"
+
+    def test_no_messages_does_not_crash(self, agent_in_session, fake_repo):
+        """Sin mensaje que redactar no hay nada que anotar, y no puede reventar."""
+        self._redact(agent_in_session)
+
+        assert self._events_on_session(fake_repo) == []
+
+    def test_guardrail_trace_stores_enriched_event(self, stored_message, fake_repo):
         trace = {
             "inputAssessment": {
                 "contentPolicy": {
@@ -927,97 +957,45 @@ class TestRedactLatestMessage:
             },
             "outputAssessments": [],
         }
-        with patch.object(MongoDBSessionManager.__bases__[0], "redact_latest_message"):
-            manager.redact_latest_message(
-                {"role": "user", "content": [{"text": "***"}]},
-                agent,
-                guardrail_trace=trace,
-            )
-        calls = mock_repo.collection.update_one.call_args_list
-        for c in calls:
-            set_data = c[0][1].get("$set", {})
-            for k, v in set_data.items():
-                if "guardrail_event" in k:
-                    assert v["trace"] == trace
-                    assert "HATE/HIGH" in v["policies_triggered"]["contentPolicy"]
-                    assert "VIOLENCE/MEDIUM" in v["policies_triggered"]["contentPolicy"]
-                    return
-        pytest.fail("enriched guardrail_event not found")
 
-    def test_redact_with_guardrail_trace_session_event_excludes_full_trace(
-        self, manager, mock_repo
-    ):
-        agent = MagicMock()
-        agent.agent_id = "test-agent"
-        mock_repo.collection.find_one.return_value = {
-            "agents": {"test-agent": {"messages": [{"message_id": 5}]}}
-        }
+        self._redact(stored_message, guardrail_trace=trace)
+
+        event = self._event_on_message(fake_repo)
+        assert event["trace"] == trace
+        assert "HATE/HIGH" in event["policies_triggered"]["contentPolicy"]
+        assert "VIOLENCE/MEDIUM" in event["policies_triggered"]["contentPolicy"]
+
+    def test_session_event_excludes_full_trace(self, stored_message, fake_repo):
+        """El array de sesión se lee entero para auditar: el trace no cabe ahí."""
         trace = {
             "inputAssessment": {
                 "contentPolicy": {"filters": [{"type": "HATE", "confidence": "HIGH"}]}
             },
             "outputAssessments": [],
         }
-        with patch.object(MongoDBSessionManager.__bases__[0], "redact_latest_message"):
-            manager.redact_latest_message(
-                {"role": "user", "content": [{"text": "***"}]},
-                agent,
-                guardrail_trace=trace,
-            )
-        calls = mock_repo.collection.update_one.call_args_list
-        for c in calls:
-            push_data = c[0][1].get("$push", {})
-            if "guardrail_events" in push_data:
-                event = push_data["guardrail_events"]
-                assert "trace" not in event
-                assert "HATE/HIGH" in event["policies_triggered"]["contentPolicy"]
-                return
-        pytest.fail("session guardrail_events push not found")
 
-    def test_redact_with_stop_reason(self, manager, mock_repo):
-        agent = MagicMock()
-        agent.agent_id = "test-agent"
-        mock_repo.collection.find_one.return_value = {
-            "agents": {"test-agent": {"messages": [{"message_id": 3}]}}
-        }
-        with patch.object(MongoDBSessionManager.__bases__[0], "redact_latest_message"):
-            manager.redact_latest_message(
-                {"role": "user", "content": [{"text": "***"}]},
-                agent,
-                stop_reason="guardrail_intervened",
-            )
-        calls = mock_repo.collection.update_one.call_args_list
-        for c in calls:
-            set_data = c[0][1].get("$set", {})
-            for k, v in set_data.items():
-                if "guardrail_event" in k:
-                    assert v["stop_reason"] == "guardrail_intervened"
-                    break
-            push_data = c[0][1].get("$push", {})
-            if "guardrail_events" in push_data:
-                assert (
-                    push_data["guardrail_events"]["stop_reason"]
-                    == "guardrail_intervened"
-                )
+        self._redact(stored_message, guardrail_trace=trace)
 
-    def test_redact_without_trace_is_backward_compatible(self, manager, mock_repo):
-        agent = MagicMock()
-        agent.agent_id = "test-agent"
-        mock_repo.collection.find_one.return_value = {
-            "agents": {"test-agent": {"messages": [{"message_id": 1}]}}
-        }
-        with patch.object(MongoDBSessionManager.__bases__[0], "redact_latest_message"):
-            manager.redact_latest_message(
-                {"role": "user", "content": [{"text": "***"}]}, agent
-            )
-        calls = mock_repo.collection.update_one.call_args_list
-        for c in calls:
-            set_data = c[0][1].get("$set", {})
-            for k, v in set_data.items():
-                if "guardrail_event" in k:
-                    assert set(v.keys()) == {"action", "timestamp"}
-                    return
-        pytest.fail("backward-compatible guardrail_event not found")
+        event = self._events_on_session(fake_repo)[0]
+        assert "trace" not in event
+        assert "HATE/HIGH" in event["policies_triggered"]["contentPolicy"]
+
+    def test_stop_reason_reaches_both_levels(self, stored_message, fake_repo):
+        self._redact(stored_message, stop_reason="guardrail_intervened")
+
+        assert (
+            self._event_on_message(fake_repo)["stop_reason"] == "guardrail_intervened"
+        )
+        assert (
+            self._events_on_session(fake_repo)[0]["stop_reason"]
+            == "guardrail_intervened"
+        )
+
+    def test_without_trace_is_backward_compatible(self, stored_message, fake_repo):
+        """Una intervención pelada sigue siendo solo action y timestamp."""
+        self._redact(stored_message)
+
+        assert set(self._event_on_message(fake_repo).keys()) == {"action", "timestamp"}
 
 
 # ---------------------------------------------------------------------------

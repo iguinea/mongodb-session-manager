@@ -281,65 +281,138 @@ class TestAgentConfigWrittenOnlyOnChange:
 # ---------------------------------------------------------------------------
 
 
+def _manager_over_mock_repo():
+    """Manager sobre un repositorio mockeado, inyectado sin parchear la clase.
+
+    Se cuentan las escrituras que el manager PIDE al repositorio, que es el
+    contrato que defiende la optimización. Lo que `super().sync_agent()` escriba
+    por su cuenta no entra en la cuenta.
+    """
+    mock_repo = MagicMock()
+    mock_repo.read_session.return_value = None
+    mock_repo.update_message_fields.return_value = True
+    mock_repo.update_agent_fields.return_value = True
+    mgr = MongoDBSessionManager(session_id="s1", session_repository=mock_repo)
+    return mgr, mock_repo
+
+
+def _manager_writes(mock_repo):
+    """Count the writes the manager asked the repository for."""
+    return (
+        mock_repo.update_message_fields.call_count
+        + mock_repo.update_agent_fields.call_count
+    )
+
+
+def _ready_to_sync(mgr, mock_agent):
+    """Build an agent with one tracked message, ready to be synced."""
+    agent = mock_agent(agent_id="a1", latency_ms=100, system_prompt="p", model_id="m1")
+    agent.state._get_version.return_value = 1
+    agent._interrupt_state._get_version.return_value = 1
+    agent.conversation_manager.get_state.return_value = {}
+    mgr._latest_agent_message["a1"] = SessionMessage(
+        message_id=2, message={"role": "assistant", "content": [{"text": "x"}]}
+    )
+    return agent
+
+
 class TestSyncAgentWriteCount:
     def test_first_sync_issues_single_update(self, mock_agent):
-        """Métricas y config van al mismo documento: un solo update_one.
-
-        `super().sync_agent()` usa el repositorio, que aquí está mockeado; lo
-        que se cuenta es lo que el manager escribe por su cuenta.
-        """
-        client, collection = make_client()
-        mock_repo = MagicMock()
-        mock_repo.read_session.return_value = None
-        mock_repo.collection = collection
-        with patch(
-            "mongodb_session_manager.mongodb_session_manager.MongoDBSessionRepository",
-            return_value=mock_repo,
-        ):
-            mgr = MongoDBSessionManager(session_id="s1", client=client)
-
-        agent = mock_agent(
-            agent_id="a1", latency_ms=100, system_prompt="p", model_id="m1"
-        )
-        agent.state._get_version.return_value = 1
-        agent._interrupt_state._get_version.return_value = 1
-        agent.conversation_manager.get_state.return_value = {}
-        mgr._latest_agent_message["a1"] = SessionMessage(
-            message_id=2, message={"role": "assistant", "content": [{"text": "x"}]}
-        )
-        collection.update_one.reset_mock()
+        """Métricas y config van al mismo documento: una sola escritura."""
+        mgr, mock_repo = _manager_over_mock_repo()
+        agent = _ready_to_sync(mgr, mock_agent)
 
         mgr.sync_agent(agent)
 
-        assert collection.update_one.call_count == 1
+        assert _manager_writes(mock_repo) == 1
+
+    def test_first_sync_carries_the_config_along_with_the_metrics(self, mock_agent):
+        """La config viaja de polizón en la escritura de métricas, no aparte."""
+        mgr, mock_repo = _manager_over_mock_repo()
+        agent = _ready_to_sync(mgr, mock_agent)
+
+        mgr.sync_agent(agent)
+
+        kwargs = mock_repo.update_message_fields.call_args.kwargs
+        assert kwargs["agent_set_operations"]["agent_data.model"] == "m1"
 
     def test_second_sync_without_changes_issues_single_update(self, mock_agent):
         """El sync de cierre ya no reescribe la config, solo las métricas."""
+        mgr, mock_repo = _manager_over_mock_repo()
+        agent = _ready_to_sync(mgr, mock_agent)
+
+        mgr.sync_agent(agent)
+        mock_repo.reset_mock()
+        mgr.sync_agent(agent)
+
+        assert _manager_writes(mock_repo) == 1
+        assert (
+            mock_repo.update_message_fields.call_args.kwargs["agent_set_operations"]
+            is None
+        )
+
+
+# ---------------------------------------------------------------------------
+# 5b. El guardarraíl también cuesta una sola escritura
+# ---------------------------------------------------------------------------
+
+
+class TestGuardrailEventWriteCount:
+    def test_guardrail_event_costs_one_write(self, mock_agent):
+        """La anotación del mensaje y la de la sesión comparten round-trip.
+
+        Guardarraíl explícito: separar el $set del $push «por limpieza»
+        duplicaría el coste de cada intervención.
+        """
         client, collection = make_client()
-        mock_repo = MagicMock()
-        mock_repo.read_session.return_value = None
-        mock_repo.collection = collection
-        with patch(
-            "mongodb_session_manager.mongodb_session_manager.MongoDBSessionRepository",
-            return_value=mock_repo,
-        ):
-            mgr = MongoDBSessionManager(session_id="s1", client=client)
-
-        agent = mock_agent(
-            agent_id="a1", latency_ms=100, system_prompt="p", model_id="m1"
-        )
-        agent.state._get_version.return_value = 1
-        agent._interrupt_state._get_version.return_value = 1
-        agent.conversation_manager.get_state.return_value = {}
-        mgr._latest_agent_message["a1"] = SessionMessage(
-            message_id=2, message={"role": "assistant", "content": [{"text": "x"}]}
-        )
-
-        mgr.sync_agent(agent)
+        mgr = make_manager(client)
+        agent = mock_agent(agent_id="a1")
         collection.update_one.reset_mock()
-        mgr.sync_agent(agent)
+
+        mgr._record_guardrail_event(
+            agent,
+            5,
+            stop_reason="guardrail_intervened",
+            guardrail_trace={"inputAssessment": {}, "outputAssessments": []},
+        )
 
         assert collection.update_one.call_count == 1
+        update = collection.update_one.call_args[0][1]
+        assert "$set" in update
+        assert "$push" in update
+
+
+class TestUnmatchedSyncDoesNotCacheConfig:
+    def test_config_is_not_cached_when_the_write_missed(self, mock_agent):
+        """Si la escritura no casó, la config no está persistida.
+
+        Cachearla igualmente la haría desaparecer para siempre: cada sync
+        posterior la daría por escrita y no volvería a intentarlo.
+        """
+        mgr, mock_repo = _manager_over_mock_repo()
+        mock_repo.update_message_fields.return_value = False
+        mock_repo.update_agent_fields.return_value = False
+        agent = _ready_to_sync(mgr, mock_agent)
+
+        mgr.sync_agent(agent)
+
+        assert "a1" not in mgr._agent_config_cache
+
+    def test_the_next_sync_writes_the_config_again(self, mock_agent):
+        """Y por eso el sync siguiente vuelve a intentar escribirla."""
+        mgr, mock_repo = _manager_over_mock_repo()
+        mock_repo.update_message_fields.return_value = False
+        mock_repo.update_agent_fields.return_value = False
+        agent = _ready_to_sync(mgr, mock_agent)
+
+        mgr.sync_agent(agent)
+        mock_repo.update_message_fields.reset_mock()
+        mgr.sync_agent(agent)
+
+        assert (
+            mock_repo.update_message_fields.call_args.kwargs["agent_set_operations"]
+            is not None
+        )
 
 
 # ---------------------------------------------------------------------------
