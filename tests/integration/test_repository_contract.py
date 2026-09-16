@@ -34,9 +34,11 @@ class TestMongoDBContract(SessionRepositoryContract):
         yield repo
         repo.close()
 
+    def _raw_session(self, store, session_id: str) -> dict[str, Any]:
+        return store.collection.find_one({"_id": session_id})
+
     def _messages(self, store, session_id: str) -> list[dict[str, Any]]:
-        doc = store.collection.find_one({"_id": session_id})
-        return doc["agents"]["a1"]["messages"]
+        return self._raw_session(store, session_id)["agents"]["a1"]["messages"]
 
     def _raw_message(self, store, session_id: str, message_id: int) -> dict[str, Any]:
         for msg in self._messages(store, session_id):
@@ -60,5 +62,4 @@ class TestMongoDBContract(SessionRepositoryContract):
         )
 
     def _session_guardrail_events(self, store, session_id: str) -> list[dict[str, Any]]:
-        doc = store.collection.find_one({"_id": session_id})
-        return doc.get("guardrail_events", [])
+        return self._raw_session(store, session_id).get("guardrail_events", [])

@@ -1197,3 +1197,57 @@ class TestToolUsageProcessing:
         assert result["search_documents"]["call_count"] == 5
         assert result["search_documents"]["success_rate"] == pytest.approx(0.8)
         assert "tool_info" not in result["search_documents"]
+
+
+# ---------------------------------------------------------------------------
+# Names inside paths (#79)
+# ---------------------------------------------------------------------------
+
+
+class TestNamesInPaths:
+    @pytest.mark.parametrize("method", ["initialize", "initialize_bidi_agent"])
+    def test_an_invalid_agent_id_fails_the_same_way_every_time(
+        self, manager_fake, fake_repo, mock_agent, method
+    ):
+        """Rejected before Strands registers the id, so a retry does not lie.
+
+        Strands records the agent_id in `_latest_agent_message` before it touches
+        the repository. Failing after that would turn the second attempt into a
+        misleading "agent_id must be unique" SessionException.
+        """
+        agent = mock_agent(agent_id="a.b")
+
+        for _ in range(2):
+            with pytest.raises(ValueError, match="agent_id"):
+                getattr(manager_fake, method)(agent)
+
+        assert "a.b" not in manager_fake._latest_agent_message
+        assert fake_repo.session("test-session")["agents"] == {}
+
+    @pytest.mark.parametrize(
+        "call",
+        [
+            lambda m: m.update_metadata({"ok": 1, "$where": 1}),
+            lambda m: m.delete_metadata(["a..b"]),
+        ],
+        ids=["update", "delete"],
+    )
+    def test_a_metadata_hook_never_sees_an_invalid_key(self, fake_repo, call):
+        """A custom hook may publish what it receives before calling the original."""
+        hook = MagicMock()
+        manager = MongoDBSessionManager(
+            session_id="test-session", session_repository=fake_repo, metadata_hook=hook
+        )
+
+        with pytest.raises(ValueError, match="metadata key"):
+            call(manager)
+
+        hook.assert_not_called()
+
+    def test_the_metadata_tool_tells_the_agent_why(self, manager_fake, fake_repo):
+        tool = manager_fake.get_metadata_tool()
+
+        result = tool(action="set", metadata={"tags.$[]": "x"})
+
+        assert "metadata key 'tags.$[]'" in result
+        assert fake_repo.session("test-session")["metadata"] == {}

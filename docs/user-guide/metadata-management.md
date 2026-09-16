@@ -187,6 +187,35 @@ collection.update_one(
 # Other fields in metadata remain unchanged!
 ```
 
+### Keys Are Paths
+
+Because each key is appended to `metadata.`, a dot in a key is a path separator, not part of the name:
+
+```python
+# Updates one nested field and keeps its siblings
+session_manager.update_metadata({"address.city": "Madrid"})
+
+# Writes the first element of an existing array
+session_manager.update_metadata({"tags.0": "urgent"})
+
+# Replaces the whole subdocument: other keys under "address" are lost
+session_manager.update_metadata({"address": {"city": "Madrid"}})
+```
+
+MongoDB would read some keys as syntax, so they are rejected with `ValueError` before anything is written, even if the rest of the dictionary is valid:
+
+| Key | Why it is rejected |
+|-----|--------------------|
+| `"$where"`, `"user.$role"` | A segment starting with `$` is an operator, and cannot be indexed |
+| `"tags.$[]"` | Would rewrite every element of the array |
+| `""`, `"a..b"`, `".a"`, `"a."` | Empty segment |
+| A key containing `\x00` | BSON cannot encode it |
+
+A `$` that does not start a segment is plain data (`"price$usd"` is fine). The same rule applies to `delete_metadata()` and to the `metadata_fields` you ask to index. The `manage_metadata` tool returns the error to the agent as text, so the agent can retry with a valid key.
+
+!!! warning "Changed in v0.13.0"
+    Keys with a segment starting with `$` used to be stored as literal fields. They are now rejected. Keys already stored remain in the document and `get_metadata()` still returns them; remove them with `session_manager.session_repository.collection` if needed.
+
 ### Progressive Metadata Building
 
 ```python

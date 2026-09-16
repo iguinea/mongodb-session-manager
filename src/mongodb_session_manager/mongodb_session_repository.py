@@ -17,6 +17,7 @@ from pymongo.errors import PyMongoError
 from strands.session.session_repository import SessionRepository
 from strands.types.session import Session, SessionAgent, SessionMessage
 
+from .field_names import validate_agent_id, validate_field_paths
 from .message_identity import (
     STORAGE_ID_FIELD,
     MessageRef,
@@ -208,7 +209,14 @@ class MongoDBSessionRepository(SessionRepository):
             client: Optional pre-configured MongoClient to use
             application_name: Application name for session categorization (immutable after creation)
             **kwargs: Additional arguments for MongoClient (ignored if client is provided)
+
+        Raises:
+            ValueError: If a metadata field is not a valid dot-notation path. It
+                is checked before any client is created: an invalid name cannot
+                be indexed, and that failure used to be swallowed together with
+                every index created after it.
         """
+        validate_field_paths(metadata_fields or (), "metadata field")
         self.application_name = application_name
         if client is not None:
             # Use provided client
@@ -286,6 +294,29 @@ class MongoDBSessionRepository(SessionRepository):
     def _parse_iso_datetime(dt_str: str) -> datetime:
         """Convert ISO 8601 string (possibly with Z suffix) to Python datetime."""
         return datetime.fromisoformat(dt_str.replace("Z", TIMEZONE_UTC_SUFFIX))
+
+    @staticmethod
+    def _agent_path(agent_id: str) -> str:
+        """Build `agents.<agent_id>`, the only place an agent path is built.
+
+        Validating here is what keeps a name MongoDB would parse as syntax from
+        ever reaching a path (#79): with `a.b` the agent landed nested, where no
+        read looks, and every request wiped its history. Call it in the first
+        statement of a method, before any early return or round-trip.
+        """
+        validate_agent_id(agent_id)
+        return f"agents.{agent_id}"
+
+    @staticmethod
+    def _prefixed(prefix: str, fields: Mapping[str, Any], what: str) -> dict[str, Any]:
+        """Join a caller's keys to a path the repository owns, validating them first.
+
+        The sibling of _agent_path() for the keys that come from outside: metadata
+        keys and the keys relative to a message or an agent. Every key is checked
+        before any is joined, so a batch with one bad key produces nothing to write.
+        """
+        validate_field_paths(fields, what)
+        return {f"{prefix}.{name}": value for name, value in fields.items()}
 
     @staticmethod
     def _agent_exists(doc: dict | None, agent_id: str) -> bool:
@@ -378,6 +409,7 @@ class MongoDBSessionRepository(SessionRepository):
         self, session_id: str, session_agent: SessionAgent, **kwargs: Any
     ) -> None:
         """Create a new Agent in a Session."""
+        agent_path = self._agent_path(session_agent.agent_id)
         now = datetime.now(UTC)
         agent_data = session_agent.__dict__.copy()
         agent_data["created_at"] = self._parse_iso_datetime(session_agent.created_at)
@@ -395,7 +427,7 @@ class MongoDBSessionRepository(SessionRepository):
                 {"_id": session_id},
                 {
                     "$set": {
-                        f"agents.{session_agent.agent_id}": agent_doc,
+                        agent_path: agent_doc,
                         "updated_at": now,
                     }
                 },
@@ -416,13 +448,12 @@ class MongoDBSessionRepository(SessionRepository):
         self, session_id: str, agent_id: str, **kwargs: Any
     ) -> SessionAgent | None:
         """Read an Agent from a Session."""
+        agent_path = self._agent_path(agent_id)
         try:
             # Any narrower projection must keep agent_data.model and
             # agent_data.system_prompt: the session manager relies on them to
             # know which config is already persisted.
-            doc = self.collection.find_one(
-                {"_id": session_id}, {f"agents.{agent_id}": 1}
-            )
+            doc = self.collection.find_one({"_id": session_id}, {agent_path: 1})
 
             if not self._agent_exists(doc, agent_id):
                 logger.debug(f"Agent {agent_id} not found in session {session_id}")
@@ -476,17 +507,17 @@ class MongoDBSessionRepository(SessionRepository):
         SessionAgent does not carry. Every field is still replaced whole, so
         keys removed from the agent state do disappear.
         """
+        agent_path = self._agent_path(session_agent.agent_id)
         now = datetime.now(UTC)
         agent_data = session_agent.__dict__.copy()
         agent_data["created_at"] = self._parse_iso_datetime(session_agent.created_at)
         agent_data["updated_at"] = self._parse_iso_datetime(session_agent.updated_at)
 
-        agent_prefix = f"agents.{session_agent.agent_id}"
         set_operations = {
-            f"{agent_prefix}.agent_data.{name}": value
+            f"{agent_path}.agent_data.{name}": value
             for name, value in agent_data.items()
         }
-        set_operations[f"{agent_prefix}.updated_at"] = now
+        set_operations[f"{agent_path}.updated_at"] = now
         set_operations["updated_at"] = now
 
         try:
@@ -527,6 +558,7 @@ class MongoDBSessionRepository(SessionRepository):
         attached to the SessionMessage, which Strands keeps for the rest of the
         turn and hands back for the redaction.
         """
+        agent_path = self._agent_path(agent_id)
         now = datetime.now(UTC)
         storage_id = new_storage_id()
         message_data = session_message.__dict__.copy()
@@ -538,9 +570,9 @@ class MongoDBSessionRepository(SessionRepository):
             result = self.collection.update_one(
                 {"_id": session_id},
                 {
-                    "$push": {f"agents.{agent_id}.messages": message_data},
+                    "$push": {f"{agent_path}.messages": message_data},
                     "$set": {
-                        f"agents.{agent_id}.updated_at": now,
+                        f"{agent_path}.updated_at": now,
                         "updated_at": now,
                     },
                 },
@@ -562,9 +594,10 @@ class MongoDBSessionRepository(SessionRepository):
         self, session_id: str, agent_id: str, message_id: int, **kwargs: Any
     ) -> SessionMessage | None:
         """Read a Message from an Agent."""
+        agent_path = self._agent_path(agent_id)
         try:
             doc = self.collection.find_one(
-                {"_id": session_id}, {f"agents.{agent_id}.messages": 1}
+                {"_id": session_id}, {f"{agent_path}.messages": 1}
             )
 
             if not self._agent_exists(doc, agent_id):
@@ -603,7 +636,10 @@ class MongoDBSessionRepository(SessionRepository):
         if self.collection.count_documents({"_id": session_id}, limit=1) == 0:
             return ValueError(f"Session {session_id} not found")
 
-        agent_filter = {"_id": session_id, f"agents.{agent_id}": {"$exists": True}}
+        agent_filter = {
+            "_id": session_id,
+            self._agent_path(agent_id): {"$exists": True},
+        }
         if self.collection.count_documents(agent_filter, limit=1) == 0:
             return ValueError(f"Agent {agent_id} not found in session {session_id}")
 
@@ -661,24 +697,23 @@ class MongoDBSessionRepository(SessionRepository):
             here: update_message() turns it into a ValueError, the agent sync
             logs it and the guardrail event ignores it. matched_count is pymongo
             vocabulary and does not leave this class.
-        """
-        message_prefix = f"agents.{agent_id}.messages.$"
-        set_operations: dict[str, Any] = {
-            f"{message_prefix}.{name}": value for name, value in message_fields.items()
-        }
 
-        if agent_fields:
-            set_operations.update(
-                {
-                    f"agents.{agent_id}.{name}": value
-                    for name, value in agent_fields.items()
-                }
-            )
+        Raises:
+            ValueError: If the agent_id or a field key would be parsed as syntax.
+                Checked before the early return for an empty write, so a bad
+                name fails the same way whether or not there is anything to write.
+        """
+        agent_path = self._agent_path(agent_id)
+        message_prefix = f"{agent_path}.messages.$"
+        set_operations = self._prefixed(message_prefix, message_fields, "message field")
+        set_operations.update(
+            self._prefixed(agent_path, agent_fields or {}, "agent field")
+        )
 
         if touch_timestamps:
             now = datetime.now(UTC)
             set_operations[f"{message_prefix}.updated_at"] = now
-            set_operations[f"agents.{agent_id}.updated_at"] = now
+            set_operations[f"{agent_path}.updated_at"] = now
             set_operations["updated_at"] = now
 
         if not set_operations and not push:
@@ -696,7 +731,7 @@ class MongoDBSessionRepository(SessionRepository):
 
         try:
             result = self.collection.update_one(
-                {"_id": session_id, f"agents.{agent_id}.messages.{field}": value},
+                {"_id": session_id, f"{agent_path}.messages.{field}": value},
                 update,
             )
         except PyMongoError as e:
@@ -754,13 +789,16 @@ class MongoDBSessionRepository(SessionRepository):
 
         Returns:
             True when the session was found.
-        """
-        if not set_operations:
-            return False
 
-        prefixed = {
-            f"agents.{agent_id}.{name}": value for name, value in set_operations.items()
-        }
+        Raises:
+            ValueError: If the agent_id or a key would be parsed as syntax,
+                checked before the early return for an empty write.
+        """
+        prefixed = self._prefixed(
+            self._agent_path(agent_id), set_operations, "agent field"
+        )
+        if not prefixed:
+            return False
 
         try:
             result = self.collection.update_one({"_id": session_id}, {"$set": prefixed})
@@ -823,9 +861,10 @@ class MongoDBSessionRepository(SessionRepository):
         **kwargs: Any,
     ) -> list[SessionMessage]:
         """List Messages from an Agent with pagination support."""
+        agent_path = self._agent_path(agent_id)
         try:
             doc = self.collection.find_one(
-                {"_id": session_id}, {f"agents.{agent_id}.messages": 1}
+                {"_id": session_id}, {f"{agent_path}.messages": 1}
             )
 
             if not doc or not self._agent_exists(doc, agent_id):
@@ -877,13 +916,19 @@ class MongoDBSessionRepository(SessionRepository):
 
     # CUSTOM METHODS
     def update_metadata(self, session_id: str, metadata: dict[str, Any]) -> None:
-        """Update the metadata for the session."""
-        try:
-            # Build $set operation with dot notation to preserve existing values
-            set_operations = {
-                f"metadata.{key}": value for key, value in metadata.items()
-            }
+        """Update the metadata for the session.
 
+        A dotted key is a path (`user.name`, `tags.0`), which is what keeps
+        sibling fields intact.
+
+        Raises:
+            ValueError: If any key has an empty segment, a segment starting with
+                `$` or a NUL byte. The whole batch is checked first, so nothing
+                is written.
+        """
+        # Dot notation preserves the existing values of every other key.
+        set_operations = self._prefixed("metadata", metadata, "metadata key")
+        try:
             self.collection.update_one(
                 {"_id": session_id},
                 {"$set": set_operations},
@@ -897,13 +942,15 @@ class MongoDBSessionRepository(SessionRepository):
         return self.collection.find_one({"_id": session_id}, {"metadata": 1})
 
     def delete_metadata(self, session_id: str, metadata_keys: list[str]) -> None:
-        """Delete metadata keys for the session."""
-        try:
-            # Build $unset operation with dot notation
-            unset_operations = {
-                f"metadata.{metadata_key}": "" for metadata_key in metadata_keys
-            }
+        """Delete metadata keys for the session.
 
+        Raises:
+            ValueError: Under the same rule as update_metadata(), before any write.
+        """
+        unset_operations = self._prefixed(
+            "metadata", dict.fromkeys(metadata_keys, ""), "metadata key"
+        )
+        try:
             self.collection.update_one(
                 {"_id": session_id},
                 {"$unset": unset_operations},
@@ -1079,11 +1126,12 @@ class MongoDBSessionRepository(SessionRepository):
         Unlike pop_read_agent_config(), this is a standalone read that consumes
         nothing and also carries prompt_metadata.
         """
+        agent_path = self._agent_path(agent_id)
         try:
             # Projecting agents.<id> would pull the agent subdocument with its
             # whole messages array; only agent_data is needed here.
             doc = self.collection.find_one(
-                {"_id": session_id}, {f"agents.{agent_id}.agent_data": 1}
+                {"_id": session_id}, {f"{agent_path}.agent_data": 1}
             )
 
             if not self._agent_exists(doc, agent_id):
@@ -1119,9 +1167,10 @@ class MongoDBSessionRepository(SessionRepository):
 
     def count_messages(self, session_id: str, agent_id: str) -> int:
         """Count the messages stored for one agent, 0 when the agent is unknown."""
+        agent_path = self._agent_path(agent_id)
         try:
             doc = self.collection.find_one(
-                {"_id": session_id}, {f"agents.{agent_id}.messages": 1}
+                {"_id": session_id}, {f"{agent_path}.messages": 1}
             )
 
             if not self._agent_exists(doc, agent_id):
@@ -1143,11 +1192,12 @@ class MongoDBSessionRepository(SessionRepository):
         The identity comes along, so a write built from here names a message
         and not an index -- see MessageRef.
         """
+        agent_path = self._agent_path(agent_id)
         try:
             # $slice keeps the whole history from travelling over the wire.
             doc = self.collection.find_one(
                 {"_id": session_id},
-                {f"agents.{agent_id}.messages": {"$slice": -1}},
+                {f"{agent_path}.messages": {"$slice": -1}},
             )
 
             if not self._agent_exists(doc, agent_id):

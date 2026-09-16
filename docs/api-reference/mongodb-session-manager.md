@@ -316,6 +316,10 @@ If the agent already exists in the session, its state and conversation history a
 
 - **kwargs** (`Any`): Additional keyword arguments passed to the parent class.
 
+#### Raises
+
+- `ValueError`: If the `agent_id` cannot be stored as `agents.<agent_id>`: it contains `.`, starts with `$`, is empty or holds a NUL byte (see [names that become paths](mongodb-session-repository.md#names-that-become-paths)). The error surfaces when the `Agent` is created, and it is raised before Strands registers the id, so retrying on the same manager fails the same way instead of with `SessionException`. `initialize_bidi_agent()` applies the same check.
+
 #### Example
 
 ```python
@@ -357,7 +361,8 @@ This method performs a partial update of metadata, meaning only the specified fi
 - Only updates the specified fields
 - Preserves all other existing metadata fields
 - Creates new fields if they don't exist
-- Can update nested fields using dot notation
+- Can update nested fields using dot notation (`{"user.name": "Ana"}`)
+- Raises `ValueError`, writing nothing, if any key has an empty segment, a segment starting with `$` or a NUL byte (see [names that become paths](mongodb-session-repository.md#names-that-become-paths)). The `manage_metadata` tool returns that message to the agent as text
 
 #### Example
 
@@ -979,6 +984,8 @@ def metadata_hook(
   - For `"update"`: `metadata` (dict)
   - For `"delete"`: `keys` (list)
   - For `"get"`: (no additional args)
+
+Keys are validated **before** the hook is called: a hook never receives a metadata key the repository would reject, so it cannot publish one to an external system before the write fails.
 
 #### Example Metadata Hooks
 

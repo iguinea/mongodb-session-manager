@@ -13,6 +13,7 @@ from mongodb_session_manager.message_identity import (
     storage_id_of,
 )
 from mongodb_session_manager.mongodb_session_repository import MongoDBSessionRepository
+from tests.support.repository_contract import AGENT_SCOPED_CALLS
 
 # ---------------------------------------------------------------------------
 # Init
@@ -1426,3 +1427,77 @@ class TestMessageReads:
     ):
         mock_mongo_collection.find_one.return_value = {"agents": {}}
         assert mock_repository.get_last_message_ref("s1", "missing") is None
+
+
+# ---------------------------------------------------------------------------
+# Names inside paths (#79)
+# ---------------------------------------------------------------------------
+
+
+class TestNamesInPathsCostNoRoundTrip:
+    """The contract proves nothing is written; this proves nothing is even sent."""
+
+    @pytest.mark.parametrize("call", AGENT_SCOPED_CALLS)
+    def test_an_invalid_agent_id_never_reaches_the_collection(
+        self, mock_repository, mock_mongo_collection, call
+    ):
+        with pytest.raises(ValueError, match="agent_id"):
+            call(mock_repository, "s1", "a.b")
+
+        assert mock_mongo_collection.method_calls == []
+
+    @pytest.mark.parametrize(
+        "call",
+        [
+            lambda repo: repo.update_metadata("s1", {"ok": 1, "$where": 1}),
+            lambda repo: repo.delete_metadata("s1", ["ok", "a..b"]),
+        ],
+        ids=["update_metadata", "delete_metadata"],
+    )
+    def test_an_invalid_metadata_key_never_reaches_the_collection(
+        self, mock_repository, mock_mongo_collection, call
+    ):
+        with pytest.raises(ValueError, match="metadata key"):
+            call(mock_repository)
+
+        assert mock_mongo_collection.method_calls == []
+
+    def test_invalid_metadata_fields_fail_before_any_index(
+        self, mock_mongo_client, mock_mongo_collection
+    ):
+        """A config error at startup, instead of indexes that go missing in silence.
+
+        `metadata.$where` cannot be indexed, and the failure used to be swallowed
+        together with every index created after it -- application_name included.
+        Which names are invalid is tests/unit/test_field_names.py's job.
+        """
+        with pytest.raises(ValueError, match="metadata field"):
+            MongoDBSessionRepository(
+                client=mock_mongo_client,
+                database_name="db",
+                collection_name="coll",
+                metadata_fields=["status", "$where"],
+            )
+
+        mock_mongo_collection.create_index.assert_not_called()
+
+    def test_valid_names_build_the_same_paths_as_before(
+        self, mock_repository, mock_mongo_collection
+    ):
+        """Validation is a gate, not a rewrite: `a$b` and dotted keys pass untouched."""
+        mock_repository.update_metadata("s1", {"user.name": "ana"})
+        mock_repository.count_messages("s1", "a$b")
+
+        set_ops = mock_mongo_collection.update_one.call_args[0][1]["$set"]
+        assert set_ops == {"metadata.user.name": "ana"}
+        projection = mock_mongo_collection.find_one.call_args[0][1]
+        assert projection == {"agents.a$b.messages": 1}
+
+    def test_a_non_string_metadata_key_still_becomes_its_text(
+        self, mock_repository, mock_mongo_collection
+    ):
+        """Before #79 the key went through an f-string; validation must not break that."""
+        mock_repository.update_metadata("s1", {1: "x"})
+
+        set_ops = mock_mongo_collection.update_one.call_args[0][1]["$set"]
+        assert set_ops == {"metadata.1": "x"}

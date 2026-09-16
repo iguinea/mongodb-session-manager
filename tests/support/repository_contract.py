@@ -18,7 +18,82 @@ from typing import Any
 import pytest
 from strands.types.session import Session, SessionAgent, SessionMessage, SessionType
 
-from mongodb_session_manager.message_identity import MessageRef, storage_id_of
+from mongodb_session_manager.message_identity import MessageRef, ref_of, storage_id_of
+
+
+def _agent(agent_id: str) -> SessionAgent:
+    return SessionAgent(agent_id=agent_id, state={}, conversation_manager_state={})
+
+
+def _message(message_id: int = 0) -> SessionMessage:
+    return SessionMessage(
+        message_id=message_id, message={"role": "user", "content": [{"text": "hi"}]}
+    )
+
+
+# Every repository call that turns an agent_id into a path, as
+# (store, session_id, agent_id) -> call. The empty-write variants are there on
+# purpose: both implementations return early when there is nothing to write, and
+# the agent_id must be rejected before that early return, not after.
+AGENT_SCOPED_CALLS = [
+    pytest.param(
+        lambda s, sid, aid: s.create_agent(sid, _agent(aid)), id="create_agent"
+    ),
+    pytest.param(lambda s, sid, aid: s.read_agent(sid, aid), id="read_agent"),
+    pytest.param(
+        lambda s, sid, aid: s.update_agent(sid, _agent(aid)), id="update_agent"
+    ),
+    pytest.param(
+        lambda s, sid, aid: s.create_message(sid, aid, _message()), id="create_message"
+    ),
+    pytest.param(lambda s, sid, aid: s.read_message(sid, aid, 0), id="read_message"),
+    pytest.param(
+        lambda s, sid, aid: s.update_message(sid, aid, _message()), id="update_message"
+    ),
+    pytest.param(lambda s, sid, aid: s.list_messages(sid, aid), id="list_messages"),
+    pytest.param(
+        lambda s, sid, aid: s.update_message_fields(
+            sid, aid, MessageRef(0), {"guardrail_event": {}}
+        ),
+        id="update_message_fields",
+    ),
+    pytest.param(
+        lambda s, sid, aid: s.update_message_fields(sid, aid, MessageRef(0), {}),
+        id="update_message_fields_empty",
+    ),
+    pytest.param(
+        lambda s, sid, aid: s.record_guardrail_event(
+            sid, aid, MessageRef(0), {"action": "BLOCKED"}
+        ),
+        id="record_guardrail_event",
+    ),
+    pytest.param(
+        lambda s, sid, aid: s.update_agent_fields(sid, aid, {"agent_data.model": "m"}),
+        id="update_agent_fields",
+    ),
+    pytest.param(
+        lambda s, sid, aid: s.update_agent_fields(sid, aid, {}),
+        id="update_agent_fields_empty",
+    ),
+    pytest.param(
+        lambda s, sid, aid: s.get_agent_config(sid, aid), id="get_agent_config"
+    ),
+    pytest.param(lambda s, sid, aid: s.count_messages(sid, aid), id="count_messages"),
+    pytest.param(
+        lambda s, sid, aid: s.get_last_message_ref(sid, aid), id="get_last_message_ref"
+    ),
+]
+
+# Every repository call that turns a metadata key into a path, as
+# (store, session_id, key) -> call.
+METADATA_CALLS = [
+    pytest.param(
+        lambda s, sid, key: s.update_metadata(sid, {key: "x"}), id="update_metadata"
+    ),
+    pytest.param(
+        lambda s, sid, key: s.delete_metadata(sid, [key]), id="delete_metadata"
+    ),
+]
 
 
 class SessionRepositoryContract:
@@ -40,10 +115,7 @@ class SessionRepositoryContract:
         store.create_session(
             Session(session_id=session_id, session_type=SessionType.AGENT)
         )
-        store.create_agent(
-            session_id,
-            SessionAgent(agent_id="a1", state={}, conversation_manager_state={}),
-        )
+        store.create_agent(session_id, _agent("a1"))
         for index in range(2):
             store.create_message(
                 session_id,
@@ -311,10 +383,7 @@ class SessionRepositoryContract:
         assert store.get_agent_config(populated, "ghost") is None
 
     def test_list_agent_configs_has_one_entry_per_agent(self, store, populated):
-        store.create_agent(
-            populated,
-            SessionAgent(agent_id="a2", state={}, conversation_manager_state={}),
-        )
+        store.create_agent(populated, _agent("a2"))
 
         configs = store.list_agent_configs(populated)
 
@@ -371,7 +440,114 @@ class SessionRepositoryContract:
 
         assert store.get_metadata(populated)["metadata"] == {"user": {"role": "admin"}}
 
+    # -- Names inside paths (#79) ------------------------------------------
+    #
+    # One invalid name per call is enough here: which names are invalid is
+    # tests/unit/test_field_names.py's job. What these cases prove is that both
+    # implementations apply the rule, and before anything else happens.
+
+    @pytest.mark.parametrize("call", AGENT_SCOPED_CALLS)
+    def test_an_invalid_agent_id_is_rejected_without_writing(
+        self, store, populated, call
+    ):
+        """Every call that builds `agents.<agent_id>` refuses what MongoDB would parse.
+
+        With `a.b` the agent landed nested under `agents.a.b`, where no read
+        looks, so every request created it again and wiped its history.
+        """
+        before = self._raw_session(store, populated)
+
+        with pytest.raises(ValueError, match="agent_id"):
+            call(store, populated, "a.b")
+
+        assert self._raw_session(store, populated) == before
+
+    @pytest.mark.parametrize("call", AGENT_SCOPED_CALLS)
+    def test_the_agent_id_is_checked_before_the_session(self, store, call):
+        """Both implementations fail the same way, whether or not the session exists."""
+        with pytest.raises(ValueError, match="agent_id"):
+            call(store, "nope", "a.b")
+
+    def test_a_dollar_inside_an_agent_id_works_end_to_end(self, store, populated):
+        """Only a *leading* `$` breaks MongoDB; `a$b` must keep working."""
+        agent_id = "a$b"
+        message = _message()
+        store.create_agent(populated, _agent(agent_id))
+        store.create_message(populated, agent_id, message)
+
+        assert store.read_agent(populated, agent_id) is not None
+        assert [m.message_id for m in store.list_messages(populated, agent_id)] == [0]
+        assert store.read_message(populated, agent_id, 0) is not None
+        assert store.count_messages(populated, agent_id) == 1
+        assert store.get_last_message_ref(populated, agent_id) == ref_of(message)
+        assert (
+            store.update_message_fields(
+                populated, agent_id, ref_of(message), {"guardrail_event": {"a": 1}}
+            )
+            is True
+        )
+        assert store.get_agent_config(populated, agent_id)["agent_id"] == agent_id
+
+    @pytest.mark.parametrize("call", METADATA_CALLS)
+    def test_an_array_operator_is_rejected_without_writing(
+        self, store, populated, call
+    ):
+        """`tags.$[]` would rewrite, or null out, every element of an existing array."""
+        store.update_metadata(populated, {"tags": ["a", "b"]})
+        before = self._raw_session(store, populated)
+
+        with pytest.raises(ValueError, match="metadata key"):
+            call(store, populated, "tags.$[]")
+
+        assert self._raw_session(store, populated) == before
+
+    @pytest.mark.parametrize("call", METADATA_CALLS)
+    def test_a_metadata_key_is_checked_before_the_session(self, store, call):
+        with pytest.raises(ValueError, match="metadata key"):
+            call(store, "nope", "$where")
+
+    def test_a_batch_with_one_invalid_key_writes_none_of_them(self, store, populated):
+        """The valid key comes first on purpose: nothing may land before the check."""
+        with pytest.raises(ValueError):
+            store.update_metadata(populated, {"status": "ok", "$where": 1})
+
+        assert "status" not in store.get_metadata(populated)["metadata"]
+
+    @pytest.mark.parametrize(
+        "call",
+        [
+            pytest.param(
+                lambda s, sid, field: s.update_message_fields(
+                    sid, "a1", MessageRef(0), {field: 1}
+                ),
+                id="message_field",
+            ),
+            pytest.param(
+                lambda s, sid, field: s.update_message_fields(
+                    sid, "a1", MessageRef(0), {"x": 1}, agent_set_operations={field: 1}
+                ),
+                id="agent_field",
+            ),
+            pytest.param(
+                lambda s, sid, field: s.update_agent_fields(sid, "a1", {field: 1}),
+                id="update_agent_fields",
+            ),
+        ],
+    )
+    def test_a_relative_field_is_rejected_without_writing(self, store, populated, call):
+        """`$where` on purpose: MongoDB would store it silently as a literal field."""
+        before = self._raw_session(store, populated)
+
+        with pytest.raises(ValueError, match="field"):
+            call(store, populated, "$where")
+
+        assert self._raw_session(store, populated) == before
+
     # -- Raw access, implemented by each subclass --------------------------
+
+    def _raw_session(self, store, session_id: str) -> dict[str, Any]:
+        """Return the whole stored session document, to compare before and after."""
+        raise NotImplementedError
 
     def _ref(self, store, session_id: str, message_id: int) -> MessageRef:
         """Build the reference of a stored message, identity included."""

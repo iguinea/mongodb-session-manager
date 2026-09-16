@@ -102,6 +102,19 @@ The following indexes are automatically created:
 - `updated_at`: For finding recently modified sessions
 - `metadata.<field>`: For each field in `metadata_fields` parameter
 
+### Names that become paths
+
+The repository reaches each agent as `agents.<agent_id>` and each metadata key as `metadata.<key>`, with dot notation. MongoDB reads those names as syntax, so the repository checks them first and raises `ValueError` **before any round-trip** ([#79](https://github.com/iguinea/mongodb-session-manager/issues/79)). The rule lives in `mongodb_session_manager.field_names`:
+
+- **A segment** is non-empty, does not start with `$` and holds no NUL byte. A `$` anywhere else is plain data: `a$b` works.
+- **A path** is segments separated by `.`. Metadata keys (`update_metadata`, `delete_metadata`), `metadata_fields` and the relative keys of `update_message_fields` / `update_agent_fields` are paths: `user.name` is a nested field and `tags.0` an array element.
+- **An `agent_id`** is a single segment, so it cannot contain `.` either. With `a.b` the agent landed nested under `agents.a.b`, where no read looks, and every request created it again with an empty history.
+
+A batch is all or nothing: one invalid key and nothing is written. Limits that are not about syntax are not checked here and still come back as server errors, such as `{"a": 1, "a.b": 2}` in the same update (conflicting paths) or more than 100 levels of nesting.
+
+!!! warning "Breaking change in v0.13.0"
+    Metadata keys with a segment starting with `$` (`$where`, `x.$y`) used to be stored as literal fields. They are now rejected. Keys already stored stay in the document and `get_metadata()` still returns them, but removing them takes `repo.collection`, since `delete_metadata()` applies the same rule.
+
 ---
 
 ## Constructor
@@ -132,9 +145,13 @@ Initialize MongoDB Session Repository.
 
 - **client** (`Optional[MongoClient]`, default: `None`): Pre-configured `MongoClient` instance. When provided, the repository will use this client instead of creating a new one. The repository will not close a borrowed client.
 
-- **metadata_fields** (`Optional[List[str]]`, default: `None`): List of metadata field names to index for optimized queries.
+- **metadata_fields** (`Optional[List[str]]`, default: `None`): List of metadata field names to index for optimized queries. Each one is a [path](#names-that-become-paths).
 
 - **kwargs** (`Any`): Additional arguments for `MongoClient` (only used if `client` is not provided).
+
+#### Raises
+
+- `ValueError`: If a metadata field is not a valid [path](#names-that-become-paths). Checked before any client is created: MongoDB cannot index such a field, and that failure used to be swallowed together with every index created after it, `application_name` included.
 
 #### Connection Lifecycle Management
 
@@ -269,6 +286,9 @@ else:
 ---
 
 ## Agent Operations
+
+!!! note "Every method that takes an `agent_id` checks it first"
+    Agent and message operations raise `ValueError` for an `agent_id` that is not a single [segment](#names-that-become-paths), before any round-trip and before an empty write returns early. `_agent_path()` is the only place that builds `agents.<agent_id>`.
 
 ### `create_agent`
 
@@ -407,11 +427,15 @@ The non-positional sibling of [`update_message_fields`](#update_message_fields):
 
 - **agent_id** (`str`): ID of the agent.
 
-- **set_operations** (`Mapping[str, Any]`): Keys **relative to the agent document**, such as `"agent_data.model"`. The repository prefixes them; callers never write `agents.<id>.` themselves.
+- **set_operations** (`Mapping[str, Any]`): Keys **relative to the agent document**, such as `"agent_data.model"`. The repository prefixes them; callers never write `agents.<id>.` themselves. Each key is a [path](#names-that-become-paths).
 
 #### Returns
 
 `bool`: `True` when the session was found. An empty `set_operations` returns `False` without a round-trip.
+
+#### Raises
+
+- `ValueError`: If the `agent_id` or a key is not a valid name, even when `set_operations` is empty.
 
 #### Example
 
@@ -651,6 +675,10 @@ This is the public face of the only method in the project that builds the positi
 
 `bool`: `True` when the filter matched a document. A no-match is **not** an error here — `update_message()` turns it into a `ValueError`, the agent sync logs it, and the guardrail event ignores it.
 
+#### Raises
+
+- `ValueError`: If the `agent_id` or a key of either mapping is not a valid [name](#names-that-become-paths). Nothing is written.
+
 #### Example
 
 ```python
@@ -776,10 +804,11 @@ Updates only the specified metadata fields while preserving all other existing f
 
 - **session_id** (`str`): ID of the session to update.
 
-- **metadata** (`Dict[str, Any]`): Dictionary of metadata fields to update.
+- **metadata** (`Dict[str, Any]`): Dictionary of metadata fields to update. Each key is a [path](#names-that-become-paths): `{"user.name": "Ana"}` writes the nested field and keeps its siblings.
 
 #### Raises
 
+- `ValueError`: If any key has an empty segment, a segment starting with `$` or a NUL byte. The whole dictionary is checked first, so nothing is written.
 - `PyMongoError`: If the database operation fails.
 
 #### Example
@@ -842,10 +871,11 @@ Removes the specified metadata fields using MongoDB's `$unset` operator while pr
 
 - **session_id** (`str`): ID of the session.
 
-- **metadata_keys** (`List[str]`): List of metadata field names to delete.
+- **metadata_keys** (`List[str]`): List of metadata field names to delete. Each one is a [path](#names-that-become-paths).
 
 #### Raises
 
+- `ValueError`: Under the same rule as `update_metadata`, before anything is removed.
 - `PyMongoError`: If the database operation fails.
 
 #### Example

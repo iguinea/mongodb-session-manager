@@ -539,8 +539,10 @@ Some behaviours are reproduced warts and all, because a double kinder than reali
 
 Both implementations ask `MessageRef.locator()` which field names a message, so that rule cannot drift between them — the double scans a list, the repository builds a dot-path, and they agree on *what* they are looking for.
 
-!!! warning "Not evidence about `agent_id` with `.` or `$`"
-    The double resolves dotted paths its own way, so it does not reproduce how MongoDB breaks on those identifiers ([#79](https://github.com/iguinea/mongodb-session-manager/issues/79)).
+Names that MongoDB would read as syntax — an `agent_id` with a dot, a segment starting with `$`, an empty one — are rejected by both through the same rule in `mongodb_session_manager.field_names`, and at the same point: before the session is looked up and before an empty write returns early ([#79](https://github.com/iguinea/mongodb-session-manager/issues/79)). The contract runs every agent-scoped method with invalid ids, including the empty-write variants, and checks that the stored session document compares equal before and after.
+
+!!! warning "Not evidence about array indexes in a path"
+    `_set_dotted()` only walks documents. On MongoDB, `tags.0` over an existing array writes its first element; the double replaces the array with `{"0": ...}`. No contract case relies on it.
 
 ## Mocking MongoDB Connections
 
