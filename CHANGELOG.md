@@ -1,5 +1,16 @@
 # Changelog
 
+## [2026-09-16] PR #82 - Refactor: el manager deja de saltarse la interfaz del repositorio (#80) (@iguinea)
+
+- Refactor: primitivo unico de escritura posicional en el repositorio (…
+- Add: operaciones de dominio en el repositorio (#80)
+- Test: repositorio in-memory y contrato compartido (#80)
+- Refactor: el manager habla con el repositorio, no con la coleccion (#80)
+- Docs: documentar la interfaz del repositorio y el doble in-memory (#80)
+- Refactor: aplicar el gate de simplificacion (#80)
+- Fix: cerrar los hallazgos del gate de revision (#80)
+- Chore: ajustar el gate de calidad a los ficheros de soporte de tests …
+
 ## [0.11.0] - 2026-09-16
 
 ### Added
