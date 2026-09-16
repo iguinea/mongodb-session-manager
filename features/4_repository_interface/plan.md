@@ -203,7 +203,7 @@ repositorio real sobre cliente falso y asertan rutas absolutas, que el repositor
 1. `uv run ruff format .` && `uv run ruff check .`
 2. `uv run python -m pytest tests/unit/ -v` — baseline medido al abrir la rama: **283 pasan**.
 3. `uv run python -m pytest tests/integration/ -v` con
-   `MONGODB_CONNECTION_STRING=mongodb://mongodb:mongodb@localhost:8550/` — **obligatorio**:
+   `MONGODB_CONNECTION_STRING=mongodb://<user>:<pass>@localhost:8550/` — **obligatorio**:
    `test_turn_stays_within_write_budget` es el único juez real de que no se coló un round-trip.
 4. `grep -rn "session_repository.collection" src/` → cero. `repo.collection` sigue declarado.
 5. `uv run pytest --cov=src tests/` — la cobertura del repositorio debe subir.
