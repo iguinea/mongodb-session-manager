@@ -31,6 +31,13 @@ on:
 #   - el job `test` levanta un servicio Docker, así que el runner necesita la
 #     label `docker` y la imagen de Mongo debe tener build arm64
 
+# Permisos del GITHUB_TOKEN. El default del repo es de solo lectura, así que el
+# job `security` no podía subir su SARIF y moría con "Resource not accessible by
+# integration" en cada push a main: el escaneo corría entero y se tiraba el
+# resultado. Se concede `security-events: write` solo en ese job.
+permissions:
+  contents: read
+
 env:
   MONGODB_CONNECTION_STRING: "mongodb://mongodb:mongodb@localhost:27017/"
 
@@ -38,15 +45,15 @@ jobs:
   lint:
     runs-on: ${{ fromJSON(vars.CI_RUNS_ON || '["ubuntu-latest"]') }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version-file: .tool-versions
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@v10
 
       # --all-extras no es opcional: ruff y pytest viven en el grupo `dev`, y
       # con un `uv sync` pelado el paso siguiente moría con
@@ -76,15 +83,15 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version-file: .tool-versions
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@v10
 
       - name: Install dependencies
         run: uv sync --all-extras --locked
@@ -99,15 +106,15 @@ jobs:
     runs-on: ${{ fromJSON(vars.CI_RUNS_ON || '["ubuntu-latest"]') }}
     needs: [lint, test]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version-file: .tool-versions
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@v10
 
       - name: Build package
         run: uv build
@@ -120,11 +127,14 @@ jobs:
 
   security:
     runs-on: ${{ fromJSON(vars.CI_RUNS_ON || '["ubuntu-latest"]') }}
+    permissions:
+      contents: read
+      security-events: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: "fs"
           ignore-unfixed: true
@@ -133,7 +143,7 @@ jobs:
           severity: "CRITICAL,HIGH"
 
       - name: Upload Trivy scan results
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: "trivy-results.sarif"
