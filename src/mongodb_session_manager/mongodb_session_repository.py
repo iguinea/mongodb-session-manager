@@ -6,6 +6,7 @@ import logging
 import secrets
 import threading
 import weakref
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 
@@ -575,6 +576,154 @@ class MongoDBSessionRepository(SessionRepository):
             f"of session {session_id}"
         )
 
+    def _update_message_document(
+        self,
+        session_id: str,
+        agent_id: str,
+        message_id: int,
+        message_fields: Mapping[str, Any],
+        *,
+        extra_set: Mapping[str, Any] | None = None,
+        push: Mapping[str, Any] | None = None,
+        touch_timestamps: bool = False,
+    ) -> bool:
+        """Write fields onto one message, located server-side by message_id.
+
+        This is the only place in the project that builds the positional
+        selector. Everything that writes on a message goes through here:
+        update_message(), the turn metrics and the guardrail event. Keeping it
+        in one place is what makes the message identity of issue #78 a local
+        change instead of a hunt across three call sites.
+
+        Args:
+            message_fields: Keys relative to the message document
+                ("guardrail_event", "event_loop_metrics.cycle_metrics"). The
+                positional prefix is this method's business, not the caller's.
+            extra_set: Absolute paths that must land in the same round-trip.
+            push: Absolute paths to $push onto. Stays private precisely because
+                these keys are not prefixed by anything the repository owns.
+            touch_timestamps: Refresh updated_at on message, agent and session.
+                Off by default: annotating a turn that already happened is not
+                conversational activity, and moving the session clock for it
+                would misreport session duration to its consumers.
+
+        Returns:
+            True when the filter matched a document. A no-match is not an error
+            here: update_message() turns it into a ValueError, the agent sync
+            logs it and the guardrail event ignores it. matched_count is pymongo
+            vocabulary and does not leave this class.
+        """
+        message_prefix = f"agents.{agent_id}.messages.$"
+        set_operations: dict[str, Any] = {
+            f"{message_prefix}.{name}": value for name, value in message_fields.items()
+        }
+
+        if extra_set:
+            set_operations.update(extra_set)
+
+        if touch_timestamps:
+            now = datetime.now(UTC)
+            set_operations[f"{message_prefix}.updated_at"] = now
+            set_operations[f"agents.{agent_id}.updated_at"] = now
+            set_operations["updated_at"] = now
+
+        if not set_operations and not push:
+            return False
+
+        update: dict[str, Any] = {}
+        if set_operations:
+            update["$set"] = set_operations
+        if push:
+            update["$push"] = dict(push)
+
+        try:
+            # message_id is not a unique key -- Strands derives it in memory --
+            # so a duplicated id matches its first occurrence only. See #78.
+            result = self.collection.update_one(
+                {
+                    "_id": session_id,
+                    f"agents.{agent_id}.messages.message_id": message_id,
+                },
+                update,
+            )
+        except PyMongoError as e:
+            logger.error(
+                f"Failed to update message {message_id} of agent {agent_id} "
+                f"in session {session_id}: {e}"
+            )
+            raise
+
+        return result.matched_count > 0
+
+    def update_message_fields(
+        self,
+        session_id: str,
+        agent_id: str,
+        message_id: int,
+        set_operations: Mapping[str, Any],
+        agent_set_operations: Mapping[str, Any] | None = None,
+        touch_timestamps: bool = False,
+    ) -> bool:
+        """Write fields on one message, and optionally on its agent, in one write.
+
+        Args:
+            set_operations: Keys relative to the message document.
+            agent_set_operations: Keys relative to the agent document
+                ("agent_data.model"). They travel in the same round-trip: on
+                DocumentDB every write costs 40-55 ms regardless of its size,
+                so what drives latency is the number of round-trips.
+
+        Returns:
+            True when the filter matched a document.
+        """
+        extra_set = None
+        if agent_set_operations:
+            extra_set = {
+                f"agents.{agent_id}.{name}": value
+                for name, value in agent_set_operations.items()
+            }
+
+        return self._update_message_document(
+            session_id,
+            agent_id,
+            message_id,
+            set_operations,
+            extra_set=extra_set,
+            touch_timestamps=touch_timestamps,
+        )
+
+    def update_agent_fields(
+        self, session_id: str, agent_id: str, set_operations: Mapping[str, Any]
+    ) -> bool:
+        """Write fields under agents.<agent_id> without touching its messages.
+
+        The non-positional sibling of update_message_fields(): the filter names
+        the session only. Used when there is no message to point at, such as the
+        first sync of an agent that has not appended anything yet.
+
+        Args:
+            set_operations: Keys relative to the agent document.
+
+        Returns:
+            True when the session was found.
+        """
+        if not set_operations:
+            return False
+
+        prefixed = {
+            f"agents.{agent_id}.{name}": value for name, value in set_operations.items()
+        }
+
+        try:
+            result = self.collection.update_one({"_id": session_id}, {"$set": prefixed})
+        except PyMongoError as e:
+            logger.error(
+                f"Failed to update agent {agent_id} in session {session_id}: {e}"
+            )
+            raise
+
+        return result.matched_count > 0
+
     def update_message(
         self,
         session_id: str,
@@ -599,38 +748,25 @@ class MongoDBSessionRepository(SessionRepository):
         Note that message_id is not a unique key -- Strands derives it in memory
         -- so a duplicated id matches its first occurrence only. See issue #78.
         """
-        now = datetime.now(UTC)
-        message_prefix = f"agents.{agent_id}.messages.$"
+        matched = self._update_message_document(
+            session_id,
+            agent_id,
+            session_message.message_id,
+            {
+                "message": session_message.message,
+                "redact_message": session_message.redact_message,
+            },
+            touch_timestamps=True,
+        )
 
-        set_operations: dict[str, Any] = {
-            f"{message_prefix}.message": session_message.message,
-            f"{message_prefix}.redact_message": session_message.redact_message,
-            f"{message_prefix}.updated_at": now,
-            f"agents.{agent_id}.updated_at": now,
-            "updated_at": now,
-        }
-
-        try:
-            result = self.collection.update_one(
-                {
-                    "_id": session_id,
-                    f"agents.{agent_id}.messages.message_id": session_message.message_id,
-                },
-                {"$set": set_operations},
+        if not matched:
+            raise self._missing_message_error(
+                session_id, agent_id, session_message.message_id
             )
 
-            if result.matched_count == 0:
-                raise self._missing_message_error(
-                    session_id, agent_id, session_message.message_id
-                )
-
-            logger.info(
-                f"Updated message {session_message.message_id} for agent {agent_id}"
-            )
-
-        except PyMongoError as e:
-            logger.error(f"Failed to update message: {e}")
-            raise
+        logger.info(
+            f"Updated message {session_message.message_id} for agent {agent_id}"
+        )
 
     def list_messages(
         self,
