@@ -5,6 +5,7 @@
 ### Added
 - **El repositorio expone las operaciones que el session manager necesita de verdad**: `update_message_fields()` y `update_agent_fields()` para escribir, más `record_guardrail_event()`, `get_agent_config()`, `list_agent_configs()`, `count_messages()` y `get_last_message_id()`. Las claves que reciben son relativas al mensaje o al agente: quien conoce las rutas de MongoDB es el repositorio
 - **`MongoDBSessionManager` acepta `session_repository`**: sirve para sentar un doble en lugar del repositorio de MongoDB, que es lo que hace testeable el manager sin base de datos. **No es un punto de extensión declarado**: el contrato esperado no se publica como `Protocol`, solo existe como casos ejecutables en `tests/support/repository_contract.py`, así que sustituir el almacén es posible pero no está soportado
+- **`pop_read_agent_config()` pasa de privado a público** (antes `_pop_read_agent_config()`). El manager lo llama desde `initialize()`, así que era interfaz con nombre de método privado: un repositorio alternativo fallaba con `AttributeError` en la primera petición. Al ser público entra además en la guardia estructural que compara la superficie del doble con la del repositorio real
 
 ### Changed
 - **El session manager ya no accede a `session_repository.collection`**: lo hacía en ocho métodos, construyendo a mano filtros con dot notation, operadores `$set`/`$push` y leyendo `matched_count`. Contradecía la regla de persistencia del proyecto y el propio diagrama de arquitectura, que nunca dibujó esa arista. Hoy `grep -rn "session_repository.collection" src/` no devuelve nada
@@ -14,7 +15,9 @@
 ### Notes
 - **Sin cambios de comportamiento**: ninguna firma pública cambia y `repo.collection` sigue siendo público y soportado para consultas ad hoc. Los diez tests de `update_message()` pasan sin editar ni uno, que era precisamente el criterio de que el refactor es estructural
 - El presupuesto de escrituras por turno no se mueve: `sync_agent()` sigue costando una sola escritura, con la configuración del agente viajando de polizón en la de métricas cuando las hay, y sola cuando no
-- Nuevo doble in-memory en `tests/support/`, con 18 casos de contrato que se ejecutan dos veces —contra el doble y contra MongoDB real— para que ambas implementaciones no puedan divergir en silencio
+- Nuevo doble in-memory en `tests/support/`, con 21 casos de contrato que se ejecutan dos veces —contra el doble y contra MongoDB real— para que ambas implementaciones no puedan divergir en silencio
+- Tres de esos casos salieron del gate de revisión, y los tres fijan sitios donde el doble era **más amable** que MongoDB: escribir sobre un agente desconocido crea un agente a medias sin array de mensajes (y todo lector debe tolerarlo), `delete_metadata()` trata las claves con puntos como rutas y no como claves planas, y `pop_read_agent_config()` entrega la configuración una sola vez. Un doble que miente no sirve de red
+- Si alguna vez llegan métricas sin `message_id`, `sync_agent()` las descarta —no hay dónde escribirlas— pero ahora lo dice con un `logger.error` que las nombra, en lugar de reportar un fallo de filtro que nunca se intentó
 
 ## [2026-09-16] PR #81 - Fix: update_message() localiza el mensaje por message_id y deja de borrar campos (#64) (@iguinea)
 

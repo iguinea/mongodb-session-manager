@@ -109,8 +109,12 @@ conserva la implementación actual (proyecta y hace `len`): optimizarla a `$size
 comportamiento medible y va en issue aparte. `get_last_message_id` conserva la proyección
 `{"$slice": -1}` y es la segunda ruta de identidad de mensaje, por eso vive junto a la primera.
 
-`_pop_read_agent_config` **no se renombra** (churn sin valor), pero el fake está obligado a
-implementarlo.
+`_pop_read_agent_config` **pasa a público** como `pop_read_agent_config`, y el fake está obligado a
+implementarlo. El plan original decidió no renombrarlo («churn sin valor»); esa premisa cayó en el
+gate de revisión al añadir el parámetro `session_repository=` y la guardia estructural: un método
+que el manager llama desde fuera es parte de la interfaz diga lo que diga el guion bajo, y la
+guardia solo vigila los públicos. Con el nombre privado, cualquier repositorio de terceros petaba
+con `AttributeError` en el primer `initialize()` — justo el acoplamiento que esta issue elimina.
 
 **Sin `Protocol` ni dataclasses**, por KISS/YAGNI, ahora que el in-memory no es API pública. El
 contrato se garantiza con las tres capas de §4.

@@ -127,6 +127,24 @@ class SessionRepositoryContract:
             store.update_agent_fields("nope", "a1", {"agent_data.model": "m"}) is False
         )
 
+    def test_update_agent_fields_creates_a_bare_agent(self, store, populated):
+        """Writing on an unknown agent builds it without a messages array.
+
+        That is what MongoDB's $set on `agents.<id>.<field>` leaves behind, so
+        every reader has to cope with a half-built agent. The double must not
+        be kinder than the real thing here either -- it is the anti-drift net.
+        """
+        assert (
+            store.update_agent_fields(populated, "ghost", {"agent_data.model": "m"})
+            is True
+        )
+
+        assert store.get_agent_config(populated, "ghost")["model"] == "m"
+        assert store.count_messages(populated, "ghost") == 0
+        assert store.get_last_message_id(populated, "ghost") is None
+        assert store.list_messages(populated, "ghost") == []
+        assert store.update_message_fields(populated, "ghost", 0, {"x": 1}) is False
+
     # -- record_guardrail_event -------------------------------------------
 
     def test_guardrail_event_lands_on_message_and_session(self, store, populated):
@@ -200,6 +218,37 @@ class SessionRepositoryContract:
     def test_get_last_message_id(self, store, populated):
         assert store.get_last_message_id(populated, "a1") == 1
         assert store.get_last_message_id(populated, "ghost") is None
+
+    # -- Agent config handover ---------------------------------------------
+
+    def test_read_agent_hands_its_config_over_once(self, store, populated):
+        """The manager seeds its config cache from here, so both sides agree.
+
+        Consuming it is the point: a second caller must not be told a config
+        is already persisted when the first one has taken responsibility.
+        """
+        store.update_agent_fields(
+            populated,
+            "a1",
+            {"agent_data.model": "m", "agent_data.system_prompt": "sp"},
+        )
+        assert store.read_agent(populated, "a1") is not None
+
+        assert store.pop_read_agent_config(populated, "a1") == {
+            "model": "m",
+            "system_prompt": "sp",
+        }
+        assert store.pop_read_agent_config(populated, "a1") is None
+
+    # -- Metadata ----------------------------------------------------------
+
+    def test_delete_metadata_reaches_dotted_keys(self, store, populated):
+        """A dotted key is a path, not a flat key that happens to have dots."""
+        store.update_metadata(populated, {"user.name": "ana", "user.role": "admin"})
+
+        store.delete_metadata(populated, ["user.name"])
+
+        assert store.get_metadata(populated)["metadata"] == {"user": {"role": "admin"}}
 
     # -- Raw access, implemented by each subclass --------------------------
 

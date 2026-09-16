@@ -148,8 +148,12 @@ class MongoDBSessionManager(RepositorySessionManager):
             feedback_hook: Hook to be called when feedback is added
             application_name: Application name for session categorization (immutable after creation)
             session_repository: Repository to store sessions in. Defaults to a
-                MongoDB one built from the arguments above; pass your own to
-                store elsewhere, or an in-memory double to test without MongoDB.
+                MongoDB one built from the arguments above; pass an in-memory
+                double to test without MongoDB. A replacement must implement
+                the whole surface of MongoDBSessionRepository, including
+                pop_read_agent_config(), which initialize() calls. That
+                contract is not published as a Protocol: it lives as executable
+                cases in tests/support/repository_contract.py
             **kwargs: Additional arguments passed to parent class and MongoClient
         """
         # Support deprecated camelCase parameter names (metadataHook, feedbackHook)
@@ -360,7 +364,7 @@ class MongoDBSessionManager(RepositorySessionManager):
         """
         super().initialize(agent, **kwargs)
 
-        persisted = self.session_repository._pop_read_agent_config(
+        persisted = self.session_repository.pop_read_agent_config(
             self.session_id, agent.agent_id
         )
         if persisted is not None:
@@ -480,9 +484,11 @@ class MongoDBSessionManager(RepositorySessionManager):
             return
 
         # Their only producer, _metrics_set_operations(), returns both or
-        # neither, so the second half is unreachable today. It stays as a cheap
-        # guard: message keys without an id would write a positional path with
-        # no positional clause, which MongoDB rejects with an opaque error.
+        # neither, so the else branch never carries metrics today. The guard
+        # stays because message keys without an id would write a positional
+        # path with no positional clause, which MongoDB rejects with an opaque
+        # error -- and if a future producer breaks that pairing, the metrics
+        # would vanish into a write that cannot carry them, so it says so.
         if message_operations and message_id is not None:
             matched = self.session_repository.update_message_fields(
                 self.session_id,
@@ -492,6 +498,12 @@ class MongoDBSessionManager(RepositorySessionManager):
                 agent_set_operations=agent_operations or None,
             )
         else:
+            if message_operations:
+                logger.error(
+                    f"Dropping metrics for agent {agent.agent_id} in session "
+                    f"{self.session_id}: there is no message_id to write them "
+                    f"onto ({sorted(message_operations)})"
+                )
             matched = self.session_repository.update_agent_fields(
                 self.session_id, agent.agent_id, agent_operations
             )

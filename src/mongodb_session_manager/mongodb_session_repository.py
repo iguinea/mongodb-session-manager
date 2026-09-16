@@ -216,7 +216,7 @@ class MongoDBSessionRepository(SessionRepository):
         self.database: Database = self.client[database_name]
         self.collection: Collection = self.database[collection_name]
         self.metadata_fields = metadata_fields
-        # Config found by the last read_agent(); see _pop_read_agent_config().
+        # Config found by the last read_agent(); see pop_read_agent_config().
         self._last_read_agent_config: dict[tuple[str, str], dict[str, Any]] = {}
         # Create indexes for timestamp ordering (only once per collection)
         self._ensure_indexes()
@@ -423,10 +423,14 @@ class MongoDBSessionRepository(SessionRepository):
             logger.error(f"Failed to read agent {agent_id}: {e}")
             raise
 
-    def _pop_read_agent_config(
+    def pop_read_agent_config(
         self, session_id: str, agent_id: str
     ) -> dict[str, Any] | None:
         """Return, and forget, the agent config found by read_agent().
+
+        Public because the session manager calls it: a method reached from
+        another class is part of the interface whatever the underscore says,
+        and any repository passed as session_repository= has to provide it.
 
         read_agent() already fetches model and system_prompt but cannot return
         them inside a SessionAgent. The session manager takes them from here to
@@ -1020,7 +1024,7 @@ class MongoDBSessionRepository(SessionRepository):
     def get_agent_config(self, session_id: str, agent_id: str) -> dict[str, Any] | None:
         """Read the stored configuration of one agent, None when it does not exist.
 
-        Unlike _pop_read_agent_config(), this is a standalone read that consumes
+        Unlike pop_read_agent_config(), this is a standalone read that consumes
         nothing and also carries prompt_metadata.
         """
         try:

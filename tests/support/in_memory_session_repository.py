@@ -58,6 +58,22 @@ def _set_dotted(document: dict[str, Any], path: str, value: Any) -> None:
     target[keys[-1]] = value
 
 
+def _unset_dotted(document: dict[str, Any], path: str) -> None:
+    """Apply one dotted $unset path, removing only the leaf.
+
+    The mirror of _set_dotted: `metadata.user.name` has to reach the same key
+    a write on that path created, not a flat key that spells it with dots.
+    """
+    keys = path.split(".")
+    target = document
+    for key in keys[:-1]:
+        child = target.get(key)
+        if not isinstance(child, dict):
+            return
+        target = child
+    target.pop(keys[-1], None)
+
+
 class InMemorySessionRepository(SessionRepository):
     """SessionRepository backed by a dict. Single-threaded, for unit tests."""
 
@@ -99,7 +115,7 @@ class InMemorySessionRepository(SessionRepository):
         if agent is None:
             return None
         # First match only, exactly like MongoDB's `$`. See #78.
-        for msg in agent["messages"]:
+        for msg in agent.get("messages", []):
             if msg.get("message_id") == message_id:
                 return msg
         return None
@@ -183,7 +199,7 @@ class InMemorySessionRepository(SessionRepository):
         }
         return session_agent
 
-    def _pop_read_agent_config(
+    def pop_read_agent_config(
         self, session_id: str, agent_id: str
     ) -> dict[str, Any] | None:
         """Return, and forget, the agent config found by read_agent()."""
@@ -291,7 +307,7 @@ class InMemorySessionRepository(SessionRepository):
         # Sort and paginate over references, then copy only the page: a deepcopy
         # of the whole history to return N messages is work nobody asked for.
         messages = sorted(
-            agent["messages"],
+            agent.get("messages", []),
             key=lambda x: (x.get("created_at") is None, x.get("created_at") or 0),
         )
         page = (
@@ -372,6 +388,9 @@ class InMemorySessionRepository(SessionRepository):
         if session is None:
             return False
 
+        # An unknown agent is created bare, with no messages array, because
+        # that is what MongoDB's $set on agents.<id>.<field> leaves behind.
+        # Every reader here copes with it the way the real repository does.
         agent = session["agents"].setdefault(agent_id, {})
         for path, value in set_operations.items():
             _set_dotted(agent, path, copy.deepcopy(value))
@@ -419,14 +438,15 @@ class InMemorySessionRepository(SessionRepository):
     def count_messages(self, session_id: str, agent_id: str) -> int:
         """Count the messages stored for one agent."""
         agent = self._agent(session_id, agent_id)
-        return len(agent["messages"]) if agent else 0
+        return len(agent.get("messages", [])) if agent else 0
 
     def get_last_message_id(self, session_id: str, agent_id: str) -> int | None:
         """Read the message_id of the agent's last message."""
         agent = self._agent(session_id, agent_id)
-        if agent is None or not agent["messages"]:
+        messages = agent.get("messages", []) if agent else []
+        if not messages:
             return None
-        return agent["messages"][-1]["message_id"]
+        return messages[-1]["message_id"]
 
     # -- Metadata, feedback, lifecycle -------------------------------------
 
@@ -451,7 +471,7 @@ class InMemorySessionRepository(SessionRepository):
         if session is None:
             return
         for key in metadata_keys:
-            session["metadata"].pop(key, None)
+            _unset_dotted(session["metadata"], key)
 
     def add_feedback(self, session_id: str, feedback: dict[str, Any]) -> None:
         """Append feedback to the session."""

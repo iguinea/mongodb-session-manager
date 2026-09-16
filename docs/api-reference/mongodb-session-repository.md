@@ -427,7 +427,7 @@ def get_agent_config(self, session_id: str, agent_id: str) -> dict[str, Any] | N
 
 Read the stored configuration of one agent: `agent_id`, `model`, `system_prompt` and `prompt_metadata`. Returns `None` when the session or the agent does not exist.
 
-Projects only `agent_data`, so it never drags the agent's message history over the wire. Unlike [`_pop_read_agent_config`](#_pop_read_agent_config), this is a standalone read that consumes nothing.
+Projects only `agent_data`, so it never drags the agent's message history over the wire. Unlike [`pop_read_agent_config`](#pop_read_agent_config), this is a standalone read that consumes nothing.
 
 ### `list_agent_configs`
 
@@ -945,10 +945,10 @@ This method is called automatically during initialization. It creates indexes on
 
 Errors during index creation are logged but do not raise exceptions.
 
-### `_pop_read_agent_config`
+### `pop_read_agent_config`
 
 ```python
-def _pop_read_agent_config(
+def pop_read_agent_config(
     self, session_id: str, agent_id: str
 ) -> dict[str, Any] | None
 ```
@@ -956,6 +956,8 @@ def _pop_read_agent_config(
 Return, and forget, the `model` and `system_prompt` found by the last `read_agent()` for this session and agent.
 
 `MongoDBSessionManager.initialize()` calls it right after the Strands SDK restores an agent, to learn which config is already persisted without a second read. Only the last read is kept, so a long-lived repository does not accumulate system prompts. Any narrower projection in `read_agent()` must keep `agent_data.model` and `agent_data.system_prompt`.
+
+It is public because the manager calls it: any repository passed as `session_repository=` has to provide it, or `initialize()` raises `AttributeError`.
 
 ---
 

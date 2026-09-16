@@ -331,12 +331,12 @@ class TestAgentOperations:
 
         # Left out of the SessionAgent, but handed over to the session manager
         # (issue #65): once, and only for the session they were read from.
-        assert mock_repository._pop_read_agent_config("s2", "a1") is None
-        assert mock_repository._pop_read_agent_config("s1", "a1") == {
+        assert mock_repository.pop_read_agent_config("s2", "a1") is None
+        assert mock_repository.pop_read_agent_config("s1", "a1") == {
             "model": "claude-3",
             "system_prompt": "You are helpful",
         }
-        assert mock_repository._pop_read_agent_config("s1", "a1") is None
+        assert mock_repository.pop_read_agent_config("s1", "a1") is None
 
     def test_update_agent(
         self, mock_repository, mock_mongo_collection, sample_session_agent
