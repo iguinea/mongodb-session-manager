@@ -1,5 +1,10 @@
 # Changelog
 
+## [2026-09-16] PR #88 - Fix: métricas de la invocación una sola vez, en su último mensaje (#66) (@iguinea)
+
+- Fix: métricas de la invocación una sola vez, en su último mensaje (#66)
+- Docs: CHANGELOG y versión 0.15.0 (#66)
+
 ## [0.15.0] - 2026-09-16
 
 ### Changed
