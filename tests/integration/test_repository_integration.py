@@ -1,6 +1,6 @@
 """Integration tests for MongoDBSessionRepository (requires MongoDB)."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -17,10 +17,14 @@ class ProjectionRecorder(monitoring.CommandListener):
 
     def __init__(self) -> None:
         self.projections: list[dict[str, Any]] = []
+        self.commands: list[tuple[str, dict[str, Any]]] = []
         self.enabled = False
 
     def started(self, event: Any) -> None:
-        if self.enabled and event.command_name == "find":
+        if not self.enabled:
+            return
+        self.commands.append((event.command_name, dict(event.command)))
+        if event.command_name == "find":
             self.projections.append(dict(event.command.get("projection", {})))
 
     def succeeded(self, event: Any) -> None:
@@ -304,6 +308,42 @@ class TestMessageLifecycle:
         assert result is not None
         assert result.message_id == 1
 
+    def test_single_message_count_and_configs_are_server_side(
+        self, projection_repo, unique_session_id
+    ):
+        repo, recorder = projection_repo
+        repo.create_session(Session(session_id=unique_session_id, session_type="chat"))
+        repo.create_agent(
+            unique_session_id,
+            SessionAgent(agent_id="a1", state={}, conversation_manager_state={}),
+        )
+        repo.create_message(
+            unique_session_id,
+            "a1",
+            SessionMessage(
+                message_id=0,
+                message={"role": "user", "content": [{"text": "hello"}]},
+            ),
+        )
+        recorder.enabled = True
+
+        assert repo.read_message(unique_session_id, "a1", 0) is not None
+        assert repo.count_messages(unique_session_id, "a1") == 1
+        assert repo.list_agent_configs(unique_session_id)[0]["agent_id"] == "a1"
+
+        assert [name for name, _ in recorder.commands] == [
+            "aggregate",
+            "aggregate",
+            "aggregate",
+        ]
+        pipelines = [command["pipeline"] for _, command in recorder.commands]
+        assert "$filter" in repr(pipelines[0])
+        assert "$arrayElemAt" in repr(pipelines[0])
+        assert "$size" in repr(pipelines[1])
+        assert "$objectToArray" in repr(pipelines[2])
+        assert "messages" not in repr(pipelines[2])
+        assert "state" not in repr(pipelines[2])
+
     def test_list_messages_with_pagination(self, repo, unique_session_id):
         session = Session(session_id=unique_session_id, session_type="default")
         repo.create_session(session)
@@ -327,6 +367,64 @@ class TestMessageLifecycle:
 
         page = repo.list_messages(unique_session_id, "a1", limit=2, offset=1)
         assert len(page) == 2
+
+    def test_server_sorts_before_paginating_and_puts_missing_dates_last(
+        self, projection_repo, unique_session_id
+    ):
+        repo, recorder = projection_repo
+        repo.create_session(Session(session_id=unique_session_id, session_type="chat"))
+        repo.create_agent(
+            unique_session_id,
+            SessionAgent(agent_id="a1", state={}, conversation_manager_state={}),
+        )
+        for message_id in range(3):
+            repo.create_message(
+                unique_session_id,
+                "a1",
+                SessionMessage(
+                    message_id=message_id,
+                    message={
+                        "role": "user",
+                        "content": [{"text": f"m{message_id}"}],
+                    },
+                ),
+            )
+        repo.collection.update_one(
+            {"_id": unique_session_id, "agents.a1.messages.message_id": 0},
+            {
+                "$set": {
+                    "agents.a1.messages.$.created_at": datetime(2026, 1, 2, tzinfo=UTC)
+                }
+            },
+        )
+        repo.collection.update_one(
+            {"_id": unique_session_id, "agents.a1.messages.message_id": 1},
+            {
+                "$set": {
+                    "agents.a1.messages.$.created_at": datetime(2026, 1, 1, tzinfo=UTC)
+                }
+            },
+        )
+        repo.collection.update_one(
+            {"_id": unique_session_id, "agents.a1.messages.message_id": 2},
+            {"$unset": {"agents.a1.messages.$.created_at": ""}},
+        )
+        recorder.enabled = True
+
+        page = repo.list_messages(unique_session_id, "a1", limit=2, offset=1)
+
+        assert [message.message_id for message in page] == [0, 2]
+        assert [name for name, _ in recorder.commands] == ["aggregate"]
+        pipeline = recorder.commands[0][1]["pipeline"]
+        assert {"$skip": 1} in pipeline
+        assert {"$limit": 2} in pipeline
+        assert pipeline[-1] == {
+            "$sort": {
+                "_missing_created_at": 1,
+                "message.created_at": 1,
+                "_array_index": 1,
+            }
+        }
 
     def _seed_message(self, repo, session_id, text="original"):
         """Sesión + agente `a1` + un mensaje con message_id 1.

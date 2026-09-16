@@ -10,6 +10,7 @@ This guide covers how to run and write tests for the MongoDB Session Manager pro
 - [Writing Integration Tests](#writing-integration-tests)
 - [Test Coverage](#test-coverage)
 - [Testing with MongoDB](#testing-with-mongodb)
+- [Testing with the development DocumentDB](#testing-with-the-development-documentdb)
 - [Mocking MongoDB Connections](#mocking-mongodb-connections)
 - [Testing Hooks](#testing-hooks)
 - [Testing AWS Integrations](#testing-aws-integrations)
@@ -503,6 +504,125 @@ def test_concurrent_metadata_updates(mongodb_uri):
     assert len(metadata) == 10
     manager.close()
 ```
+
+## Testing with the development DocumentDB
+
+Use this procedure for a compatibility gate after an aggregation, projection,
+read-preference, or driver change. DocumentDB is private: the local test suite
+reaches it through the development bastion and never by opening the database to
+the internet.
+
+The private OV repository is the source of truth for the current bastion IP,
+DocumentDB endpoint, SSH key, CA bundle, Secrets Manager id, and security-group
+ids. See `docs/rag-pipeline.md` ("Túneles SSH a DocumentDB") and the
+"Acceso SSH al bastion (SG)" section of its `CLAUDE.md`. Those environment
+details are deliberately not copied into this public repository.
+
+### Prerequisites and access check
+
+The development AWS profile is `MRG-dev` and the region is `eu-west-1`. Fill the
+remaining values from the OV runbook:
+
+```bash
+export AWS_PROFILE=MRG-dev
+export AWS_REGION=eu-west-1
+export BASTION_HOST=<dev-bastion-ip>
+export DOCDB_HOST=<dev-documentdb-cluster-endpoint>
+export DOCDB_SECRET_ID=<dev-documentdb-secret-id>
+export PEM_FILE=<path-to-dev-pem>
+export CA_FILE=<path-to-global-bundle.pem>
+export LOCAL_DOCDB_PORT=27018
+
+aws sts get-caller-identity
+nc -zvw 3 "$BASTION_HOST" 22
+```
+
+If SSH already succeeds, do not change any security group. If it times out,
+compare the current public IP with the bastion rule documented by OV. Only the
+inbound TCP/22 rule whose description is `Movil` is authorized for automated
+replacement, always as a single `/32`; do not touch rules belonging to other
+people or add `0.0.0.0/0`. Re-read the private OV runbook before making that
+external change.
+
+### Open the tunnel and obtain credentials
+
+Use an SSH control socket so the exact tunnel can be closed without killing an
+unrelated SSH process. Do not enable shell tracing (`set -x`): it would expose
+the password when the connection string is assembled.
+
+```bash
+docdb_tunnel_dir=$(mktemp -d)
+docdb_control_socket="$docdb_tunnel_dir/control"
+
+ssh -i "$PEM_FILE" \
+  -M -S "$docdb_control_socket" \
+  -o StrictHostKeyChecking=accept-new \
+  -o ExitOnForwardFailure=yes \
+  -o ServerAliveInterval=30 \
+  -L "$LOCAL_DOCDB_PORT:$DOCDB_HOST:27017" \
+  "ec2-user@$BASTION_HOST" -N -f
+
+secret_json=$(aws secretsmanager get-secret-value \
+  --secret-id "$DOCDB_SECRET_ID" \
+  --query SecretString \
+  --output text)
+mongo_user=$(jq -er '.username' <<<"$secret_json")
+mongo_password=$(jq -er '.password' <<<"$secret_json")
+encoded_user=$(jq -rn --arg value "$mongo_user" '$value|@uri')
+encoded_password=$(jq -rn --arg value "$mongo_password" '$value|@uri')
+
+export MONGODB_CONNECTION_STRING="mongodb://${encoded_user}:${encoded_password}@localhost:${LOCAL_DOCDB_PORT}/?tls=true&tlsCAFile=${CA_FILE}&tlsAllowInvalidHostnames=true&directConnection=true&readPreference=secondaryPreferred&retryWrites=false&authSource=admin"
+
+unset secret_json mongo_user mongo_password encoded_user encoded_password
+```
+
+`tlsAllowInvalidHostnames=true` is needed because the TLS connection names
+`localhost` while the certificate names the DocumentDB endpoint.
+`retryWrites=false` is required by DocumentDB. Credentials remain only in the
+process environment and must never be printed, committed, or passed as literal
+command-line arguments.
+
+### Run and clean up
+
+```bash
+# Full compatibility gate
+uv run pytest -m integration -q
+
+# Narrow gate for server-side message reads (#58)
+uv run pytest -m integration \
+  tests/integration/test_repository_integration.py \
+  tests/integration/test_repository_contract.py -q
+
+ssh -S "$docdb_control_socket" -O exit "ec2-user@$BASTION_HOST"
+unset MONGODB_CONNECTION_STRING
+rmdir "$docdb_tunnel_dir"
+```
+
+Fixtures delete every session document they register. Ad-hoc benchmarks must
+use unique ids and delete only those exact ids in a `finally` block. Never drop
+a shared database or collection as test cleanup.
+
+### Read-preference caveat
+
+`directConnection=true` is appropriate for the full suite over one local port,
+but PyMongo sends `primaryPreferred` on the wire in that topology even when the
+client option is `secondaryPreferred`. Therefore it proves DocumentDB query
+compatibility, not replica selection.
+
+To test the production preference, connect with `replicaSet=rs0` from inside the
+VPC, or through a tunnel/proxy that can resolve and reach every private hostname
+advertised by DocumentDB. Assert with a `CommandListener` that each aggregate
+contains:
+
+```json
+{"$readPreference": {"mode": "secondaryPreferred"}}
+```
+
+The #58 validation used a process-local DNS mapping through the SSH tunnel for
+this probe. All four immediate post-write reads carried `secondaryPreferred`
+and passed. The development cluster had one member, so the selected server was
+necessarily `RSPrimary`; measuring replica lag or a physically secondary read
+requires a second cluster instance.
 
 ## Testing Without MongoDB: the In-Memory Repository
 

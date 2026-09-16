@@ -179,6 +179,18 @@ class SessionRepositoryContract:
             listed[1]
         )
 
+    def test_read_message_returns_the_first_duplicate(self, store, populated):
+        """A read by Strands' non-unique index keeps its historical semantics."""
+        duplicate = SessionMessage(
+            message_id=1,
+            message={"role": "user", "content": [{"text": "duplicate"}]},
+        )
+        store.create_message(populated, "a1", duplicate)
+
+        read = store.read_message(populated, "a1", 1)
+
+        assert read.message["content"][0]["text"] == "m1"
+
     # -- update_message_fields --------------------------------------------
 
     def test_writes_a_field_on_the_message(self, store, populated):
@@ -465,6 +477,16 @@ class SessionRepositoryContract:
     def test_count_messages(self, store, populated):
         assert store.count_messages(populated, "a1") == 2
         assert store.count_messages(populated, "ghost") == 0
+
+    @pytest.mark.parametrize(
+        ("limit", "offset", "parameter"),
+        [(-1, 0, "limit"), (None, -1, "offset")],
+    )
+    def test_list_messages_rejects_negative_pagination(
+        self, store, populated, limit, offset, parameter
+    ):
+        with pytest.raises(ValueError, match=parameter):
+            store.list_messages(populated, "a1", limit=limit, offset=offset)
 
     def test_get_last_message_ref(self, store, populated):
         ref = store.get_last_message_ref(populated, "a1")

@@ -791,35 +791,45 @@ def _update_message_document(
 #### List Messages
 ```python
 def list_messages(self, session_id, agent_id, limit=None, offset=0, **kwargs):
-    doc = self.collection.find_one(
-        {"_id": session_id}, {f"agents.{agent_id}.messages": 1}
-    )
-
-    messages = doc["agents"][agent_id].get("messages", [])
-
-    # Sort by created_at
-    messages.sort(key=lambda x: x.get("created_at", ""), reverse=False)
-
-    # Pagination
-    if limit:
-        messages = messages[offset : offset + limit]
-    else:
-        messages = messages[offset:]
-
-    # Convert to SessionMessage (filter metrics)
-    result = []
-    for msg_data in messages:
-        filtered = {
-            k: v for k, v in msg_data.items() if k not in ["event_loop_metrics"]
-        }
-        result.append(SessionMessage(**filtered))
-
-    return result
+    sort_order = {
+        "_missing_created_at": 1,
+        "message.created_at": 1,
+        "_array_index": 1,
+    }
+    pipeline = [
+        {"$match": {"_id": session_id}},
+        {"$project": {"message": {"$ifNull": [f"$agents.{agent_id}.messages", []]}}},
+        {"$unwind": {"path": "$message", "includeArrayIndex": "_array_index"}},
+        {
+            "$project": {
+                "message": 1,
+                "_array_index": 1,
+                "_missing_created_at": {
+                    "$cond": [
+                        {"$eq": [{"$ifNull": ["$message.created_at", None]}, None]},
+                        1,
+                        0,
+                    ]
+                },
+            }
+        },
+        {"$sort": sort_order},
+    ]
+    if offset:
+        pipeline.append({"$skip": offset})
+    if limit is not None:
+        pipeline.append({"$limit": limit})
+    if offset or limit is not None:
+        # DocumentDB guarantees aggregation output order when $sort is last.
+        pipeline.append({"$sort": sort_order})
+    return [
+        to_session_message(row["message"]) for row in collection.aggregate(pipeline)
+    ]
 ```
 
-**Projection**: Only fetch messages array
-**Sorting**: Client-side sort by `created_at`
-**Pagination**: Client-side slicing
+**Projection**: The aggregation emits only each page row and small sort keys
+**Sorting**: Server-side by `created_at`, stable by physical array index; missing timestamps last
+**Pagination**: Server-side `$skip` / `$limit`, after sorting
 **Filtering**: Remove `event_loop_metrics` before creating SDK object
 
 ## Metadata Object

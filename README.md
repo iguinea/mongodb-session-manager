@@ -10,6 +10,7 @@ A MongoDB session manager for [Strands Agents](https://github.com/strands-agents
 - **Session Persistence**: Complete conversation history stored in MongoDB
 - **Multiple Agents per Session**: Support for specialized agents sharing context
 - **Connection Pooling**: Built-in MongoDB connection pool for high performance
+- **Bounded Message Reads**: Pagination, single-message lookup, counts, and agent-config listings are computed in MongoDB instead of transferring complete histories
 - **Event Loop Metrics**: Automatic capture of tokens, latency, TTFB from Strands SDK
 - **Agent State Persistence**: Store and restore agent state across sessions
 - **Metadata Management**: Partial updates, field deletion, and built-in agent tool

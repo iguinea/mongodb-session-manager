@@ -658,7 +658,7 @@ recorded, so the next manager retries.
 
 **Code Reference**: `src/mongodb_session_manager/mongodb_session_repository.py` (`_ensure_indexes`, `_INDEX_REGISTRY`)
 
-### Restore Read Payload
+### Bounded Restore and Domain Reads
 
 A warm restoration performs three domain reads: the session header, the agent
 state and the message history. Session documents embed their histories, so an
@@ -671,9 +671,12 @@ The first two reads now have payloads independent of history size:
   `updated_at`.
 - `read_agent()` projects `agents.<id>.agent_data`, including the `model` and
   `system_prompt` used to seed the config cache.
-- `list_messages()` remains the only read that transfers messages. It sorts by
-  `created_at` before applying `offset`; a projection `$slice` uses physical
-  array order first and would change the result when those orders differ.
+- `list_messages()` sorts by `created_at` and paginates inside an aggregation;
+  only the requested page crosses the wire. A direct `$slice` remains invalid
+  because it would cut physical order before chronological order.
+- `read_message()` returns one `$filter` match, `count_messages()` returns one
+  `$size`, and `list_agent_configs()` maps only its four public fields. None of
+  them transfers the embedded history.
 
 Measured against a local MongoDB 8.2.7 standalone with primary reads, 5 warmups
 and 30 repetitions (messages of 918 BSON bytes):
@@ -689,6 +692,14 @@ The byte reduction approaches 66.7% as history grows. These timings validate
 MongoDB locally; DocumentDB support for the projection syntax is documented by
 AWS, but its latency and replica consistency require measurement on the target
 cluster.
+
+The follow-up benchmark for #58 used MongoDB 8.2.7, PyMongo 4.16, 5 warmups and
+30 repetitions. With 5,000 messages of 512 characters, a chronological page of
+10 fell from **3,397,842 B / 14.322 ms p50** to **7,350 B / 4.263 ms p50**.
+Single-message lookup fell from 13.771 to 1.516 ms p50, server count from 13.410
+to 1.122 ms, and config listing from 13.481 to 0.519 ms. Their responses were
+670 B, 16 B and 118 B and contained no `messages` key. Full p50/p95/p99 tables
+and explain summaries are in `artifacts/issue-58-server-side-reads.md`.
 
 ### Writes per Turn
 
