@@ -1,5 +1,10 @@
 # Changelog
 
+## [2026-09-16] PR #89 - Update: reducir lecturas completas al restaurar sesiones (#57) (@iguinea)
+
+- Update: reducir lecturas completas al restaurar sesiones (#57)
+- Docs: CHANGELOG y versión 0.16.0 (#57)
+
 ## [0.16.0] - 2026-09-16
 
 ### Changed
