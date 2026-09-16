@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.12.0] - 2026-09-16
+
+### Fixed
+- **La redacción de Guardrails podía caer en el mensaje equivocado** (#78). `message_id` no identifica un mensaje: Strands lo deriva en memoria (`latest.message_id + 1`) y cada manager restaura su contador desde el último mensaje almacenado, así que dos managers que restauran el mismo agente a la vez calculan el mismo índice y `create_message()` hace `$push` de dos mensajes numerados igual. A partir de ahí el operador posicional `$` actualiza **solo el primero que casa**. Verificado contra MongoDB 8.2.7 con dos managers concurrentes: la redacción del segundo aterrizaba en el mensaje del primero, *y además lo sobrescribía con el contenido del segundo* — se redactaba contenido inocente, se perdía el original y el contenido bloqueado quedaba visible. Lo mismo afectaba al `guardrail_event` de auditoría y a las métricas del turno
+- **El evento de auditoría nombraba «el último mensaje», no el que se acababa de redactar**: `redact_latest_message()` volvía a preguntar por el último mensaje después de que la clase padre hubiera redactado. Ahora toma la referencia del mismísimo `SessionMessage` que se redactó, así que el vínculo es cierto por construcción y no por coincidencia
+
+### Added
+- **`storage_id`: identidad estable de mensaje**. Un uuid4 que `create_message()` acuña una vez, nunca derivado de nada y nunca reescrito. El mismo valor se adjunta al `SessionMessage` —Strands conserva esa instancia durante todo el turno: la añade, la guarda en `_latest_agent_message` y la devuelve para la redacción—, de modo que cada escritura nombra el mensaje que *este* proceso añadió. `read_message()` y `list_messages()` también lo traen, para un manager restaurado
+- **`MessageRef`** (`mongodb_session_manager.MessageRef`): el value object que apunta a un mensaje almacenado. Su método `locator()` contiene la regla entera —identidad si la hay, índice si no—, y tanto el repositorio de MongoDB como el doble in-memory preguntan ahí en vez de decidir cada uno por su cuenta
+- El evento de guardarraíl de nivel sesión lleva ahora `storage_id` junto a `message_id`: el índice solo no basta para que un auditor sepa qué mensaje se interceptó
+
+### Changed
+- **Breaking: `get_last_message_id()` pasa a ser `get_last_message_ref()`** y devuelve un `MessageRef | None` en lugar de un `int | None`. El `storage_id` viaja con él, así que una escritura construida desde ahí nombra un mensaje y no una posición
+- **Breaking: `update_message_fields()` y `record_guardrail_event()`** reciben un `MessageRef` donde antes recibían un `message_id: int`
+- El `ValueError` de `update_message()` dice ahora por cuál de los dos campos se buscó (`searched by storage_id=…`). Con un índice duplicado, «mensaje 7 no encontrado» era falso: el 7 estaba ahí; lo que faltaba era la identidad
+
+### Notes
+- **No hace falta migrar nada**. Los mensajes almacenados antes de esta versión no tienen `storage_id` y se siguen localizando por `message_id`, exactamente como siempre; la exposición a #78 se extingue por sí sola en cada conversación según sus agentes añaden mensajes nuevos
+- **Sigue siendo posible que dos managers generen el mismo `message_id`**: esta versión hace que cada uno escriba sobre su propio mensaje, no impide que el historial acabe con dos mensajes numerados igual. Impedirlo es un problema distinto y queda fuera
+- El presupuesto de escrituras por turno no se mueve: mismas 12 lecturas y 8 escrituras que antes, misma proyección `$slice: -1`, mismo `update_one` único para el guardarraíl. El coste del campo es de 49 bytes BSON por mensaje
+- `attach_storage_id()` depende de que el `SessionMessage` de Strands acepte un atributo fuera de sus campos. Es un contrato con una SDK ajena, así que está fijado en `tests/unit/test_message_identity.py`: una actualización que lo rompa falla ahí, en vez de desactivar el arreglo en silencio
+
 ## [2026-09-16] PR #82 - Refactor: el manager deja de saltarse la interfaz del repositorio (#80) (@iguinea)
 
 - Refactor: primitivo unico de escritura posicional en el repositorio (…

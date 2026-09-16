@@ -15,6 +15,7 @@ from strands.session.repository_session_manager import RepositorySessionManager
 from strands.types.content import Message
 from strands.types.tools import JSONSchema
 
+from .message_identity import MessageRef, ref_of
 from .mongodb_session_repository import MongoDBSessionRepository
 
 logger = logging.getLogger(__name__)
@@ -253,26 +254,31 @@ class MongoDBSessionManager(RepositorySessionManager):
     def redact_latest_message(
         self, redact_message: Message, agent: Agent, **kwargs: Any
     ) -> None:
-        """Redact the latest message and record guardrail event."""
+        """Redact the latest message and record guardrail event.
+
+        The event names the message super() has just redacted, taken from the
+        same SessionMessage it used. Asking where the last message is a second
+        time would be asking a different question: the answer could be another
+        manager's message, and the audit trail would point at it.
+        """
         super().redact_latest_message(redact_message, agent, **kwargs)
 
-        action = kwargs.get("action", GUARDRAIL_ACTION_BLOCKED)
-        stop_reason = kwargs.get("stop_reason")
-        guardrail_trace = kwargs.get("guardrail_trace")
-        last_message_id = self._get_last_message_id(agent)
-        if last_message_id is not None:
-            self._record_guardrail_event(
-                agent,
-                last_message_id,
-                action=action,
-                stop_reason=stop_reason,
-                guardrail_trace=guardrail_trace,
-            )
+        # super() raises when there is nothing to redact, so by here there is a
+        # message and it is the one it just wrote to.
+        redacted = self._latest_agent_message[agent.agent_id]
+
+        self._record_guardrail_event(
+            agent,
+            ref_of(redacted),
+            action=kwargs.get("action", GUARDRAIL_ACTION_BLOCKED),
+            stop_reason=kwargs.get("stop_reason"),
+            guardrail_trace=kwargs.get("guardrail_trace"),
+        )
 
     def _record_guardrail_event(
         self,
         agent: Agent,
-        message_id: int,
+        ref: MessageRef,
         action: str = GUARDRAIL_ACTION_BLOCKED,
         stop_reason: str | None = None,
         guardrail_trace: dict[str, Any] | None = None,
@@ -299,7 +305,7 @@ class MongoDBSessionManager(RepositorySessionManager):
             guardrail_event["trace"] = guardrail_trace
 
         self.session_repository.record_guardrail_event(
-            self.session_id, agent.agent_id, message_id, guardrail_event
+            self.session_id, agent.agent_id, ref, guardrail_event
         )
 
     # Policy extraction rules: (policy_name, list_path, format_fields)
@@ -388,21 +394,22 @@ class MongoDBSessionManager(RepositorySessionManager):
         # are combined into a single write. On DocumentDB every write costs
         # 40-55 ms regardless of its size, so the number of round-trips is what
         # drives latency, not the number of bytes.
-        metrics_ops, message_id = self._build_metrics_update(agent)
+        metrics_ops, message_ref = self._build_metrics_update(agent)
         config_ops, config_cache_entry = self._build_agent_config_update(agent)
 
         # _build_agent_config_update() returns ({}, None) together, so the cache
         # entry is already None whenever there are no config operations.
         self._apply_sync_update(
-            agent, metrics_ops, config_ops, message_id, config_cache_entry
+            agent, metrics_ops, config_ops, message_ref, config_cache_entry
         )
 
     def _build_metrics_update(self, agent: Agent) -> tuple:
         """Build the $set operations carrying event loop metrics.
 
         Returns:
-            Tuple of (set operations, message_id they target). Both are empty
-            when there are no metrics yet or the last message is unknown.
+            Tuple of (set operations, reference to the message they target).
+            Both are empty when there are no metrics yet or the last message is
+            unknown.
         """
         metrics_summary = agent.event_loop_metrics.get_summary()
         accumulated_metrics = metrics_summary.get("accumulated_metrics", {})
@@ -446,8 +453,8 @@ class MongoDBSessionManager(RepositorySessionManager):
         Keys are relative to the message document; where that message lives is
         the repository's business.
         """
-        last_message_id = self._get_last_message_id(agent)
-        if last_message_id is None:
+        message_ref = self._get_last_message_ref(agent)
+        if message_ref is None:
             return {}, None
 
         return {
@@ -455,14 +462,14 @@ class MongoDBSessionManager(RepositorySessionManager):
             "event_loop_metrics.accumulated_usage": usage_data,
             "event_loop_metrics.cycle_metrics": cycle_data,
             "event_loop_metrics.tool_usage": tool_usage,
-        }, last_message_id
+        }, message_ref
 
     def _apply_sync_update(
         self,
         agent: Agent,
         message_operations: dict,
         agent_operations: dict,
-        message_id: int | None,
+        message_ref: MessageRef | None,
         config_cache_entry: tuple | None,
     ) -> None:
         """Apply the agent's sync write, if there is anything to write.
@@ -476,7 +483,7 @@ class MongoDBSessionManager(RepositorySessionManager):
             agent: Agent being synced.
             message_operations: Fields to write on the last message.
             agent_operations: Fields to write on the agent itself.
-            message_id: Message the metrics belong to, when there are metrics.
+            message_ref: Message the metrics belong to, when there are metrics.
             config_cache_entry: Agent config to remember as persisted, recorded
                 only once the write is known to have matched.
         """
@@ -485,15 +492,15 @@ class MongoDBSessionManager(RepositorySessionManager):
 
         # Their only producer, _metrics_set_operations(), returns both or
         # neither, so the else branch never carries metrics today. The guard
-        # stays because message keys without an id would write a positional
-        # path with no positional clause, which MongoDB rejects with an opaque
-        # error -- and if a future producer breaks that pairing, the metrics
-        # would vanish into a write that cannot carry them, so it says so.
-        if message_operations and message_id is not None:
+        # stays because message keys without a reference would write a
+        # positional path with no positional clause, which MongoDB rejects with
+        # an opaque error -- and if a future producer breaks that pairing, the
+        # metrics would vanish into a write that cannot carry them, so it says so.
+        if message_operations and message_ref is not None:
             matched = self.session_repository.update_message_fields(
                 self.session_id,
                 agent.agent_id,
-                message_id,
+                message_ref,
                 message_operations,
                 agent_set_operations=agent_operations or None,
             )
@@ -501,7 +508,7 @@ class MongoDBSessionManager(RepositorySessionManager):
             if message_operations:
                 logger.error(
                     f"Dropping metrics for agent {agent.agent_id} in session "
-                    f"{self.session_id}: there is no message_id to write them "
+                    f"{self.session_id}: there is no message to write them "
                     f"onto ({sorted(message_operations)})"
                 )
             matched = self.session_repository.update_agent_fields(
@@ -513,7 +520,7 @@ class MongoDBSessionManager(RepositorySessionManager):
             # both halves travel in the same write.
             logger.warning(
                 f"Sync update matched no document for agent {agent.agent_id} "
-                f"in session {self.session_id} (message_id={message_id})"
+                f"in session {self.session_id} (message={message_ref})"
             )
             return
 
@@ -535,22 +542,26 @@ class MongoDBSessionManager(RepositorySessionManager):
             }
         return tool_usage
 
-    def _get_last_message_id(self, agent: Agent) -> int | None:
-        """Get the message_id of the last message for an agent.
+    def _get_last_message_ref(self, agent: Agent) -> MessageRef | None:
+        """Reference the last message of an agent.
 
-        Prefers the value the parent class already tracks in memory. Besides
-        saving a query, this avoids a read-after-write: the lookup used to run
-        milliseconds after create_message pushed the message, and on a
+        Prefers the SessionMessage the parent class already tracks in memory,
+        which carries the identity create_message() stamped on it: that is what
+        points the write at the message *this* manager appended, and not at
+        another one that happens to share its index (#78).
+
+        Besides saving a query, this avoids a read-after-write: the lookup used
+        to run milliseconds after create_message pushed the message, and on a
         secondaryPreferred cluster a lagging replica would return the previous
-        message_id, silently attributing the metrics to the wrong message.
+        message, silently attributing the metrics to the wrong one.
         """
         latest_message = getattr(self, "_latest_agent_message", {}).get(agent.agent_id)
         if latest_message is not None:
-            return latest_message.message_id
+            return ref_of(latest_message)
 
         # No message tracked yet (e.g. a restored session that has not appended
         # anything in this process): fall back to reading it.
-        return self.session_repository.get_last_message_id(
+        return self.session_repository.get_last_message_ref(
             self.session_id, agent.agent_id
         )
 
@@ -563,10 +574,10 @@ class MongoDBSessionManager(RepositorySessionManager):
         tool_usage: dict,
     ) -> None:
         """Update the last message in a session with event loop metrics."""
-        set_operations, last_message_id = self._metrics_set_operations(
+        set_operations, message_ref = self._metrics_set_operations(
             agent, usage_data, metrics_data, cycle_data, tool_usage
         )
-        self._apply_sync_update(agent, set_operations, {}, last_message_id, None)
+        self._apply_sync_update(agent, set_operations, {}, message_ref, None)
 
     def _build_agent_config_update(self, agent: Agent) -> tuple:
         """Build the $set operations for the agent configuration.

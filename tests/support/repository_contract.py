@@ -18,6 +18,8 @@ from typing import Any
 import pytest
 from strands.types.session import Session, SessionAgent, SessionMessage, SessionType
 
+from mongodb_session_manager.message_identity import MessageRef, storage_id_of
+
 
 class SessionRepositoryContract:
     """Shared behaviour of the repository, independent of where it stores."""
@@ -53,10 +55,53 @@ class SessionRepositoryContract:
             )
         return session_id
 
+    # -- Message identity --------------------------------------------------
+
+    def test_create_message_stamps_a_storage_id(self, store, populated):
+        """Every message is born with an identity that does not come from its index."""
+        stored = [self._raw_message(store, populated, i) for i in range(2)]
+
+        assert all(msg.get("storage_id") for msg in stored)
+        assert stored[0]["storage_id"] != stored[1]["storage_id"]
+
+    def test_create_message_hands_the_identity_back(self, store, populated):
+        """The identity travels on the SessionMessage Strands keeps in memory.
+
+        That is what lets the redaction and the turn metrics point at the very
+        message this process appended, instead of at whatever shares its index.
+        """
+        message = SessionMessage(
+            message_id=2, message={"role": "user", "content": [{"text": "m2"}]}
+        )
+
+        store.create_message(populated, "a1", message)
+
+        assert (
+            storage_id_of(message)
+            == self._raw_message(store, populated, 2)["storage_id"]
+        )
+
+    def test_reading_a_message_carries_its_identity(self, store, populated):
+        """A restored manager gets the identity back from storage."""
+        listed = store.list_messages(populated, "a1")
+
+        assert (
+            storage_id_of(listed[1])
+            == self._raw_message(store, populated, 1)["storage_id"]
+        )
+        assert storage_id_of(store.read_message(populated, "a1", 1)) == storage_id_of(
+            listed[1]
+        )
+
     # -- update_message_fields --------------------------------------------
 
     def test_writes_a_field_on_the_message(self, store, populated):
-        store.update_message_fields(populated, "a1", 1, {"guardrail_event": {"a": 1}})
+        store.update_message_fields(
+            populated,
+            "a1",
+            self._ref(store, populated, 1),
+            {"guardrail_event": {"a": 1}},
+        )
 
         assert store.read_message(populated, "a1", 1) is not None
         stored = self._raw_message(store, populated, 1)
@@ -64,11 +109,12 @@ class SessionRepositoryContract:
 
     def test_a_dotted_write_keeps_its_siblings(self, store, populated):
         """Writing a.b must not wipe a.c -- that was the bug behind #64."""
+        ref = self._ref(store, populated, 1)
         store.update_message_fields(
-            populated, "a1", 1, {"event_loop_metrics.accumulated_usage": {"t": 1}}
+            populated, "a1", ref, {"event_loop_metrics.accumulated_usage": {"t": 1}}
         )
         store.update_message_fields(
-            populated, "a1", 1, {"event_loop_metrics.cycle_metrics": {"c": 2}}
+            populated, "a1", ref, {"event_loop_metrics.cycle_metrics": {"c": 2}}
         )
 
         metrics = self._raw_message(store, populated, 1)["event_loop_metrics"]
@@ -76,7 +122,12 @@ class SessionRepositoryContract:
         assert metrics["cycle_metrics"] == {"c": 2}
 
     def test_does_not_touch_the_other_messages(self, store, populated):
-        store.update_message_fields(populated, "a1", 1, {"guardrail_event": {"a": 1}})
+        store.update_message_fields(
+            populated,
+            "a1",
+            self._ref(store, populated, 1),
+            {"guardrail_event": {"a": 1}},
+        )
 
         assert "guardrail_event" not in self._raw_message(store, populated, 0)
 
@@ -84,7 +135,7 @@ class SessionRepositoryContract:
         store.update_message_fields(
             populated,
             "a1",
-            1,
+            self._ref(store, populated, 1),
             {"event_loop_metrics.cycle_metrics": {"c": 1}},
             agent_set_operations={"agent_data.model": "claude-opus-5"},
         )
@@ -92,28 +143,59 @@ class SessionRepositoryContract:
         assert store.get_agent_config(populated, "a1")["model"] == "claude-opus-5"
 
     def test_returns_false_for_an_unknown_message(self, store, populated):
-        assert store.update_message_fields(populated, "a1", 99, {"x": 1}) is False
-
-    def test_matches_only_the_first_duplicate(self, store, populated):
-        """message_id is not unique: Strands derives it in memory. See #78.
-
-        Documents today's behaviour so that fixing #78 has to update this case
-        deliberately, in both implementations at once.
-        """
-        store.create_message(
-            populated,
-            "a1",
-            SessionMessage(
-                message_id=1, message={"role": "user", "content": [{"text": "dup"}]}
-            ),
+        assert (
+            store.update_message_fields(populated, "a1", MessageRef(99), {"x": 1})
+            is False
         )
 
-        store.update_message_fields(populated, "a1", 1, {"guardrail_event": {"n": 1}})
+    def test_returns_false_for_an_unknown_storage_id(self, store, populated):
+        """An identity nobody stored matches nothing, whatever its index says."""
+        ref = MessageRef(message_id=1, storage_id="0" * 32)
+
+        assert store.update_message_fields(populated, "a1", ref, {"x": 1}) is False
+
+    def test_targets_its_own_duplicate(self, store, populated):
+        """message_id is not unique: Strands derives it in memory. See #78.
+
+        Two managers restoring the same agent at once compute the same index, so
+        the array can hold two messages numbered 1. Each write must land on the
+        message its own identity names -- the second one here, not the first one
+        the positional operator would otherwise match.
+        """
+        duplicate = SessionMessage(
+            message_id=1, message={"role": "user", "content": [{"text": "dup"}]}
+        )
+        store.create_message(populated, "a1", duplicate)
+
+        store.update_message_fields(
+            populated,
+            "a1",
+            MessageRef(message_id=1, storage_id=storage_id_of(duplicate)),
+            {"guardrail_event": {"n": 1}},
+        )
 
         duplicates = self._raw_messages_with_id(store, populated, 1)
         assert len(duplicates) == 2
-        assert duplicates[0]["guardrail_event"] == {"n": 1}
-        assert "guardrail_event" not in duplicates[1]
+        assert "guardrail_event" not in duplicates[0]
+        assert duplicates[1]["guardrail_event"] == {"n": 1}
+
+    def test_falls_back_to_message_id_without_a_storage_id(self, store, populated):
+        """Messages stored before #78 have no identity, and stay updatable.
+
+        They are located by message_id exactly as they always were, which is why
+        this change needs no migration.
+        """
+        self._push_legacy_message(store, populated, 2)
+
+        assert (
+            store.update_message_fields(
+                populated, "a1", MessageRef(2), {"guardrail_event": {"old": True}}
+            )
+            is True
+        )
+        assert self._raw_message(store, populated, 2)["guardrail_event"] == {
+            "old": True
+        }
 
     # -- update_agent_fields ----------------------------------------------
 
@@ -141,9 +223,12 @@ class SessionRepositoryContract:
 
         assert store.get_agent_config(populated, "ghost")["model"] == "m"
         assert store.count_messages(populated, "ghost") == 0
-        assert store.get_last_message_id(populated, "ghost") is None
+        assert store.get_last_message_ref(populated, "ghost") is None
         assert store.list_messages(populated, "ghost") == []
-        assert store.update_message_fields(populated, "ghost", 0, {"x": 1}) is False
+        assert (
+            store.update_message_fields(populated, "ghost", MessageRef(0), {"x": 1})
+            is False
+        )
 
     # -- record_guardrail_event -------------------------------------------
 
@@ -154,8 +239,9 @@ class SessionRepositoryContract:
             "policies_triggered": {"contentPolicy": ["HATE/HIGH"]},
             "trace": {"inputAssessment": {"big": "payload"}},
         }
+        ref = self._ref(store, populated, 1)
 
-        assert store.record_guardrail_event(populated, "a1", 1, event) is True
+        assert store.record_guardrail_event(populated, "a1", ref, event) is True
 
         on_message = self._raw_message(store, populated, 1)["guardrail_event"]
         assert on_message["trace"] == {"inputAssessment": {"big": "payload"}}
@@ -163,6 +249,7 @@ class SessionRepositoryContract:
         on_session = self._session_guardrail_events(store, populated)
         assert len(on_session) == 1
         assert on_session[0]["message_id"] == 1
+        assert on_session[0]["storage_id"] == ref.storage_id
         assert on_session[0]["agent_id"] == "a1"
         assert on_session[0]["policies_triggered"] == {"contentPolicy": ["HATE/HIGH"]}
         assert "trace" not in on_session[0]
@@ -172,8 +259,33 @@ class SessionRepositoryContract:
     ):
         event = {"action": "BLOCKED", "timestamp": datetime.now(UTC)}
 
-        assert store.record_guardrail_event(populated, "a1", 99, event) is False
+        assert (
+            store.record_guardrail_event(populated, "a1", MessageRef(99), event)
+            is False
+        )
         assert self._session_guardrail_events(store, populated) == []
+
+    def test_guardrail_event_names_the_message_it_landed_on(self, store, populated):
+        """The session-level audit entry must survive a duplicated index.
+
+        message_id alone would point the auditor at two messages; the identity
+        says which one was actually intercepted.
+        """
+        duplicate = SessionMessage(
+            message_id=1, message={"role": "user", "content": [{"text": "dup"}]}
+        )
+        store.create_message(populated, "a1", duplicate)
+
+        store.record_guardrail_event(
+            populated,
+            "a1",
+            MessageRef(message_id=1, storage_id=storage_id_of(duplicate)),
+            {"action": "BLOCKED", "timestamp": datetime.now(UTC)},
+        )
+
+        on_session = self._session_guardrail_events(store, populated)
+        assert on_session[0]["message_id"] == 1
+        assert on_session[0]["storage_id"] == storage_id_of(duplicate)
 
     # -- Domain reads ------------------------------------------------------
 
@@ -215,9 +327,18 @@ class SessionRepositoryContract:
         assert store.count_messages(populated, "a1") == 2
         assert store.count_messages(populated, "ghost") == 0
 
-    def test_get_last_message_id(self, store, populated):
-        assert store.get_last_message_id(populated, "a1") == 1
-        assert store.get_last_message_id(populated, "ghost") is None
+    def test_get_last_message_ref(self, store, populated):
+        ref = store.get_last_message_ref(populated, "a1")
+
+        assert ref.message_id == 1
+        assert ref.storage_id == self._raw_message(store, populated, 1)["storage_id"]
+        assert store.get_last_message_ref(populated, "ghost") is None
+
+    def test_get_last_message_ref_without_a_storage_id(self, store, populated):
+        """A message stored before #78 still answers, with no identity to give."""
+        self._push_legacy_message(store, populated, 2)
+
+        assert store.get_last_message_ref(populated, "a1") == MessageRef(2)
 
     # -- Agent config handover ---------------------------------------------
 
@@ -252,8 +373,34 @@ class SessionRepositoryContract:
 
     # -- Raw access, implemented by each subclass --------------------------
 
+    def _ref(self, store, session_id: str, message_id: int) -> MessageRef:
+        """Build the reference of a stored message, identity included."""
+        return MessageRef.from_document(
+            self._raw_message(store, session_id, message_id)
+        )
+
     def _raw_message(self, store, session_id: str, message_id: int) -> dict[str, Any]:
         """Return one stored message document, extension fields included."""
+        raise NotImplementedError
+
+    @staticmethod
+    def legacy_message_document(message_id: int) -> dict[str, Any]:
+        """Shape a message as it was stored before #78: no identity at all."""
+        now = datetime.now(UTC)
+        return {
+            "message_id": message_id,
+            "message": {"role": "user", "content": [{"text": "legacy"}]},
+            "redact_message": None,
+            "created_at": now,
+            "updated_at": now,
+        }
+
+    def _push_legacy_message(self, store, session_id: str, message_id: int) -> None:
+        """Append legacy_message_document() straight into the store.
+
+        It bypasses create_message() on purpose: that method stamps an identity
+        by design, so this is the only way to get a pre-#78 message.
+        """
         raise NotImplementedError
 
     def _raw_messages_with_id(

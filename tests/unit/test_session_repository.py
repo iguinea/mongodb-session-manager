@@ -7,6 +7,11 @@ import pytest
 from pymongo.errors import PyMongoError
 from strands.types.session import Session, SessionMessage
 
+from mongodb_session_manager.message_identity import (
+    MessageRef,
+    attach_storage_id,
+    storage_id_of,
+)
 from mongodb_session_manager.mongodb_session_repository import MongoDBSessionRepository
 
 # ---------------------------------------------------------------------------
@@ -416,6 +421,29 @@ class TestMessageOperations:
         with pytest.raises(ValueError, match="Session s1 not found"):
             mock_repository.create_message("s1", "a1", sample_session_message)
 
+    def test_create_message_stamps_the_identity_on_both_sides(
+        self, mock_repository, mock_mongo_collection, sample_session_message
+    ):
+        """El storage_id se escribe y se queda en el SessionMessage. Ver #78."""
+        mock_repository.create_message("s1", "a1", sample_session_message)
+
+        pushed = mock_mongo_collection.update_one.call_args[0][1]["$push"][
+            "agents.a1.messages"
+        ]
+        assert pushed["storage_id"] == storage_id_of(sample_session_message)
+        assert pushed["storage_id"]
+
+    def test_create_message_does_not_hand_over_an_identity_it_failed_to_store(
+        self, mock_repository, mock_mongo_collection, sample_session_message
+    ):
+        """Sin sesión no hay mensaje, y por tanto tampoco identidad que llevar."""
+        mock_mongo_collection.update_one.return_value = MagicMock(matched_count=0)
+
+        with pytest.raises(ValueError):
+            mock_repository.create_message("s1", "a1", sample_session_message)
+
+        assert storage_id_of(sample_session_message) is None
+
     def test_read_message_returns_message(self, mock_repository, mock_mongo_collection):
         mock_mongo_collection.find_one.return_value = {
             "agents": {
@@ -547,6 +575,24 @@ class TestMessageOperations:
             message={"role": "user", "content": [{"text": "x"}]},
         )
         with pytest.raises(ValueError, match="Message 99 not found"):
+            mock_repository.update_message("s1", "a1", msg)
+
+    def test_update_message_says_what_it_searched_for(
+        self, mock_repository, mock_mongo_collection
+    ):
+        """Con un índice duplicado, «mensaje 7 no encontrado» sería mentira.
+
+        El índice sí existe; lo que no se encontró es la identidad. El
+        diagnóstico tiene que decir por cuál de los dos se buscó.
+        """
+        mock_mongo_collection.update_one.return_value = MagicMock(matched_count=0)
+        mock_mongo_collection.count_documents.return_value = 1
+        msg = SessionMessage(
+            message_id=7, message={"role": "user", "content": [{"text": "x"}]}
+        )
+        attach_storage_id(msg, "9f1c")
+
+        with pytest.raises(ValueError, match="searched by storage_id=9f1c"):
             mock_repository.update_message("s1", "a1", msg)
 
     def test_update_message_names_the_missing_agent(
@@ -949,7 +995,10 @@ class TestUpdateMessageFields:
     ):
         """El llamante nombra campos del mensaje; el prefijo lo pone el repositorio."""
         mock_repository.update_message_fields(
-            "s1", "a1", 3, {"event_loop_metrics.cycle_metrics": {"cycle_count": 2}}
+            "s1",
+            "a1",
+            MessageRef(3, "abc"),
+            {"event_loop_metrics.cycle_metrics": {"cycle_count": 2}},
         )
 
         set_data = mock_mongo_collection.update_one.call_args[0][1]["$set"]
@@ -957,14 +1006,30 @@ class TestUpdateMessageFields:
             "cycle_count": 2
         }
 
-    def test_matches_the_message_by_message_id(
+    def test_matches_the_message_by_its_identity(
         self, mock_repository, mock_mongo_collection
     ):
-        mock_repository.update_message_fields("s1", "a1", 7, {"guardrail_event": {}})
+        """El selector nombra la identidad, no el índice. Es el fix de #78."""
+        mock_repository.update_message_fields(
+            "s1", "a1", MessageRef(7, "9f1c"), {"guardrail_event": {}}
+        )
 
         query = mock_mongo_collection.update_one.call_args[0][0]
         assert query["_id"] == "s1"
+        assert query["agents.a1.messages.storage_id"] == "9f1c"
+        assert "agents.a1.messages.message_id" not in query
+
+    def test_falls_back_to_message_id_without_an_identity(
+        self, mock_repository, mock_mongo_collection
+    ):
+        """Los mensajes anteriores a #78 no tienen identidad: siguen por índice."""
+        mock_repository.update_message_fields(
+            "s1", "a1", MessageRef(7), {"guardrail_event": {}}
+        )
+
+        query = mock_mongo_collection.update_one.call_args[0][0]
         assert query["agents.a1.messages.message_id"] == 7
+        assert "agents.a1.messages.storage_id" not in query
 
     def test_agent_fields_travel_in_the_same_write(
         self, mock_repository, mock_mongo_collection
@@ -977,7 +1042,7 @@ class TestUpdateMessageFields:
         mock_repository.update_message_fields(
             "s1",
             "a1",
-            3,
+            MessageRef(3, "abc"),
             {"event_loop_metrics.accumulated_usage": {"totalTokens": 10}},
             agent_set_operations={"agent_data.model": "claude-opus-5"},
         )
@@ -988,7 +1053,12 @@ class TestUpdateMessageFields:
         assert "agents.a1.messages.$.event_loop_metrics.accumulated_usage" in set_data
 
     def test_returns_true_when_a_document_matched(self, mock_repository):
-        assert mock_repository.update_message_fields("s1", "a1", 1, {"x": 1}) is True
+        assert (
+            mock_repository.update_message_fields(
+                "s1", "a1", MessageRef(1, "abc"), {"x": 1}
+            )
+            is True
+        )
 
     def test_returns_false_when_nothing_matched(
         self, mock_repository, mock_mongo_collection
@@ -1001,7 +1071,12 @@ class TestUpdateMessageFields:
         mock_mongo_collection.update_one.return_value = MagicMock(
             matched_count=0, modified_count=0
         )
-        assert mock_repository.update_message_fields("s1", "a1", 1, {"x": 1}) is False
+        assert (
+            mock_repository.update_message_fields(
+                "s1", "a1", MessageRef(1, "abc"), {"x": 1}
+            )
+            is False
+        )
 
     def test_touch_timestamps_refreshes_the_three_levels(
         self, mock_repository, mock_mongo_collection
@@ -1012,7 +1087,7 @@ class TestUpdateMessageFields:
         por qué decidir si una escritura mueve el reloj de la sesión.
         """
         mock_repository._update_message_document(
-            "s1", "a1", 1, {"message": {}}, touch_timestamps=True
+            "s1", "a1", MessageRef(1, "abc"), {"message": {}}, touch_timestamps=True
         )
 
         set_data = mock_mongo_collection.update_one.call_args[0][1]["$set"]
@@ -1027,20 +1102,27 @@ class TestUpdateMessageFields:
         El `updated_at` raíz mide actividad conversacional; las anotaciones que
         el manager hace sobre el turno recién cerrado no lo son.
         """
-        mock_repository.update_message_fields("s1", "a1", 1, {"guardrail_event": {}})
+        mock_repository.update_message_fields(
+            "s1", "a1", MessageRef(1, "abc"), {"guardrail_event": {}}
+        )
 
         set_data = mock_mongo_collection.update_one.call_args[0][1]["$set"]
         assert "updated_at" not in set_data
         assert "agents.a1.updated_at" not in set_data
 
     def test_does_not_read_before_writing(self, mock_repository, mock_mongo_collection):
-        mock_repository.update_message_fields("s1", "a1", 1, {"x": 1})
+        mock_repository.update_message_fields(
+            "s1", "a1", MessageRef(1, "abc"), {"x": 1}
+        )
         assert mock_mongo_collection.find_one.call_count == 0
 
     def test_no_write_when_there_is_nothing_to_set(
         self, mock_repository, mock_mongo_collection
     ):
-        assert mock_repository.update_message_fields("s1", "a1", 1, {}) is False
+        assert (
+            mock_repository.update_message_fields("s1", "a1", MessageRef(1, "abc"), {})
+            is False
+        )
         assert mock_mongo_collection.update_one.call_count == 0
 
 
@@ -1108,7 +1190,7 @@ class TestRecordGuardrailEvent:
         self, mock_repository, mock_mongo_collection
     ):
         event = self._event()
-        mock_repository.record_guardrail_event("s1", "a1", 5, event)
+        mock_repository.record_guardrail_event("s1", "a1", MessageRef(5, "9f1c"), event)
 
         set_data = mock_mongo_collection.update_one.call_args[0][1]["$set"]
         assert set_data["agents.a1.messages.$.guardrail_event"] == event
@@ -1117,7 +1199,9 @@ class TestRecordGuardrailEvent:
         self, mock_repository, mock_mongo_collection
     ):
         """Una sola escritura: el $set del mensaje y el $push de la sesión juntos."""
-        mock_repository.record_guardrail_event("s1", "a1", 5, self._event())
+        mock_repository.record_guardrail_event(
+            "s1", "a1", MessageRef(5, "9f1c"), self._event()
+        )
 
         assert mock_mongo_collection.update_one.call_count == 1
         update = mock_mongo_collection.update_one.call_args[0][1]
@@ -1127,12 +1211,15 @@ class TestRecordGuardrailEvent:
     def test_session_event_identifies_the_message(
         self, mock_repository, mock_mongo_collection
     ):
-        mock_repository.record_guardrail_event("s1", "a1", 5, self._event())
+        mock_repository.record_guardrail_event(
+            "s1", "a1", MessageRef(5, "9f1c"), self._event()
+        )
 
         pushed = mock_mongo_collection.update_one.call_args[0][1]["$push"][
             "guardrail_events"
         ]
         assert pushed["message_id"] == 5
+        assert pushed["storage_id"] == "9f1c"
         assert pushed["agent_id"] == "a1"
         assert pushed["action"] == "BLOCKED"
         assert "timestamp" in pushed
@@ -1146,7 +1233,7 @@ class TestRecordGuardrailEvent:
         ahí el GuardrailTrace completo lo haría impracticable.
         """
         event = self._event(trace={"inputAssessment": {"huge": "payload"}})
-        mock_repository.record_guardrail_event("s1", "a1", 5, event)
+        mock_repository.record_guardrail_event("s1", "a1", MessageRef(5, "9f1c"), event)
 
         update = mock_mongo_collection.update_one.call_args[0][1]
         assert update["$set"]["agents.a1.messages.$.guardrail_event"]["trace"] == {
@@ -1162,7 +1249,7 @@ class TestRecordGuardrailEvent:
             stop_reason="guardrail_intervened",
             policies_triggered={"contentPolicy": ["HATE/HIGH"]},
         )
-        mock_repository.record_guardrail_event("s1", "a1", 5, event)
+        mock_repository.record_guardrail_event("s1", "a1", MessageRef(5, "9f1c"), event)
 
         pushed = mock_mongo_collection.update_one.call_args[0][1]["$push"][
             "guardrail_events"
@@ -1174,7 +1261,9 @@ class TestRecordGuardrailEvent:
         self, mock_repository, mock_mongo_collection
     ):
         """Anotar un turno ya cerrado no es actividad conversacional."""
-        mock_repository.record_guardrail_event("s1", "a1", 5, self._event())
+        mock_repository.record_guardrail_event(
+            "s1", "a1", MessageRef(5, "9f1c"), self._event()
+        )
 
         set_data = mock_mongo_collection.update_one.call_args[0][1]["$set"]
         assert "updated_at" not in set_data
@@ -1186,7 +1275,9 @@ class TestRecordGuardrailEvent:
             matched_count=0, modified_count=0
         )
         assert (
-            mock_repository.record_guardrail_event("s1", "a1", 5, self._event())
+            mock_repository.record_guardrail_event(
+                "s1", "a1", MessageRef(5, "9f1c"), self._event()
+            )
             is False
         )
 
@@ -1295,34 +1386,43 @@ class TestMessageReads:
         mock_mongo_collection.find_one.return_value = {"agents": {}}
         assert mock_repository.count_messages("s1", "missing") == 0
 
-    def test_get_last_message_id_returns_the_last_one(
+    def test_get_last_message_ref_carries_the_identity(
         self, mock_repository, mock_mongo_collection
     ):
         mock_mongo_collection.find_one.return_value = {
+            "agents": {"a1": {"messages": [{"message_id": 7, "storage_id": "9f1c"}]}}
+        }
+        assert mock_repository.get_last_message_ref("s1", "a1") == MessageRef(7, "9f1c")
+
+    def test_get_last_message_ref_without_an_identity(
+        self, mock_repository, mock_mongo_collection
+    ):
+        """Un mensaje anterior a #78 responde igual, sin identidad que dar."""
+        mock_mongo_collection.find_one.return_value = {
             "agents": {"a1": {"messages": [{"message_id": 7}]}}
         }
-        assert mock_repository.get_last_message_id("s1", "a1") == 7
+        assert mock_repository.get_last_message_ref("s1", "a1") == MessageRef(7)
 
-    def test_get_last_message_id_slices_the_array_server_side(
+    def test_get_last_message_ref_slices_the_array_server_side(
         self, mock_repository, mock_mongo_collection
     ):
         """Solo el último mensaje viaja por la red, no el historial entero."""
         mock_mongo_collection.find_one.return_value = {"agents": {}}
-        mock_repository.get_last_message_id("s1", "a1")
+        mock_repository.get_last_message_ref("s1", "a1")
 
         projection = mock_mongo_collection.find_one.call_args[0][1]
         assert projection == {"agents.a1.messages": {"$slice": -1}}
 
-    def test_get_last_message_id_returns_none_without_messages(
+    def test_get_last_message_ref_returns_none_without_messages(
         self, mock_repository, mock_mongo_collection
     ):
         mock_mongo_collection.find_one.return_value = {
             "agents": {"a1": {"messages": []}}
         }
-        assert mock_repository.get_last_message_id("s1", "a1") is None
+        assert mock_repository.get_last_message_ref("s1", "a1") is None
 
-    def test_get_last_message_id_returns_none_for_an_unknown_agent(
+    def test_get_last_message_ref_returns_none_for_an_unknown_agent(
         self, mock_repository, mock_mongo_collection
     ):
         mock_mongo_collection.find_one.return_value = {"agents": {}}
-        assert mock_repository.get_last_message_id("s1", "missing") is None
+        assert mock_repository.get_last_message_ref("s1", "missing") is None

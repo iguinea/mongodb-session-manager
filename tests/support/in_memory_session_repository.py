@@ -12,8 +12,9 @@ reads the same as its integration counterpart.
 Two behaviours are reproduced *on purpose*, warts included -- a double that is
 kinder than the real thing lies:
 
-- The positional update matches only the first message carrying a given
-  message_id (see issue #78).
+- A message is located by the identity it carries; a message stored before #78
+  has none, and falls back to `message_id`, where a duplicate matches only its
+  first occurrence.
 - `update_agent()` writes field by field, so it does not wipe the config the
   manager keeps under `agent_data` (see issue #65).
 
@@ -35,6 +36,13 @@ from typing import Any
 from strands.session.session_repository import SessionRepository
 from strands.types.session import Session, SessionAgent, SessionMessage
 
+from mongodb_session_manager.message_identity import (
+    STORAGE_ID_FIELD,
+    MessageRef,
+    attach_storage_id,
+    new_storage_id,
+    ref_of,
+)
 from mongodb_session_manager.mongodb_session_repository import (
     MongoDBSessionRepository,
 )
@@ -98,6 +106,19 @@ class InMemorySessionRepository(SessionRepository):
                 return copy.deepcopy(msg)
         raise KeyError(f"Message {message_id} not found in agent {agent_id}")
 
+    def push_raw_message(
+        self, session_id: str, agent_id: str, message_data: dict[str, Any]
+    ) -> None:
+        """Append a message document as stored, bypassing create_message().
+
+        The counterpart of a hand-written `$push` against MongoDB. Used to place
+        a message that create_message() would never produce -- one without a
+        storage_id, as everything written before #78 is.
+        """
+        self._sessions[session_id]["agents"][agent_id]["messages"].append(
+            copy.deepcopy(message_data)
+        )
+
     # -- Internals ---------------------------------------------------------
 
     def _agent(self, session_id: str, agent_id: str) -> dict[str, Any] | None:
@@ -108,17 +129,22 @@ class InMemorySessionRepository(SessionRepository):
         return session["agents"][agent_id]
 
     def _find_message(
-        self, session_id: str, agent_id: str, message_id: int
+        self, session_id: str, agent_id: str, ref: MessageRef
     ) -> dict[str, Any] | None:
-        """Return the first message with this id, mirroring the positional operator."""
+        """Return the message a reference names, mirroring the positional operator.
+
+        Which field names the message is MessageRef's rule, the same one the
+        real repository asks; the first match wins, exactly like MongoDB's `$`.
+        """
         agent = self._agent(session_id, agent_id)
         if agent is None:
             return None
-        # First match only, exactly like MongoDB's `$`. See #78.
-        for msg in agent.get("messages", []):
-            if msg.get("message_id") == message_id:
-                return msg
-        return None
+
+        field, value = ref.locator()
+        return next(
+            (msg for msg in agent.get("messages", []) if msg.get(field) == value),
+            None,
+        )
 
     # -- Session -----------------------------------------------------------
 
@@ -238,30 +264,31 @@ class InMemorySessionRepository(SessionRepository):
         session_message: SessionMessage,
         **kwargs: Any,
     ) -> None:
-        """Append a message to an agent."""
+        """Append a message to an agent, stamping its stable identity."""
         agent = self._agent(session_id, agent_id)
         if agent is None:
             raise ValueError(f"Session {session_id} not found")
 
         now = datetime.now(UTC)
+        storage_id = new_storage_id()
         message_data = copy.deepcopy(session_message.__dict__)
+        message_data[STORAGE_ID_FIELD] = storage_id
         message_data["created_at"] = now
         message_data["updated_at"] = now
 
         agent["messages"].append(message_data)
         agent["updated_at"] = now
         self._sessions[session_id]["updated_at"] = now
+        attach_storage_id(session_message, storage_id)
 
     def read_message(
         self, session_id: str, agent_id: str, message_id: int, **kwargs: Any
     ) -> SessionMessage | None:
         """Read one message."""
-        msg = self._find_message(session_id, agent_id, message_id)
+        msg = self._find_message(session_id, agent_id, MessageRef(message_id))
         if msg is None:
             return None
-        return SessionMessage(
-            **MongoDBSessionRepository._filter_message_data(copy.deepcopy(msg))
-        )
+        return MongoDBSessionRepository._to_session_message(copy.deepcopy(msg))
 
     def update_message(
         self,
@@ -271,10 +298,11 @@ class InMemorySessionRepository(SessionRepository):
         **kwargs: Any,
     ) -> None:
         """Update a message, writing only the allowlisted fields."""
+        ref = ref_of(session_message)
         matched = self._update_message_document(
             session_id,
             agent_id,
-            session_message.message_id,
+            ref,
             {
                 "message": session_message.message,
                 "redact_message": session_message.redact_message,
@@ -287,8 +315,9 @@ class InMemorySessionRepository(SessionRepository):
             if self._agent(session_id, agent_id) is None:
                 raise ValueError(f"Agent {agent_id} not found in session {session_id}")
             raise ValueError(
-                f"Message {session_message.message_id} not found in agent {agent_id} "
-                f"of session {session_id}"
+                MongoDBSessionRepository._missing_message_text(
+                    session_id, agent_id, ref
+                )
             )
 
     def list_messages(
@@ -316,9 +345,7 @@ class InMemorySessionRepository(SessionRepository):
             else messages[offset:]
         )
         return [
-            SessionMessage(
-                **MongoDBSessionRepository._filter_message_data(copy.deepcopy(msg))
-            )
+            MongoDBSessionRepository._to_session_message(copy.deepcopy(msg))
             for msg in page
         ]
 
@@ -328,7 +355,7 @@ class InMemorySessionRepository(SessionRepository):
         self,
         session_id: str,
         agent_id: str,
-        message_id: int,
+        ref: MessageRef,
         message_fields: dict[str, Any],
         *,
         agent_fields: dict[str, Any] | None = None,
@@ -339,7 +366,7 @@ class InMemorySessionRepository(SessionRepository):
         if not message_fields and not agent_fields and not push:
             return False
 
-        msg = self._find_message(session_id, agent_id, message_id)
+        msg = self._find_message(session_id, agent_id, ref)
         if msg is None:
             return False
         # _find_message already proved both exist.
@@ -364,7 +391,7 @@ class InMemorySessionRepository(SessionRepository):
         self,
         session_id: str,
         agent_id: str,
-        message_id: int,
+        ref: MessageRef,
         set_operations: dict[str, Any],
         agent_set_operations: dict[str, Any] | None = None,
     ) -> bool:
@@ -372,7 +399,7 @@ class InMemorySessionRepository(SessionRepository):
         return self._update_message_document(
             session_id,
             agent_id,
-            message_id,
+            ref,
             set_operations,
             agent_fields=agent_set_operations,
         )
@@ -397,17 +424,17 @@ class InMemorySessionRepository(SessionRepository):
         return True
 
     def record_guardrail_event(
-        self, session_id: str, agent_id: str, message_id: int, event: dict[str, Any]
+        self, session_id: str, agent_id: str, ref: MessageRef, event: dict[str, Any]
     ) -> bool:
         """Record a guardrail intervention on its message and on the session."""
         return self._update_message_document(
             session_id,
             agent_id,
-            message_id,
+            ref,
             {"guardrail_event": event},
             push={
                 "guardrail_events": MongoDBSessionRepository._session_guardrail_entry(
-                    agent_id, message_id, event
+                    agent_id, ref, event
                 )
             },
         )
@@ -440,13 +467,13 @@ class InMemorySessionRepository(SessionRepository):
         agent = self._agent(session_id, agent_id)
         return len(agent.get("messages", [])) if agent else 0
 
-    def get_last_message_id(self, session_id: str, agent_id: str) -> int | None:
-        """Read the message_id of the agent's last message."""
+    def get_last_message_ref(self, session_id: str, agent_id: str) -> MessageRef | None:
+        """Reference the agent's last message, identity included."""
         agent = self._agent(session_id, agent_id)
         messages = agent.get("messages", []) if agent else []
         if not messages:
             return None
-        return messages[-1]["message_id"]
+        return MessageRef.from_document(messages[-1])
 
     # -- Metadata, feedback, lifecycle -------------------------------------
 

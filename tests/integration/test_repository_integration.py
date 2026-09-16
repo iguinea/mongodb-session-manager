@@ -227,20 +227,22 @@ class TestMessageLifecycle:
         assert len(page) == 2
 
     def _seed_message(self, repo, session_id, text="original"):
-        """Sesión + agente `a1` + un mensaje con message_id 1."""
+        """Sesión + agente `a1` + un mensaje con message_id 1.
+
+        Devuelve el SessionMessage creado, que vuelve con su identidad puesta
+        por `create_message()` -- igual que lo recibe Strands.
+        """
         repo.create_session(Session(session_id=session_id, session_type="default"))
         repo.create_agent(
             session_id,
             SessionAgent(agent_id="a1", state={}, conversation_manager_state={}),
         )
-        repo.create_message(
-            session_id,
-            "a1",
-            SessionMessage(
-                message_id=1,
-                message={"role": "user", "content": [{"text": text}]},
-            ),
+        message = SessionMessage(
+            message_id=1,
+            message={"role": "user", "content": [{"text": text}]},
         )
+        repo.create_message(session_id, "a1", message)
+        return message
 
     @staticmethod
     def _redaction(message_id=1, text="original"):
@@ -315,32 +317,50 @@ class TestMessageLifecycle:
         with pytest.raises(ValueError, match="Agent ghost not found"):
             repo.update_message(unique_session_id, "ghost", self._redaction())
 
-    def test_duplicate_message_id_updates_only_the_first(self, repo, unique_session_id):
-        """Contrato actual, no deseado: message_id no es una identidad única.
+    def test_duplicate_message_id_redacts_its_own_message(
+        self, repo, unique_session_id
+    ):
+        """message_id no es una identidad única, y aun así se acierta. Ver #78.
 
         Strands deriva el id en memoria (`append_message`: latest.message_id + 1),
-        así que dos managers concurrentes pueden duplicarlo; el operador
-        posicional actualiza entonces solo el primer elemento que casa. Cuando
-        #78 dé a cada mensaje una identidad estable, este test debe fallar y
-        reescribirse.
+        así que dos managers concurrentes pueden duplicarlo. La redacción va
+        contra el SessionMessage que devolvió `create_message()`, que lleva su
+        storage_id: el operador posicional casa con ese, no con el primero que
+        comparte índice.
         """
         self._seed_message(repo, unique_session_id, text="first")
-        repo.create_message(
-            unique_session_id,
-            "a1",
-            SessionMessage(
-                message_id=1,
-                message={"role": "user", "content": [{"text": "second"}]},
-            ),
+        second = SessionMessage(
+            message_id=1,
+            message={"role": "user", "content": [{"text": "second"}]},
         )
+        repo.create_message(unique_session_id, "a1", second)
+        second.redact_message = {"role": "user", "content": [{"text": "***"}]}
 
-        repo.update_message(unique_session_id, "a1", self._redaction(text="first"))
+        repo.update_message(unique_session_id, "a1", second)
 
         messages = repo.collection.find_one({"_id": unique_session_id})["agents"]["a1"][
             "messages"
         ]
-        assert messages[0]["redact_message"] is not None
-        assert messages[1]["redact_message"] is None
+        assert messages[0]["redact_message"] is None
+        assert messages[1]["redact_message"]["content"][0]["text"] == "***"
+
+    def test_message_stored_before_the_identity_is_still_redactable(
+        self, repo, unique_session_id
+    ):
+        """Compatibilidad: sin storage_id se localiza por índice, como siempre."""
+        self._seed_message(repo, unique_session_id)
+        repo.collection.update_one(
+            {"_id": unique_session_id},
+            {"$unset": {"agents.a1.messages.$[].storage_id": ""}},
+        )
+
+        repo.update_message(unique_session_id, "a1", self._redaction())
+
+        message_doc = repo.collection.find_one({"_id": unique_session_id})["agents"][
+            "a1"
+        ]["messages"][0]
+        assert "storage_id" not in message_doc
+        assert message_doc["redact_message"]["content"][0]["text"] == "***"
 
 
 # ---------------------------------------------------------------------------
