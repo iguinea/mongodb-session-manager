@@ -261,6 +261,27 @@ class TestReadSession:
         assert result.session_id == "s1"
         assert result.session_type == "chat"
 
+    def test_projects_only_the_session_header(
+        self, mock_repository, mock_mongo_collection
+    ):
+        """El historial embebido no viaja para reconstruir un Session."""
+        mock_mongo_collection.find_one.return_value = {
+            "session_id": "s1",
+            "session_type": "chat",
+        }
+
+        mock_repository.read_session("s1")
+
+        mock_mongo_collection.find_one.assert_called_once_with(
+            {"_id": "s1"},
+            {
+                "session_id": 1,
+                "session_type": 1,
+                "created_at": 1,
+                "updated_at": 1,
+            },
+        )
+
     def test_returns_none_when_not_found(self, mock_repository, mock_mongo_collection):
         mock_mongo_collection.find_one.return_value = None
         assert mock_repository.read_session("missing") is None
@@ -307,6 +328,28 @@ class TestAgentOperations:
         result = mock_repository.read_agent("s1", "a1")
         assert result is not None
         assert result.agent_id == "a1"
+
+    def test_read_agent_projects_only_agent_data(
+        self, mock_repository, mock_mongo_collection
+    ):
+        """El estado y la config viajan; el array de mensajes, no."""
+        mock_mongo_collection.find_one.return_value = {
+            "agents": {
+                "a1": {
+                    "agent_data": {
+                        "agent_id": "a1",
+                        "state": {},
+                        "conversation_manager_state": {},
+                    }
+                }
+            }
+        }
+
+        mock_repository.read_agent("s1", "a1")
+
+        mock_mongo_collection.find_one.assert_called_once_with(
+            {"_id": "s1"}, {"agents.a1.agent_data": 1}
+        )
 
     def test_read_agent_returns_none_when_missing(
         self, mock_repository, mock_mongo_collection

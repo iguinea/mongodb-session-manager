@@ -252,9 +252,12 @@ print(f"Created session: {created_session.session_id}")
 def read_session(self, session_id: str, **kwargs: Any) -> Optional[Session]
 ```
 
-Read a session from MongoDB by ID.
+Read a session header from MongoDB by ID.
 
-Retrieves session metadata (ID, type, timestamps) without loading agents or messages.
+The MongoDB query projects exactly `session_id`, `session_type`, `created_at` and
+`updated_at`. Embedded agents, messages, metadata, feedback and guardrail events
+do not travel over the wire merely to determine whether the session exists and
+reconstruct the Strands `Session` object.
 
 #### Parameters
 
@@ -338,9 +341,16 @@ def read_agent(
 ) -> Optional[SessionAgent]
 ```
 
-Read an agent from a session by agent ID.
+Read an agent from a session by agent ID without loading its messages.
 
-Returns the Strands SDK fields of `agent_data` (`agent_id`, `state`, `conversation_manager_state`, `_internal_state` and timestamps). The `model` and `system_prompt` stored next to them do not fit in a `SessionAgent`: the repository keeps the last ones read for `MongoDBSessionManager.initialize()`, which uses them to avoid rewriting an unchanged config. `prompt_metadata` is left out; read it with `MongoDBSessionManager.get_agent_config()`.
+The query projects `agents.<agent_id>.agent_data`; `list_messages()` is the only
+restoration read that transfers the history. The method returns the Strands SDK
+fields of `agent_data` (`agent_id`, `state`, `conversation_manager_state`,
+`_internal_state` and timestamps). The `model` and `system_prompt` stored next to
+them do not fit in a `SessionAgent`: the repository keeps the last ones read for
+`MongoDBSessionManager.initialize()`, which uses them to avoid rewriting an
+unchanged config. `prompt_metadata` is left out; read it with
+`MongoDBSessionManager.get_agent_config()`.
 
 #### Parameters
 
@@ -1030,7 +1040,7 @@ def pop_read_agent_config(
 
 Return, and forget, the `model` and `system_prompt` found by the last `read_agent()` for this session and agent.
 
-`MongoDBSessionManager.initialize()` calls it right after the Strands SDK restores an agent, to learn which config is already persisted without a second read. Only the last read is kept, so a long-lived repository does not accumulate system prompts. Any narrower projection in `read_agent()` must keep `agent_data.model` and `agent_data.system_prompt`.
+`MongoDBSessionManager.initialize()` calls it right after the Strands SDK restores an agent, to learn which config is already persisted without a second read. Only the last read is kept, so a long-lived repository does not accumulate system prompts. The narrow `read_agent()` projection includes all of `agent_data`, and therefore keeps `model` and `system_prompt` while excluding the sibling `messages` array.
 
 It is public because the manager calls it: any repository passed as `session_repository=` has to provide it, or `initialize()` raises `AttributeError`.
 

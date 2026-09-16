@@ -658,6 +658,38 @@ recorded, so the next manager retries.
 
 **Code Reference**: `src/mongodb_session_manager/mongodb_session_repository.py` (`_ensure_indexes`, `_INDEX_REGISTRY`)
 
+### Restore Read Payload
+
+A warm restoration performs three domain reads: the session header, the agent
+state and the message history. Session documents embed their histories, so an
+unprojected `read_session()` and a projection of the whole agent made that same
+history cross the wire three times.
+
+The first two reads now have payloads independent of history size:
+
+- `read_session()` projects `session_id`, `session_type`, `created_at` and
+  `updated_at`.
+- `read_agent()` projects `agents.<id>.agent_data`, including the `model` and
+  `system_prompt` used to seed the config cache.
+- `list_messages()` remains the only read that transfers messages. It sorts by
+  `created_at` before applying `offset`; a projection `$slice` uses physical
+  array order first and would change the result when those orders differ.
+
+Measured against a local MongoDB 8.2.7 standalone with primary reads, 5 warmups
+and 30 repetitions (messages of 918 BSON bytes):
+
+| Messages | Previous restoration (p50 / BSON) | Projected restoration (p50 / BSON) |
+|---:|---:|---:|
+| 10 | 1.03 ms / 28.1 KiB | 0.99 ms / 9.5 KiB |
+| 100 | 1.76 ms / 271.8 KiB | 1.23 ms / 90.7 KiB |
+| 1,000 | 12.91 ms / 2,712 KiB | 4.93 ms / 904 KiB |
+| 5,000 | 64.24 ms / 13,570 KiB | 23.96 ms / 4,523 KiB |
+
+The byte reduction approaches 66.7% as history grows. These timings validate
+MongoDB locally; DocumentDB support for the projection syntax is documented by
+AWS, but its latency and replica consistency require measurement on the target
+cluster.
+
 ### Writes per Turn
 
 On DocumentDB every `update` costs 40-55 ms regardless of its size, so what
