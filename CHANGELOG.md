@@ -1,5 +1,9 @@
 # Changelog
 
+## [2026-09-17] PR #101 - Fix: el error de AWS sale del hook y cuenta como fallo (#99) (@iguinea)
+
+- Fix: el error de AWS sale del hook y cuenta como fallo (#99)
+
 ## [2026-09-17] PR #100 - Feat: pool que respeta la configuración, health check acotado e índices que no se pierden (#59) (@iguinea)
 
 - Feat: pool que respeta la configuración, health check acotado e índic…
