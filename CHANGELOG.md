@@ -1,5 +1,11 @@
 # Changelog
 
+## [2026-09-17] PR #98 - Feat: ciclo de vida para el trabajo asíncrono de los hooks (#62) (@iguinea)
+
+- Feat: ciclo de vida para el trabajo asíncrono de los hooks (#62)
+- Fix: correcciones del gate de revisión del ciclo de vida de hooks (#62)
+- Docs: el caso real que respalda la cola FIFO de metadata (#62)
+
 ## [0.18.0] - 2026-09-17
 
 ### Added
