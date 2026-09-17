@@ -9,7 +9,9 @@ allowing teams to monitor user satisfaction and respond quickly to negative feed
 Key Features:
     - Automatic SNS notifications on feedback submission
     - Non-blocking async operation to avoid impacting main feedback storage
-    - Graceful error handling - feedback is always stored even if notification fails
+    - Feedback is always stored even if the notification fails: the
+      notification is already out of its way by then, and its failure is
+      counted, not hidden
     - Rich message attributes for SNS filtering and routing
     - Notifications run on the event loop the hook is bound to, whatever
       thread calls it (pass `loop=`, or build the hook inside a running loop)
@@ -104,7 +106,12 @@ Requirements:
 
 Error Handling:
     - ImportError: Raised during initialization if custom_aws.sns is not available
-    - All other errors: Logged but not raised to ensure feedback storage succeeds
+    - All other errors: raised out of the notification, which runs in the
+      background — `background_work.BackgroundWork` counts them as `failed` and
+      logs them once, with their context and their traceback. The notification
+      is dispatched as `Delivery.GUARANTEED`, so a lost one has to be visible
+    - A failed notification never fails the feedback storage: by the time the
+      notification runs, the feedback is already written
 
 Thread Safety:
     The notification is dispatched to the event loop the hook is bound to —
@@ -234,97 +241,97 @@ class FeedbackSNSHook:
         """
         Hook called when feedback is added
 
+        It does not swallow what SNS refuses. By the time this runs, the
+        feedback is already stored and its caller already has an answer, so
+        there is no main operation left to break — and a notification
+        dispatched as `Delivery.GUARANTEED` is precisely the one whose loss
+        must show up in `failed` rather than in `completed`.
+
         Args:
             session_id: The session identifier
             feedback: The feedback dictionary with rating and comment
             **kwargs: Additional parameters (session_manager instance for password retrieval)
+
+        Raises:
+            ClientError: If SNS refuses the message.
         """
-        try:
-            # Extract rating and comment
-            rating = feedback.get("rating")
-            comment = feedback.get("comment", "")
+        # Extract rating and comment
+        rating = feedback.get("rating")
+        comment = feedback.get("comment", "")
 
-            # Select the appropriate topic and prefixes based on rating
-            if rating == "up":
-                topic_arn = self.topic_arn_good
-                rating_text = "positive"
-                subject_prefix = self.subject_prefix_good
-                body_prefix = self.body_prefix_good
-            elif rating == "down":
-                topic_arn = self.topic_arn_bad
-                rating_text = "negative"
-                subject_prefix = self.subject_prefix_bad
-                body_prefix = self.body_prefix_bad
-            else:
-                topic_arn = self.topic_arn_neutral
-                rating_text = "neutral"
-                subject_prefix = self.subject_prefix_neutral
-                body_prefix = self.body_prefix_neutral
+        # Select the appropriate topic and prefixes based on rating
+        if rating == "up":
+            topic_arn = self.topic_arn_good
+            rating_text = "positive"
+            subject_prefix = self.subject_prefix_good
+            body_prefix = self.body_prefix_good
+        elif rating == "down":
+            topic_arn = self.topic_arn_bad
+            rating_text = "negative"
+            subject_prefix = self.subject_prefix_bad
+            body_prefix = self.body_prefix_bad
+        else:
+            topic_arn = self.topic_arn_neutral
+            rating_text = "neutral"
+            subject_prefix = self.subject_prefix_neutral
+            body_prefix = self.body_prefix_neutral
 
-            # Prepare template variables
-            timestamp = datetime.now(UTC).isoformat()
-            template_vars = {
-                "session_id": session_id,
-                "rating": rating_text,
-                "timestamp": timestamp,
-            }
+        # Prepare template variables
+        timestamp = datetime.now(UTC).isoformat()
+        template_vars = {
+            "session_id": session_id,
+            "rating": rating_text,
+            "timestamp": timestamp,
+        }
 
-            # Apply prefixes to subject and body
-            subject_prefix_text = self._apply_template(subject_prefix, template_vars)
-            body_prefix_text = self._apply_template(body_prefix, template_vars)
+        # Apply prefixes to subject and body
+        subject_prefix_text = self._apply_template(subject_prefix, template_vars)
+        body_prefix_text = self._apply_template(body_prefix, template_vars)
 
-            # Create subject with prefix
-            base_subject = f"on session {session_id}"
-            subject = f"{subject_prefix_text}{base_subject}"
+        # Create subject with prefix
+        base_subject = f"on session {session_id}"
+        subject = f"{subject_prefix_text}{base_subject}"
 
-            # Retrieve session viewer password from session_manager
-            session_manager = kwargs.get("session_manager")
-            session_viewer_password = (
-                session_manager.get_session_viewer_password()
-                if session_manager
-                else "N/A"
+        # Retrieve session viewer password from session_manager
+        session_manager = kwargs.get("session_manager")
+        session_viewer_password = (
+            session_manager.get_session_viewer_password() if session_manager else "N/A"
+        )
+
+        # Format message with prefix
+        base_message = (
+            f"Password: {session_viewer_password}\n\nSession: {session_id}\n\n{comment}"
+        )
+        message = f"{body_prefix_text}{base_message}"
+
+        # Log the message for debugging
+        logger.debug(
+            f"Sending feedback notification to SNS topic {topic_arn}: {subject}"
+        )
+
+        if topic_arn == "none":
+            logger.info(
+                f"Skipping feedback notification to SNS topic {topic_arn} for session {session_id} "
+                f"with rating: {rating_text} because topic_arn is none"
             )
+            return
 
-            # Format message with prefix
-            base_message = f"Password: {session_viewer_password}\n\nSession: {session_id}\n\n{comment}"
-            message = f"{body_prefix_text}{base_message}"
+        # Send to SNS using asyncio.to_thread for non-blocking operation
+        await asyncio.to_thread(
+            publish_message,
+            topic_arn=topic_arn,
+            message=message,
+            subject=subject,
+            message_attributes={
+                "session_id": {"DataType": "String", "StringValue": session_id},
+                "rating": {"DataType": "String", "StringValue": rating_text},
+            },
+        )
 
-            # Log the message for debugging
-            logger.debug(
-                f"Sending feedback notification to SNS topic {topic_arn}: {subject}"
-            )
-
-            # Send to SNS using asyncio.to_thread for non-blocking operation
-            if topic_arn != "none":
-                await asyncio.to_thread(
-                    publish_message,
-                    topic_arn=topic_arn,
-                    message=message,
-                    subject=subject,
-                    message_attributes={
-                        "session_id": {"DataType": "String", "StringValue": session_id},
-                        "rating": {"DataType": "String", "StringValue": rating_text},
-                    },
-                )
-
-                logger.info(
-                    f"Sent feedback notification to SNS topic {topic_arn} for session {session_id} "
-                    f"with rating: {rating_text}"
-                )
-            else:
-                logger.info(
-                    f"Skipping feedback notification to SNS topic {topic_arn} for session {session_id} "
-                    f"with rating: {rating_text} because topic_arn is none"
-                )
-
-        except ImportError as e:
-            logger.error(f"Import error in feedback SNS hook: {e}")
-        except Exception as e:
-            # Log error but don't raise to avoid breaking the main operation
-            # The feedback should be stored even if the notification fails
-            logger.exception(
-                f"Error sending feedback to SNS for session {session_id}: {e}"
-            )
+        logger.info(
+            f"Sent feedback notification to SNS topic {topic_arn} for session {session_id} "
+            f"with rating: {rating_text}"
+        )
 
 
 def create_feedback_hook(
@@ -415,7 +422,7 @@ def create_feedback_hook(
                         kwargs["feedback"],
                         session_manager=kwargs.get("session_manager"),
                     ),
-                    "sending feedback notification to SNS",
+                    f"sending feedback notification to SNS for session {session_id}",
                     loop=dispatch_loop,
                     # A feedback notification carries a customer complaint:
                     # nothing produces it again, so it is not dropped to

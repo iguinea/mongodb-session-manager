@@ -90,7 +90,9 @@ Send real-time SNS notifications when users submit feedback, with routing based 
 
 - **Topic Routing**: Different SNS topics for positive, negative, and neutral feedback
 - **Non-blocking**: Async notifications don't slow down feedback storage
-- **Graceful Degradation**: Feedback is stored even if SNS fails
+- **Graceful Degradation**: Feedback is stored even if SNS fails — the
+  notification runs after the write, and its failure is counted in `failed`
+  rather than hidden
 - **Rich Attributes**: Message attributes for filtering and routing
 - **Selective Notifications**: Disable notifications for specific feedback types
 
@@ -544,7 +546,9 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# AWS hooks log errors automatically
+# A notification AWS refuses is logged once, as an ERROR with its traceback,
+# by the background work that dispatched it — and counted in
+# hooks_background_stats().failed
 # Enable DEBUG logging to see AWS operations
 logging.getLogger("mongodb_session_manager").setLevel(logging.DEBUG)
 ```

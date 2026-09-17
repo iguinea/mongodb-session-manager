@@ -177,15 +177,24 @@ class TestOnFeedbackAdd:
         attrs = mock_pub.call_args[1]["message_attributes"]
         assert attrs["session_id"]["StringValue"] == "s1"
 
-    def test_handles_error_gracefully(self, sns_hook):
+    def test_an_sns_error_reaches_the_dispatcher(self, sns_hook):
+        """A feedback notification that fails must not come back as delivered.
+
+        It is dispatched as `Delivery.GUARANTEED` precisely because nothing
+        produces a customer complaint again; a counter that cannot tell a lost
+        one from a sent one is what makes that guarantee unverifiable.
+        """
         hook, mock_pub = sns_hook
         mock_pub.side_effect = Exception("SNS error")
         session_mgr = MagicMock()
         session_mgr.get_session_viewer_password.return_value = "pwd"
-        # Should not raise
-        asyncio.run(
-            hook.on_feedback_add("s1", {"rating": "up"}, session_manager=session_mgr)
-        )
+
+        with pytest.raises(Exception, match="SNS error"):
+            asyncio.run(
+                hook.on_feedback_add(
+                    "s1", {"rating": "up"}, session_manager=session_mgr
+                )
+            )
 
     def test_handles_no_session_manager(self, sns_hook):
         hook, mock_pub = sns_hook

@@ -10,8 +10,10 @@ Key Features:
     - Real-time metadata change capture (create, update, delete operations)
     - Selective field propagation to minimize message size and bandwidth
     - Non-blocking async operation ensures metadata operations aren't delayed
-    - Graceful error handling - metadata operations succeed even if WebSocket send fails
-    - Automatic handling of disconnected clients (GoneException)
+    - The metadata operation succeeds even if the WebSocket send fails: the
+      notification is already out of its way by then, and its failure is
+      counted, not hidden
+    - A disconnected client (GoneException) is a normal outcome, not a failure
     - Notifications run on the event loop the hook is bound to, whatever
       thread calls it (pass `loop=`, or build the hook inside a running loop)
     - Thread-safe operation for high-concurrency environments
@@ -106,9 +108,13 @@ Requirements:
 
 Error Handling:
     - ImportError: Raised during initialization if boto3 is not available
-    - GoneException: Logged (INFO) when connection is closed, operation continues
-    - All other errors: Logged (ERROR) but not raised to ensure metadata operations succeed
-    - Failed WebSocket sends don't block or fail the metadata operation
+    - GoneException: Logged (INFO) when connection is closed, and treated as a
+      normal outcome — the client hung up, nothing went wrong
+    - All other errors: raised out of the notification, which runs in the
+      background — `background_work.BackgroundWork` counts them as `failed` and
+      logs them once, with their context and their traceback
+    - Failed WebSocket sends don't block or fail the metadata operation: by the
+      time the notification runs, that operation has already returned
 
 Performance Considerations:
     - Direct push to clients - no polling overhead
@@ -203,93 +209,88 @@ class MetadataWebSocketHook:
         """
         Hook called when metadata changes (set, update, delete)
 
+        It does not swallow what API Gateway refuses. By the time this runs,
+        the metadata write has already returned to its caller, so there is no
+        main operation left to break — and `background_work.BackgroundWork` is
+        waiting to count the failure and log it with its context.
+
         Args:
             session_id: The session identifier
             metadata: The current metadata dictionary
             operation: The operation type (update, delete)
+
+        Raises:
+            ClientError: Any refusal from API Gateway other than
+                `GoneException`, which is a closed connection and not a
+                failure.
         """
-        try:
-            # Extract connection_id from metadata
-            connection_id = metadata.get("connection_id")
+        # Extract connection_id from metadata
+        connection_id = metadata.get("connection_id")
 
-            if not connection_id:
-                logger.warning(
-                    f"No connection_id found in metadata for session {session_id}. "
-                    "WebSocket hook cannot send message without connection_id."
-                )
-                return
+        if not connection_id:
+            logger.warning(
+                f"No connection_id found in metadata for session {session_id}. "
+                "WebSocket hook cannot send message without connection_id."
+            )
+            return
 
-            # Extract only the relevant fields for WebSocket propagation
-            if self.metadata_fields:
-                # If specific fields are configured, only send those
-                relevant_metadata = {
-                    field: metadata.get(field) for field in self.metadata_fields
-                }
-                # Remove None values to keep message compact
-                relevant_metadata = {
-                    k: v for k, v in relevant_metadata.items() if v is not None
-                }
-            else:
-                # If no specific fields configured, send all metadata except connection_id
-                relevant_metadata = {
-                    k: v for k, v in metadata.items() if k != "connection_id"
-                }
-
-            # Prepare the message
-            message_data = {
-                "event": "metadata_update",
-                "session_id": session_id,
-                "operation": operation,
-                "metadata": relevant_metadata,
-                "timestamp": datetime.now(UTC).isoformat(),
+        # Extract only the relevant fields for WebSocket propagation
+        if self.metadata_fields:
+            # If specific fields are configured, only send those
+            relevant_metadata = {
+                field: metadata.get(field) for field in self.metadata_fields
+            }
+            # Remove None values to keep message compact
+            relevant_metadata = {
+                k: v for k, v in relevant_metadata.items() if v is not None
+            }
+        else:
+            # If no specific fields configured, send all metadata except connection_id
+            relevant_metadata = {
+                k: v for k, v in metadata.items() if k != "connection_id"
             }
 
-            # Convert to JSON string
-            message_body = json.dumps(message_data)
+        # Prepare the message
+        message_data = {
+            "event": "metadata_update",
+            "session_id": session_id,
+            "operation": operation,
+            "metadata": relevant_metadata,
+            "timestamp": datetime.now(UTC).isoformat(),
+        }
 
-            # Log the message for debugging
-            logger.debug(
-                f"Sending metadata update to WebSocket connection {connection_id}: {message_body}"
-            )
+        # Convert to JSON string
+        message_body = json.dumps(message_data)
 
-            # Send to WebSocket using asyncio.to_thread for non-blocking operation
-            # This ensures the hook doesn't block the main metadata operation
+        # Log the message for debugging
+        logger.debug(
+            f"Sending metadata update to WebSocket connection {connection_id}: {message_body}"
+        )
+
+        # Send to WebSocket using asyncio.to_thread for non-blocking operation
+        # This ensures the hook doesn't block the main metadata operation
+        try:
             await asyncio.to_thread(
                 self.client.post_to_connection,
                 ConnectionId=connection_id,
                 Data=message_body.encode("utf-8"),
             )
-
-            logger.info(
-                f"Sent metadata {operation} to WebSocket connection {connection_id} for session {session_id} "
-                f"with fields: {list(relevant_metadata.keys())}"
-            )
-
         except ClientError as e:
-            error_code = e.response.get("Error", {}).get("Code", "Unknown")
-
-            if error_code == "GoneException":
-                # Connection is closed/disconnected - this is expected, just log info
-                logger.info(
-                    f"WebSocket connection {connection_id} is disconnected (GoneException) "
-                    f"for session {session_id}. Message not delivered."
-                )
-            else:
-                # Other ClientError - log as error
-                logger.exception(
-                    f"AWS ClientError sending metadata to WebSocket for session {session_id}: "
-                    f"{error_code} - {e}"
-                )
-
-        except ImportError as e:
-            logger.error(f"Import error in metadata WebSocket hook: {e}")
-
-        except Exception as e:
-            # Log error but don't raise to avoid breaking the main operation
-            # The metadata update should succeed even if the hook fails
-            logger.exception(
-                f"Error sending metadata to WebSocket for session {session_id}: {e}"
+            if e.response.get("Error", {}).get("Code") != "GoneException":
+                raise
+            # The client hung up. Nothing was delivered and nothing went wrong:
+            # that is how a WebSocket session ends, so it is not a failure to
+            # report to whoever dispatched this.
+            logger.info(
+                f"WebSocket connection {connection_id} is disconnected (GoneException) "
+                f"for session {session_id}. Message not delivered."
             )
+            return
+
+        logger.info(
+            f"Sent metadata {operation} to WebSocket connection {connection_id} for session {session_id} "
+            f"with fields: {list(relevant_metadata.keys())}"
+        )
 
 
 def _build_delete_metadata(original_func, keys: list) -> dict[str, Any]:
@@ -360,7 +361,7 @@ def create_metadata_hook(
                     websocket_hook.on_metadata_change(
                         session_id, kwargs["metadata"], action
                     ),
-                    "sending metadata update to WebSocket",
+                    f"sending metadata update to WebSocket for session {session_id}",
                     loop=dispatch_loop,
                     order_key=f"websocket:{session_id}",
                 )
@@ -371,7 +372,7 @@ def create_metadata_hook(
                     websocket_hook.on_metadata_change(
                         session_id, deleted_metadata, action
                     ),
-                    "sending metadata delete to WebSocket",
+                    f"sending metadata delete to WebSocket for session {session_id}",
                     loop=dispatch_loop,
                     order_key=f"websocket:{session_id}",
                 )

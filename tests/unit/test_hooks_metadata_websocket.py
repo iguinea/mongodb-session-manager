@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -125,7 +126,12 @@ class TestOnMetadataChange:
             assert "any_field" in data["metadata"]
             assert "connection_id" not in data["metadata"]
 
-    def test_handles_gone_exception(self, ws_hook):
+    def test_a_gone_connection_is_a_normal_outcome(self, ws_hook, caplog):
+        """The client disconnected. Nothing was delivered, and nothing failed.
+
+        The one AWS error this hook still absorbs: it is how a WebSocket
+        session ends, not a fault to report.
+        """
         hook, mock_client = ws_hook
         from botocore.exceptions import ClientError
 
@@ -133,14 +139,18 @@ class TestOnMetadataChange:
         mock_client.post_to_connection.side_effect = ClientError(
             error_response, "PostToConnection"
         )
-        # Should not raise
-        asyncio.run(
-            hook.on_metadata_change(
-                "s1", {"connection_id": "c1", "status": "x"}, "update"
-            )
-        )
 
-    def test_handles_other_client_error(self, ws_hook):
+        with caplog.at_level(logging.INFO):
+            asyncio.run(
+                hook.on_metadata_change(
+                    "s1", {"connection_id": "c1", "status": "x"}, "update"
+                )
+            )
+
+        assert "GoneException" in caplog.text
+        assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
+
+    def test_any_other_client_error_reaches_the_dispatcher(self, ws_hook):
         hook, mock_client = ws_hook
         from botocore.exceptions import ClientError
 
@@ -148,22 +158,24 @@ class TestOnMetadataChange:
         mock_client.post_to_connection.side_effect = ClientError(
             error_response, "PostToConnection"
         )
-        # Should not raise
-        asyncio.run(
-            hook.on_metadata_change(
-                "s1", {"connection_id": "c1", "status": "x"}, "update"
-            )
-        )
 
-    def test_handles_generic_error(self, ws_hook):
+        with pytest.raises(ClientError):
+            asyncio.run(
+                hook.on_metadata_change(
+                    "s1", {"connection_id": "c1", "status": "x"}, "update"
+                )
+            )
+
+    def test_a_generic_error_reaches_the_dispatcher(self, ws_hook):
         hook, mock_client = ws_hook
         mock_client.post_to_connection.side_effect = Exception("network error")
-        # Should not raise
-        asyncio.run(
-            hook.on_metadata_change(
-                "s1", {"connection_id": "c1", "status": "x"}, "update"
+
+        with pytest.raises(Exception, match="network error"):
+            asyncio.run(
+                hook.on_metadata_change(
+                    "s1", {"connection_id": "c1", "status": "x"}, "update"
+                )
             )
-        )
 
 
 # ---------------------------------------------------------------------------

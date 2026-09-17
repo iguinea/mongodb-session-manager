@@ -750,8 +750,13 @@ Ensure your AWS credentials are configured with permissions to publish to SNS:
 ### Error Handling
 
 - Feedback is always stored in MongoDB first
-- SNS notification failures are logged but don't raise exceptions
 - Notifications are sent asynchronously to avoid blocking
+- An SNS failure raises out of the notification, where the background work
+  counts it as `failed` and logs it once with its context and its traceback.
+  It cannot reach the caller: by then the feedback is written and the call has
+  returned. The notification is dispatched as `Delivery.GUARANTEED`, and a
+  guarantee whose counter cannot tell a lost notification from a sent one is
+  not verifiable
 
 ---
 
@@ -921,8 +926,15 @@ Ensure your AWS credentials are configured with SQS send permissions:
 ### Error Handling
 
 - Metadata operations always complete in MongoDB first
-- SQS send failures are logged but don't raise exceptions
 - Messages are sent asynchronously to avoid blocking
+- An SQS failure raises out of the notification, where the background work
+  counts it as `failed` and logs it once with its context and its traceback.
+  It cannot reach the caller: by then the metadata is written and the call has
+  returned
+
+The WebSocket hook is the same, with one exception: a `GoneException` from API
+Gateway means the client disconnected, which is how a WebSocket session ends.
+It is logged at `INFO` and counted as a normal outcome, not a failure.
 
 ---
 
@@ -1071,7 +1083,14 @@ weak ones, so an unreferenced task can be garbage collected mid-flight — and
 logs how it ends. A coroutine that raises is reported as
 `Error <error_context>: <exception>` with its traceback, and a cancelled one as
 `Cancelled while <error_context>`. Give `error_context` a phrase that reads in
-that sentence ("sending feedback notification to Slack").
+that sentence, and put the session in it ("sending feedback notification to
+Slack for session abc-123"): it is the only log line the failure gets, so
+whatever is not in it is not anywhere.
+
+That is also why the three bundled hooks raise their AWS error instead of
+catching it. Catching it produced two lines — an `ERROR` from the hook and a
+`DEBUG` `Finished:` from the dispatch — and a counter that called the lost
+notification a delivered one.
 
 The returned handle is there for callers that want the result — the
 `Future` of a dispatch to a known loop resolves with the coroutine's return
@@ -1195,12 +1214,19 @@ stats = hooks_background_stats()
 notifications slower than the events producing them. `in_flight` staying high
 means the same thing before it starts costing anything.
 
-One caveat on `completed`: it counts coroutines that returned, not
-notifications AWS accepted. The three bundled hooks catch their own boto3
-errors and log them, so a notification that failed to publish still comes back
-completed — the error is in the log, not in the counter. `dispatched`,
-`dropped`, `cancelled`, `in_flight` and `queued` are the background work's own
-bookkeeping and mean exactly what they say.
+`completed` counts coroutines that returned and `failed` those that raised. For
+the three bundled hooks the two say what they look like they say: since v0.20.0
+they let their boto3 error out, so a notification SNS, SQS or API Gateway
+refused is a `failed` and an `ERROR` in the log, not a `completed`. The one
+exception is the WebSocket `GoneException` — a client that disconnected is a
+normal outcome, and it counts as completed.
+
+What `completed` still cannot promise is a hook **of your own**: a notification
+that catches its own error and returns anyway is indistinguishable, from here,
+from one that worked. If you want its failures in this counter, let them raise
+— nobody is waiting on that coroutine, and the dispatch will log it with its
+context. `dispatched`, `dropped`, `cancelled`, `in_flight` and `queued` are the
+background work's own bookkeeping and mean exactly what they say.
 
 #### Forking after the first notification
 
@@ -1222,7 +1248,20 @@ orchestrator like ECS gives a task to shut down.
 
 ### Error Handling in Hooks
 
-Always handle errors gracefully to avoid breaking the main operation:
+A hook has two halves, and they want opposite things.
+
+The **wrapper** runs in the caller's path, around the write itself: an error it
+lets through fails `update_metadata()` or `add_feedback()`. Handle it there, and
+re-raise only what should stop the write.
+
+The **notification**, if you dispatch one with `dispatch_async()`, runs after
+the write has returned. Nobody is waiting on it, so catching its error buys
+nothing and costs the counter: `BackgroundWork` can only see that the coroutine
+returned, and records a lost notification as `completed`. Let it raise — the
+dispatch logs it with its context and its traceback, and counts it as `failed`.
+That is what the three bundled hooks do.
+
+Handling errors in the wrapper, then, so as not to break the main operation:
 
 ```python
 def safe_hook(original_func, action, session_id, **kwargs):

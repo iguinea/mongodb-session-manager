@@ -87,10 +87,12 @@ class Delivery(Enum):
 class BackgroundWorkStats:
     """What the background work has done, and what it is doing right now.
 
-    `completed` counts coroutines that returned, not notifications AWS took:
-    the bundled hooks catch their own errors, so one that fails to publish
-    still returns. `dispatched`, `dropped`, `cancelled`, `in_flight` and
-    `queued` are this module's own doing and say exactly what they mean.
+    `completed` counts coroutines that returned and `failed` those that raised.
+    The three bundled hooks let their AWS error out, so a notification AWS
+    refused lands in `failed` — the one thing `completed` still cannot promise
+    is a hook of your own that catches its own error and returns anyway.
+    `dispatched`, `dropped`, `cancelled`, `in_flight` and `queued` are this
+    module's own doing and say exactly what they mean.
     """
 
     dispatched: int
@@ -790,8 +792,9 @@ class BackgroundWork:
 
         self._counters.completed += 1
         # "Finished", not "delivered": all this knows is that the coroutine
-        # returned. The bundled hooks catch their own AWS errors and log them,
-        # so a failed notification still lands here as completed.
+        # returned. The bundled hooks raise what AWS refuses, so for them the
+        # two mean the same; a hook that catches its own error still lands here
+        # as completed.
         return _Note(logging.DEBUG, f"Finished: {error_context}")
 
     def _drain(self, deadline: float) -> None:

@@ -1301,19 +1301,23 @@ def create_session(self, session: Session, **kwargs):
 
 **Non-critical** = features that enhance but aren't required
 
+The degradation is in *where* the work runs, not in swallowing its error. The
+notification is dispatched after the write, so it cannot fail it; and because
+nobody is waiting on it, it raises, and the background work that dispatched it
+counts the failure and logs it.
+
 ```python
 async def on_feedback_add(self, session_id, feedback):
-    try:
-        await asyncio.to_thread(
-            publish_message, topic_arn=self.topic_arn, message=message
-        )
-    except Exception as e:
-        # Log error but don't raise
-        logger.error(f"Error sending feedback to SNS: {e}", exc_info=True)
-        # Feedback is still stored in MongoDB
+    # No try: by the time this runs, the feedback is already in MongoDB and
+    # the caller has its answer. `BackgroundWork` counts what this raises as
+    # `failed` and logs it once, with its context and its traceback.
+    await asyncio.to_thread(publish_message, topic_arn=self.topic_arn, message=message)
 ```
 
-**Rationale**: If SNS notification fails, that's unfortunate but feedback is still saved. Don't fail the whole operation.
+**Rationale**: If the SNS notification fails, that's unfortunate but the
+feedback is still saved. What the operation must not do is *hide* the failure:
+catching it here produced two log lines and a `completed` counter that called
+a lost notification a delivered one (#99).
 
 #### 3. Comprehensive Logging
 
@@ -1372,6 +1376,10 @@ def metadata_hook_wrapper(original_func, action, session_id, **kwargs):
 
 **Rationale**: Original operation must succeed even if hook fails.
 
+This holds because `send_to_sqs()` is called here, in the caller's path. Work
+handed to `dispatch_async()` instead runs after this function returned, so the
+rule inverts: let it raise, and the background work will count and log it.
+
 ### Error Handling Matrix
 
 | Error Type | Strategy | Example |
@@ -1379,15 +1387,18 @@ def metadata_hook_wrapper(original_func, action, session_id, **kwargs):
 | Connection failure | Raise | MongoDB unreachable |
 | Session not found | Return None | Expected case |
 | Invalid data | Raise | Malformed document |
-| Hook failure | Log, don't raise | SNS notification failed |
+| Hook wrapper failure | Log, don't raise | The write already succeeded |
+| Background notification failure | Raise; the dispatcher counts and logs it | SNS notification failed |
 | Index creation failure | Log warning | Index already exists |
 | Metrics missing | Skip silently | Agent didn't populate metrics |
 
 ### Code Reference
 
-- Critical errors: `/workspace/src/mongodb_session_manager/mongodb_session_repository.py` (lines 214-219)
-- Hook errors: `/workspace/src/mongodb_session_manager/hooks/feedback_sns_hook.py` (lines 194-202)
-- Graceful degradation: `/workspace/src/mongodb_session_manager/hooks/metadata_sqs_hook.py` (lines 202-210)
+- Critical errors: `src/mongodb_session_manager/mongodb_session_repository.py`
+- Hook errors, and who counts them: `src/mongodb_session_manager/hooks/background_work.py`
+  (`BackgroundWork._count_outcome()`)
+- A notification that lets its error out: `src/mongodb_session_manager/hooks/feedback_sns_hook.py`
+  (`FeedbackSNSHook.on_feedback_add()`)
 
 ## Repository Pattern
 

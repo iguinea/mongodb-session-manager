@@ -31,14 +31,6 @@ def close_stopped_loop(loop: asyncio.AbstractEventLoop) -> None:
     loop.close()
 
 
-@pytest.fixture
-def work():
-    """A dispatcher of its own, closed with the test that used it."""
-    dispatcher = BackgroundWork()
-    yield dispatcher
-    dispatcher.shutdown(timeout=2.0)
-
-
 class TestSharedReserveLoop:
     """Without a loop to dispatch to, the work shares one instead of one each."""
 
