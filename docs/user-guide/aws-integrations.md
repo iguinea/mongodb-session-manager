@@ -578,10 +578,38 @@ async def lifespan(app: FastAPI):
 ```
 
 Created at import time there is no loop to capture, and each call falls back to
-the calling thread: a task if a loop runs there, a daemon thread with an event
-loop of its own if not — one per event. Pass `loop=asyncio.get_running_loop()`
-if you cannot move the construction. In a plain sync script the fallback is the
-intended behaviour and nothing needs to change.
+the calling thread: a task if a loop runs there, and otherwise the library's
+reserve loop — one event loop shared by the whole process, not one per event.
+Pass `loop=asyncio.get_running_loop()` if you cannot move the construction. In a
+plain sync script the fallback is the intended behaviour and nothing needs to
+change.
+
+### Closing without losing notifications
+
+The notifications travel in the background, so a process that exits while some
+are in flight loses them. Drain them where you shut down:
+
+```python
+from mongodb_session_manager import close_global_factory, shutdown_hooks_async
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+    stats = await shutdown_hooks_async(timeout=5.0)
+    logger.info("hook notifications drained", extra=stats.as_dict())
+    close_global_factory()
+```
+
+Inside a loop it has to be the `_async` one: the blocking `shutdown_hooks()`
+would stop the very loop the notifications are riding. Outside a loop — a
+`SIGTERM` handler, a plain `main()` — `shutdown_hooks()` is the same close.
+
+A server with no lifespan of its own — a `BedrockAgentCoreApp` entrypoint, for
+instance — needs the call from a `SIGTERM` handler. See
+[Background work](../api-reference/hooks.md#closing-the-process-without-losing-notifications)
+for why an `atexit` alone does not cover it, and for the limit, the ordering
+guarantee and the counters the background work exposes.
 
 ## Next Steps
 

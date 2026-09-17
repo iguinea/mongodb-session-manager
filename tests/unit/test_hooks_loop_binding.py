@@ -7,64 +7,15 @@ daemon thread per event. The loop can also be passed explicitly.
 
 import asyncio
 import threading
-from unittest.mock import MagicMock, patch
 
 import pytest
 from starlette.concurrency import run_in_threadpool
 
-from mongodb_session_manager.hooks import (
-    feedback_sns_hook,
-    metadata_sqs_hook,
-    metadata_websocket_hook,
-)
+from mongodb_session_manager.hooks import metadata_sqs_hook
+from tests.support.hook_builders import ALL_HOOKS, build_sqs_hook, fire_metadata
 
-
-@pytest.fixture
-def server_loop():
-    """An event loop running in its own thread, like a server's main loop."""
-    loop = asyncio.new_event_loop()
-    thread = threading.Thread(target=loop.run_forever, name="server-loop", daemon=True)
-    thread.start()
-    yield loop
-    loop.call_soon_threadsafe(loop.stop)
-    thread.join(timeout=5)
-    loop.close()
-
-
-def _build_sqs_hook(**kwargs):
-    with patch("mongodb_session_manager.hooks.metadata_sqs_hook.send_message"):
-        return metadata_sqs_hook.create_metadata_hook(
-            "https://sqs.example.com/q", ["status"], **kwargs
-        )
-
-
-def _build_websocket_hook(**kwargs):
-    with patch("mongodb_session_manager.hooks.metadata_websocket_hook.boto3"):
-        return metadata_websocket_hook.create_metadata_hook(
-            "https://api.example.com", ["status"], **kwargs
-        )
-
-
-def _build_sns_hook(**kwargs):
-    with patch("mongodb_session_manager.hooks.feedback_sns_hook.publish_message"):
-        return feedback_sns_hook.create_feedback_hook(
-            "arn:good", "arn:bad", "arn:neutral", **kwargs
-        )
-
-
-def _fire_metadata(hook):
-    hook(MagicMock(), "update", "s1", metadata={"status": "active"})
-
-
-def _fire_feedback(hook):
-    hook(MagicMock(), "add", "s1", feedback={"rating": "up", "comment": "ok"})
-
-
-HOOKS = [
-    pytest.param(_build_sqs_hook, _fire_metadata, id="sqs"),
-    pytest.param(_build_websocket_hook, _fire_metadata, id="websocket"),
-    pytest.param(_build_sns_hook, _fire_feedback, id="sns"),
-]
+# `server_loop` is shared, in tests/conftest.py.
+HOOKS = ALL_HOOKS
 
 
 @pytest.mark.parametrize(("build", "fire"), HOOKS)
@@ -115,12 +66,12 @@ async def test_metadata_write_from_the_threadpool_notifies_on_the_server_loop(
         metadata_sqs_hook.MetadataSQSHook, "on_metadata_change", fake_change
     )
     # Built inside the running loop, as a FastAPI lifespan would.
-    hook = _build_sqs_hook()
+    hook = build_sqs_hook()
     server_loop = asyncio.get_running_loop()
 
     def sync_path():
         # Starlette's worker thread: this is where the metadata write happens.
-        _fire_metadata(hook)
+        fire_metadata(hook)
 
     await run_in_threadpool(sync_path)
     await asyncio.sleep(0.05)

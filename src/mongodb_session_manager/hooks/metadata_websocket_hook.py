@@ -136,6 +136,7 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
+from .aws_client_config import notification_config
 from .utils_async import capture_loop, dispatch_async
 
 logger = logging.getLogger(__name__)
@@ -182,11 +183,13 @@ class MetadataWebSocketHook:
         self.metadata_fields = metadata_fields or []
         self.region = region
 
-        # Create API Gateway Management API client
+        # Create API Gateway Management API client. The bounded config keeps a
+        # notification from holding its thread while nobody waits for it.
         self.client = boto3.client(
             "apigatewaymanagementapi",
             endpoint_url=api_gateway_endpoint,
             region_name=region,
+            config=notification_config(),
         )
 
         logger.info(
@@ -359,6 +362,7 @@ def create_metadata_hook(
                     ),
                     "sending metadata update to WebSocket",
                     loop=dispatch_loop,
+                    order_key=f"websocket:{session_id}",
                 )
             elif action == "delete" and "keys" in kwargs:
                 result = original_func(kwargs["keys"])
@@ -369,6 +373,7 @@ def create_metadata_hook(
                     ),
                     "sending metadata delete to WebSocket",
                     loop=dispatch_loop,
+                    order_key=f"websocket:{session_id}",
                 )
             else:
                 result = original_func()

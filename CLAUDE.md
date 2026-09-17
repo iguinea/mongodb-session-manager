@@ -78,7 +78,9 @@ cd playground/chat && make frontend                   # Port 8881
    - `FeedbackSNSHook`: SNS notifications with configurable templates
    - `MetadataSQSHook`: SQS propagation for SSE
    - `MetadataWebSocketHook`: Real-time WebSocket push
-   - `dispatch_async()` no longer decides by the calling thread: the three factories take `loop=` and, failing that, capture the loop running when the hook is built, so a hook created in an async lifespan keeps notifying on the server loop from a worker thread. Without a loop the old behaviour stands (task on the calling thread's loop, or a daemon thread). It keeps a strong reference to the work — the loop only holds weak ones — and logs how it ends, so a failed notification is an `ERROR` with context and not an absence (#95)
+   - `dispatch_async()` no longer decides by the calling thread: the three factories take `loop=` and, failing that, capture the loop running when the hook is built, so a hook created in an async lifespan keeps notifying on the server loop from a worker thread. It keeps a strong reference to the work — the loop only holds weak ones — and logs how it ends, so a failed notification is an `ERROR` with context and not an absence (#95)
+   - `background_work.py`: the notifications of every hook share one bounded pool. Without a loop to dispatch to they go to a **single reserve loop**, not a daemon thread per event (a burst of 200 went from 403 threads to 21). At most `max_in_flight` (64) run at once; past it, best-effort work is dropped with a `WARNING` and a counter. `order_key` serialises work per key — the metadata hooks pass `<hook>:<session_id>`, namespaced so two hooks on one session do not serialise against each other; what cannot start yet queues in order (`max_queued_per_key`, 8) and only overflow drops, the oldest, because the payload is a partial update and not the whole state. `Delivery.GUARANTEED` opts out of the limit: the feedback hook uses it because a feedback notification is a customer complaint nothing produces again. `shutdown_hooks(timeout)` drains, cancels the rest and returns the counters — from inside a loop (a FastAPI lifespan) call `shutdown_hooks_async()`, or the drain stops the very loop the notifications ride — and an orderly exit drains even without it: the close is registered with `threading._register_atexit()`, which runs *before* Python closes its thread pools — `atexit` runs after, too late for a hook whose AWS call lives on one (1 of 20 delivered vs 20 of 20). `SIGTERM` without a handler runs no Python at all, so ECS still needs one. A loop that stops without closing the work strands whatever was riding it: `_evict()` frees those keys, or that session goes mute for good. A `fork()` is the same failure on a bigger scale — the child inherits the loop object but not its thread — so the global dispatcher registers `reset_after_fork()` with `os.register_at_fork()`. `hooks_background_stats()` exposes the counters, with one caveat: `completed` counts coroutines that returned, and the bundled hooks catch their own AWS errors (#62)
+   - `aws_client_config.notification_config()` is the **only** place the bundled hooks' boto3 clients get their timeouts: 3 s connect, 5 s read, 2 attempts (botocore's `max_attempts` counts retries, so it gets `TOTAL_ATTEMPTS - 1`). The defaults (60/60, legacy) let one stuck notification hold a thread for minutes. `worst_case_seconds()` (22 s) budgets botocore's own maximum backoff — `x-amz-retry-after` adds up to 5 s per retry on the path `AWS_NEW_RETRIES_2026` turns on — and a test asks botocore for those constants, so an upgrade that moves them fails. A third attempt would put the worst case at 37 s, past the ECS grace (#62)
 
 ### MongoDB Schema
 
@@ -201,7 +203,7 @@ When releasing, update version in **three places**:
 2. `pyproject.toml` (`version`)
 3. `CHANGELOG.md` (add release entry)
 
-Current version: **0.17.3**
+Current version: **0.18.0**
 
 ## Workflow Rules
 

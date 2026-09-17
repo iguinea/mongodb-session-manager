@@ -9,8 +9,21 @@ Available Hooks:
     - metadata_sqs_hook: Propagate metadata changes to AWS SQS for SSE
     - metadata_websocket_hook: Push metadata changes to WebSocket clients via API Gateway
 
+The notifications they send travel in the background, bounded by
+`background_work`: `shutdown_hooks()` closes that work where the process closes,
+and `hooks_background_stats()` reports it.
+
 Note: All AWS hooks require `boto3` to be installed.
 """
+
+from .background_work import BackgroundWork, BackgroundWorkStats, Delivery
+from .utils_async import (
+    capture_loop,
+    dispatch_async,
+    hooks_background_stats,
+    shutdown_hooks,
+    shutdown_hooks_async,
+)
 
 # Import hook creators if available
 try:
@@ -50,7 +63,16 @@ except ImportError:
     MetadataWebSocketHook = None
     create_metadata_websocket_hook = None
 
-__all__ = []
+__all__ = [
+    "BackgroundWork",
+    "BackgroundWorkStats",
+    "Delivery",
+    "capture_loop",
+    "dispatch_async",
+    "hooks_background_stats",
+    "shutdown_hooks",
+    "shutdown_hooks_async",
+]
 
 if feedback_sns_available:
     __all__.extend(["FeedbackSNSHook", "create_feedback_hook"])

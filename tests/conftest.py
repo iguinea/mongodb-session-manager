@@ -1,11 +1,46 @@
 """Shared fixtures for MongoDB Session Manager tests."""
 
+import asyncio
 import os
+import threading
+import time
 import uuid
+from collections.abc import Callable
 from unittest.mock import MagicMock, patch
 
 import pytest
 from strands.types.session import Session, SessionAgent, SessionMessage
+
+# ---------------------------------------------------------------------------
+# Waiting on background work, without sleeping a fixed time
+# ---------------------------------------------------------------------------
+
+
+def wait_until(predicate: Callable[[], bool], timeout: float = 2.0) -> bool:
+    """Poll a predicate until it holds or the timeout expires.
+
+    On a monotonic clock: these deadlines must not move when the wall clock
+    does.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.01)
+    return predicate()
+
+
+@pytest.fixture
+def server_loop():
+    """An event loop running in its own thread, like a server's main loop."""
+    loop = asyncio.new_event_loop()
+    thread = threading.Thread(target=loop.run_forever, name="server-loop", daemon=True)
+    thread.start()
+    yield loop
+    loop.call_soon_threadsafe(loop.stop)
+    thread.join(timeout=5)
+    loop.close()
+
 
 # ---------------------------------------------------------------------------
 # Unit-test fixtures (no MongoDB required)
@@ -121,9 +156,16 @@ def captured_dispatch(monkeypatch):
 
     calls = []
 
-    def recorder(coro, error_context, loop=None):
+    def recorder(coro, error_context, loop=None, *, order_key=None, delivery=None):
         coro.close()  # never awaited: the recorder replaces the dispatch
-        calls.append(SimpleNamespace(error_context=error_context, loop=loop))
+        calls.append(
+            SimpleNamespace(
+                error_context=error_context,
+                loop=loop,
+                order_key=order_key,
+                delivery=delivery,
+            )
+        )
         return None
 
     for module in (feedback_sns_hook, metadata_sqs_hook, metadata_websocket_hook):

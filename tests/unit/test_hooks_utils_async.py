@@ -10,36 +10,15 @@ import asyncio
 import gc
 import logging
 import threading
-import time
-from collections.abc import Callable
 from concurrent.futures import Future
 from unittest.mock import MagicMock
 
 import pytest
 
 from mongodb_session_manager.hooks.utils_async import capture_loop, dispatch_async
+from tests.conftest import wait_until
 
-
-@pytest.fixture
-def server_loop():
-    """An event loop running in its own thread, like a server's main loop."""
-    loop = asyncio.new_event_loop()
-    thread = threading.Thread(target=loop.run_forever, name="server-loop", daemon=True)
-    thread.start()
-    yield loop
-    loop.call_soon_threadsafe(loop.stop)
-    thread.join(timeout=5)
-    loop.close()
-
-
-def wait_until(predicate: Callable[[], bool], timeout: float = 2.0) -> bool:
-    """Poll a predicate until it holds or the timeout expires."""
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if predicate():
-            return True
-        time.sleep(0.01)
-    return predicate()
+# `server_loop` and `wait_until` are shared, in tests/conftest.py.
 
 
 # ---------------------------------------------------------------------------
@@ -198,14 +177,34 @@ class TestWithoutExplicitLoop:
 
         assert asyncio.run(run()) is ran_on["loop"]
 
-    def test_sync_context_uses_a_thread(self):
+    def test_sync_context_uses_the_reserve_loop(self):
+        """It used to be a daemon thread per event; now it is one shared loop."""
         executed = threading.Event()
 
         async def coro():
             executed.set()
 
-        assert dispatch_async(coro(), "test") is None
+        future = dispatch_async(coro(), "test")
+
+        assert isinstance(future, Future)
         assert executed.wait(timeout=2)
+
+    def test_a_sync_burst_does_not_spawn_a_thread_per_event(self):
+        """Regression (#62): 200 events used to mean 200 daemon threads."""
+        done = [threading.Event() for _ in range(50)]
+
+        async def coro(i: int):
+            await asyncio.sleep(0.01)
+            done[i].set()
+
+        before = threading.active_count()
+        peak = before
+        for i in range(50):
+            dispatch_async(coro(i), "test")
+            peak = max(peak, threading.active_count())
+
+        assert wait_until(lambda: all(event.is_set() for event in done), timeout=5)
+        assert peak - before <= 4
 
 
 # ---------------------------------------------------------------------------
@@ -265,8 +264,11 @@ class TestFailureLogging:
 
     def test_a_broken_dispatch_does_not_reach_the_caller(self, caplog):
         """The hook writes first; a dispatch failure must not undo that."""
+        # Every way of inspecting it raises, so the test does not depend on
+        # which question the dispatch asks first.
         broken_loop = MagicMock()
         broken_loop.is_closed.side_effect = RuntimeError("no loop here")
+        broken_loop.is_running.side_effect = RuntimeError("no loop here")
 
         async def coro():
             return None

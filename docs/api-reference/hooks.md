@@ -1025,12 +1025,11 @@ order:
 |--------|--------------------------|
 | Given (and reachable) | On that loop, via `asyncio.run_coroutine_threadsafe()`. Returns a `concurrent.futures.Future` |
 | Not given, a loop runs in the calling thread | A task on that loop. Returns the `Task` |
-| Not given, no loop anywhere | A daemon thread with an event loop of its own. Returns `None` |
+| Not given, no loop anywhere | The library's **reserve loop**: one event loop, shared by the whole process, in a daemon thread started on first use. Returns a `Future` |
 
 Passing the loop is what makes the dispatch independent of the calling thread.
 Without it, the same hook behaves differently depending on where the write
-happens — and a write from a worker thread would start **one daemon thread and
-one event loop per event**.
+happens — though never, since v0.18.0, by starting a thread per event.
 
 That is not an exotic case. Two ordinary paths land there:
 
@@ -1078,11 +1077,148 @@ The returned handle is there for callers that want the result — the
 `Future` of a dispatch to a known loop resolves with the coroutine's return
 value — but ignoring it does not lose the failure.
 
-> Work dispatched to a daemon thread dies with the process. Notifications sent
-> that way have no delivery guarantee on shutdown; a hook bound to the server
-> loop is drained with it. Bounded queues, backpressure and per-hook delivery
-> policy are tracked in
-> [#62](https://github.com/iguinea/mongodb-session-manager/issues/62).
+#### How much may run at once, and in what order
+
+The notifications of every hook in the process share one bounded pool of
+background work (`hooks/background_work.py`). Three rules apply to it, and the
+bundled hooks each opt into the ones their domain needs:
+
+**A limit on work in flight.** 64 notifications at once, by default. Past it,
+best-effort work is refused rather than queued without end: the coroutine is
+closed, a `WARNING` names what was dropped, and the `dropped` counter records
+it. Nothing is ever queued silently.
+
+**Order per key.** Work dispatched with `order_key` never runs concurrently
+with other work for that same key, and never overtakes it. The metadata hooks
+pass the `session_id`, so two updates of the same session cannot arrive
+swapped — which matters when the receiving client just applies whatever
+arrives last. Per key there is at most one notification in flight; the rest
+**queue in the order they were submitted** (8 deep by default), because a
+metadata notification carries the dict the caller passed — a partial update,
+not the whole state. Dropping `{"progress": 50}` because `{"status": "done"}`
+came after it would lose `progress` for good. Only when the queue is full does
+the oldest give way, with a `WARNING`. Different keys still run in parallel.
+
+**Delivery.** `Delivery.GUARANTEED` opts out of the limit: the work is accepted
+over it, with a `WARNING`, instead of being dropped. The feedback hook uses it,
+because a feedback notification carries something nothing produces again.
+
+```python
+from mongodb_session_manager.hooks import Delivery, dispatch_async
+
+dispatch_async(
+    send_progress(session_id, metadata),
+    "sending progress to Slack",
+    loop=dispatch_loop,
+    order_key=session_id,  # never overtaken by a later update
+)
+
+dispatch_async(
+    escalate(session_id, feedback),
+    "escalating the feedback",
+    loop=dispatch_loop,
+    delivery=Delivery.GUARANTEED,  # never dropped to respect the limit
+)
+```
+
+#### Closing the process without losing notifications
+
+Close the background work where your process shuts down. It waits for the
+notifications in flight, cancels whatever does not make it in time, stops the
+reserve loop, and returns the counters. Work dispatched afterwards is refused,
+loudly.
+
+There are two calls, and which one you want depends on where you are. From
+inside an event loop — a FastAPI lifespan, an async signal handler — use
+**`shutdown_hooks_async()`**: the notifications are riding that very loop, and
+blocking it is what would stop them from finishing.
+
+```python
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+
+from mongodb_session_manager import close_global_factory, shutdown_hooks_async
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+    stats = await shutdown_hooks_async(timeout=5.0)
+    logger.info("hook notifications drained", extra=stats.as_dict())
+    close_global_factory()
+```
+
+From a thread with no loop of its own — a plain `main()`, a synchronous signal
+handler — `shutdown_hooks()` is the same close, blocking. It warns if you call
+it from inside the loop it is draining, rather than silently spending the whole
+budget and cancelling work it could have delivered.
+
+A process that never makes that call still drains on the way out: the library
+registers the close with `threading._register_atexit()`, which runs *before*
+Python shuts its thread pools down — `atexit` runs after, too late for hooks
+that make their AWS call on one of those pools. Measured, with 20 notifications
+in flight: 20 delivered either way, against 0 before v0.18.0.
+
+What no hook can survive is a signal. `SIGTERM` without a handler runs no
+Python at all — not `atexit`, not the thread shutdown — so a service whose
+orchestrator stops it that way (ECS does) still needs the call in a handler:
+
+```python
+import signal
+
+from mongodb_session_manager import shutdown_hooks
+
+
+def _drain(signum, frame):
+    shutdown_hooks(timeout=5.0)
+    raise SystemExit(0)
+
+
+signal.signal(signal.SIGTERM, _drain)
+```
+
+#### Watching the background work
+
+`hooks_background_stats()` returns the counters as a frozen dataclass, with an
+`as_dict()` for logs and metrics:
+
+```python
+from mongodb_session_manager import hooks_background_stats
+
+stats = hooks_background_stats()
+# BackgroundWorkStats(dispatched=412, completed=409, failed=1, cancelled=0,
+#                     dropped=2, in_flight=0, queued=0)
+```
+
+`dropped` growing means the limit is being reached — either a burst or
+notifications slower than the events producing them. `in_flight` staying high
+means the same thing before it starts costing anything.
+
+One caveat on `completed`: it counts coroutines that returned, not
+notifications AWS accepted. The three bundled hooks catch their own boto3
+errors and log them, so a notification that failed to publish still comes back
+completed — the error is in the log, not in the counter. `dispatched`,
+`dropped`, `cancelled`, `in_flight` and `queued` are the background work's own
+bookkeeping and mean exactly what they say.
+
+#### Forking after the first notification
+
+A child of `os.fork()` inherits this whole machinery but only the thread that
+forked, so the reserve loop it inherits is an object with no thread behind it.
+The library resets itself in the child (`os.register_at_fork`): new loop, new
+locks, counters from zero, and the parent's work in flight left to the parent.
+Nothing to do from a prefork server (gunicorn `--preload`) beyond closing in
+each worker.
+
+#### How long a notification may talk to AWS
+
+The three bundled hooks build their boto3 clients with a bounded config: 3 s to
+connect, 5 s to read, 2 attempts in the `standard` retry mode. botocore's
+defaults (60 s, 60 s, legacy mode) suit a request somebody is waiting for; a
+notification nobody waits for would hold a thread for minutes, and the thread is
+what the limit above protects. The worst case stays under the 30 s an
+orchestrator like ECS gives a task to shut down.
 
 ### Error Handling in Hooks
 
