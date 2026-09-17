@@ -642,7 +642,8 @@ Async method called when feedback is added. Sends notification to appropriate SN
 def create_feedback_sns_hook(
     topic_arn_good: str,
     topic_arn_bad: str,
-    topic_arn_neutral: str
+    topic_arn_neutral: str,
+    loop: asyncio.AbstractEventLoop | None = None
 )
 ```
 
@@ -650,7 +651,11 @@ Create a feedback hook function for mongodb-session-manager.
 
 #### Parameters
 
-Same as `FeedbackSNSHook.__init__()`.
+Same as `FeedbackSNSHook.__init__()`, plus:
+
+- **loop** (`asyncio.AbstractEventLoop`, optional): Event loop the
+  notifications run on. Defaults to the loop running when the hook is created.
+  See [Async Operations in Hooks](#async-operations-in-hooks).
 
 #### Returns
 
@@ -825,7 +830,8 @@ Async method called when metadata changes. Sends change notification to SQS queu
 ```python
 def create_metadata_sqs_hook(
     queue_url: str,
-    metadata_fields: List[str] = None
+    metadata_fields: List[str] = None,
+    loop: asyncio.AbstractEventLoop | None = None
 )
 ```
 
@@ -836,6 +842,10 @@ Create a metadata hook function for mongodb-session-manager.
 - **queue_url** (`str`): Full SQS queue URL
 
 - **metadata_fields** (`List[str]`, optional): List of fields to propagate. If `None`, all fields are sent.
+
+- **loop** (`asyncio.AbstractEventLoop`, optional): Event loop the
+  notifications run on. Defaults to the loop running when the hook is created.
+  See [Async Operations in Hooks](#async-operations-in-hooks).
 
 #### Returns
 
@@ -970,43 +980,109 @@ manager = MongoDBSessionManager(
 
 ### Async Operations in Hooks
 
-For operations that shouldn't block (like sending notifications), use async:
+For operations that shouldn't block (like sending notifications), use
+`dispatch_async()`. It hands the coroutine to an event loop and returns
+immediately, so the metadata or feedback write is never delayed by the
+notification:
 
 ```python
 import asyncio
-import threading
+
+from mongodb_session_manager.hooks.utils_async import capture_loop, dispatch_async
 
 
-def async_notification_hook(original_func, action, session_id, **kwargs):
-    """Send notifications asynchronously"""
-    if action == "add":
+def create_notification_hook(loop: asyncio.AbstractEventLoop | None = None):
+    """Send notifications without blocking the write."""
+    # Remember the loop running now, if any: the hook may later be called from
+    # a worker thread, and then there is no loop to find.
+    dispatch_loop = loop if loop is not None else capture_loop()
+
+    def notification_hook(original_func, action, session_id, **kwargs):
+        if action != "add" or "feedback" not in kwargs:
+            return original_func()
+
         feedback = kwargs["feedback"]
+        result = original_func(feedback)  # store first
 
-        # Store feedback first
-        result = original_func(feedback)
-
-        # Send notification asynchronously
         if feedback.get("rating") == "down":
-
-            async def send_notification():
-                await send_slack_message(session_id, feedback)
-
-            # Run in background
-            try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(send_notification())
-            except RuntimeError:
-                # No running loop, use thread
-                def run_async():
-                    asyncio.run(send_notification())
-
-                thread = threading.Thread(target=run_async, daemon=True)
-                thread.start()
+            dispatch_async(
+                send_slack_message(session_id, feedback),
+                "sending feedback notification to Slack",
+                loop=dispatch_loop,
+            )
 
         return result
 
-    return original_func()
+    return notification_hook
 ```
+
+#### Which thread the notification runs on
+
+`dispatch_async(coro, error_context, loop=None)` resolves the target in this
+order:
+
+| `loop` | Where the coroutine runs |
+|--------|--------------------------|
+| Given (and reachable) | On that loop, via `asyncio.run_coroutine_threadsafe()`. Returns a `concurrent.futures.Future` |
+| Not given, a loop runs in the calling thread | A task on that loop. Returns the `Task` |
+| Not given, no loop anywhere | A daemon thread with an event loop of its own. Returns `None` |
+
+Passing the loop is what makes the dispatch independent of the calling thread.
+Without it, the same hook behaves differently depending on where the write
+happens — and a write from a worker thread would start **one daemon thread and
+one event loop per event**.
+
+That is not an exotic case. Two ordinary paths land there:
+
+- **The agent's own metadata writes.** `get_metadata_tool()` returns a
+  *synchronous* tool, and Strands runs synchronous tools with
+  `asyncio.to_thread` (`strands/tools/decorator.py`). Every `update_metadata`
+  the agent performs therefore reaches the hook from a worker thread, even in
+  an entirely `async def` server.
+- **The synchronous turn moved off the loop** with `run_in_threadpool`, the
+  pattern in [FastAPI Integration](../examples/fastapi-integration.md).
+
+Writes your own `async def` code makes directly still run on the loop and take
+the task path.
+
+The three bundled hooks — `create_feedback_sns_hook`,
+`create_metadata_sqs_hook` and `create_metadata_websocket_hook` — take the same
+`loop` argument and default to the loop running when they are created. Build
+them inside your async lifespan and they keep notifying on the server loop:
+
+```python
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Inside a running loop: the hook captures it.
+    app.state.metadata_hook = create_metadata_websocket_hook(
+        api_gateway_endpoint="https://abc123.execute-api.eu-west-1.amazonaws.com/prod",
+        metadata_fields=["status", "progress"],
+    )
+    yield
+```
+
+Built at import time instead, there is no loop to capture and each call decides
+on its own; pass `loop=asyncio.get_running_loop()` from the lifespan, or hold
+off building the hook until then.
+
+#### Failures are logged, not swallowed
+
+The dispatch keeps a strong reference to the work — an event loop only holds
+weak ones, so an unreferenced task can be garbage collected mid-flight — and
+logs how it ends. A coroutine that raises is reported as
+`Error <error_context>: <exception>` with its traceback, and a cancelled one as
+`Cancelled while <error_context>`. Give `error_context` a phrase that reads in
+that sentence ("sending feedback notification to Slack").
+
+The returned handle is there for callers that want the result — the
+`Future` of a dispatch to a known loop resolves with the coroutine's return
+value — but ignoring it does not lose the failure.
+
+> Work dispatched to a daemon thread dies with the process. Notifications sent
+> that way have no delivery guarantee on shutdown; a hook bound to the server
+> loop is drained with it. Bounded queues, backpressure and per-hook delivery
+> policy are tracked in
+> [#62](https://github.com/iguinea/mongodb-session-manager/issues/62).
 
 ### Error Handling in Hooks
 

@@ -78,6 +78,7 @@ cd playground/chat && make frontend                   # Port 8881
    - `FeedbackSNSHook`: SNS notifications with configurable templates
    - `MetadataSQSHook`: SQS propagation for SSE
    - `MetadataWebSocketHook`: Real-time WebSocket push
+   - `dispatch_async()` no longer decides by the calling thread: the three factories take `loop=` and, failing that, capture the loop running when the hook is built, so a hook created in an async lifespan keeps notifying on the server loop from a worker thread. Without a loop the old behaviour stands (task on the calling thread's loop, or a daemon thread). It keeps a strong reference to the work — the loop only holds weak ones — and logs how it ends, so a failed notification is an `ERROR` with context and not an absence (#95)
 
 ### MongoDB Schema
 
@@ -200,7 +201,7 @@ When releasing, update version in **three places**:
 2. `pyproject.toml` (`version`)
 3. `CHANGELOG.md` (add release entry)
 
-Current version: **0.17.2**
+Current version: **0.17.3**
 
 ## Workflow Rules
 

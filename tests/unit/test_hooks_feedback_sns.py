@@ -206,7 +206,7 @@ class TestCreateFeedbackHook:
             hook = create_feedback_hook("arn:g", "arn:b", "arn:n")
         assert callable(hook)
 
-    def test_calls_original_func_first(self):
+    def test_calls_original_func_first(self, captured_dispatch):
         with patch("mongodb_session_manager.hooks.feedback_sns_hook.publish_message"):
             hook = create_feedback_hook("arn:g", "arn:b", "arn:n")
 
@@ -229,7 +229,7 @@ class TestCreateFeedbackHook:
             hook = create_feedback_hook("arn:g", "arn:b", "arn:n")
         assert hook is None
 
-    def test_passes_session_manager_to_hook(self):
+    def test_passes_session_manager_to_hook(self, captured_dispatch):
         with patch("mongodb_session_manager.hooks.feedback_sns_hook.publish_message"):
             hook = create_feedback_hook("arn:g", "arn:b", "arn:n")
 
