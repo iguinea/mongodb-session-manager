@@ -10,7 +10,8 @@ Key Features:
     - Real-time metadata change capture (create, update, delete operations)
     - Selective field propagation to minimize message size and processing overhead
     - Non-blocking async operation ensures metadata operations aren't delayed
-    - Graceful error handling - metadata operations succeed even if SQS fails
+    - The metadata operation succeeds even if SQS fails: the notification is
+      already out of its way by then, and its failure is counted, not hidden
     - Message attributes for efficient queue filtering and routing
     - Notifications run on the event loop the hook is bound to, whatever
       thread calls it (pass `loop=`, or build the hook inside a running loop)
@@ -88,8 +89,11 @@ Requirements:
 
 Error Handling:
     - ImportError: Raised during initialization if custom_aws.sqs is not available
-    - All other errors: Logged but not raised to ensure metadata operations succeed
-    - Failed SQS sends don't block or fail the metadata operation
+    - All other errors: raised out of the notification, which runs in the
+      background — `background_work.BackgroundWork` counts them as `failed` and
+      logs them once, with their context and their traceback
+    - Failed SQS sends don't block or fail the metadata operation: by the time
+      the notification runs, that operation has already returned
 
 Performance Considerations:
     - Only specified metadata fields are propagated (reduces message size)
@@ -148,66 +152,66 @@ class MetadataSQSHook:
         """
         Hook called when metadata changes (set, update, delete)
 
+        It does not swallow what SQS refuses. By the time this runs, the
+        metadata write has already returned to its caller, so there is no main
+        operation left to break — and `background_work.BackgroundWork` is
+        waiting to count the failure and log it with its context.
+
         Args:
             session_id: The session identifier
             metadata: The current metadata dictionary
             operation: The operation type (set, update, delete)
+
+        Raises:
+            ClientError: If SQS refuses the message.
+            ValueError, PermissionError: What `utils_sqs.send_message()` makes
+                of a missing queue, invalid contents or a denied `SendMessage`.
         """
-        try:
-            # Extract only the relevant fields for SSE propagation
-            if self.metadata_fields:
-                # If specific fields are configured, only send those
-                relevant_metadata = {
-                    field: metadata.get(field) for field in self.metadata_fields
-                }
-                # Remove None values to keep message compact
-                relevant_metadata = {
-                    k: v for k, v in relevant_metadata.items() if v is not None
-                }
-            else:
-                # If no specific fields configured, send all metadata
-                relevant_metadata = metadata.copy()
-
-            # Prepare the message
-            message_data = {
-                "session_id": session_id,
-                "event": "metadata_update",
-                "operation": operation,
-                "metadata": relevant_metadata,
-                "timestamp": datetime.now(UTC).isoformat(),
+        # Extract only the relevant fields for SSE propagation
+        if self.metadata_fields:
+            # If specific fields are configured, only send those
+            relevant_metadata = {
+                field: metadata.get(field) for field in self.metadata_fields
             }
+            # Remove None values to keep message compact
+            relevant_metadata = {
+                k: v for k, v in relevant_metadata.items() if v is not None
+            }
+        else:
+            # If no specific fields configured, send all metadata
+            relevant_metadata = metadata.copy()
 
-            # Convert to JSON string
-            message_body = json.dumps(message_data)
+        # Prepare the message
+        message_data = {
+            "session_id": session_id,
+            "event": "metadata_update",
+            "operation": operation,
+            "metadata": relevant_metadata,
+            "timestamp": datetime.now(UTC).isoformat(),
+        }
 
-            # Log the message for debugging
-            logger.debug(f"Sending metadata update to SQS: {message_body}")
+        # Convert to JSON string
+        message_body = json.dumps(message_data)
 
-            # Send to SQS using asyncio.to_thread for non-blocking operation
-            # This ensures the hook doesn't block the main metadata operation
-            await asyncio.to_thread(
-                send_message,
-                queue_url=self.queue_url,
-                message_body=message_body,
-                message_attributes={
-                    "session_id": {"DataType": "String", "StringValue": session_id},
-                    "event": {"DataType": "String", "StringValue": "metadata_update"},
-                },
-            )
+        # Log the message for debugging
+        logger.debug(f"Sending metadata update to SQS: {message_body}")
 
-            logger.info(
-                f"Sent metadata {operation} to SQS for session {session_id} "
-                f"with fields: {list(relevant_metadata.keys())}"
-            )
+        # Send to SQS using asyncio.to_thread for non-blocking operation
+        # This ensures the hook doesn't block the main metadata operation
+        await asyncio.to_thread(
+            send_message,
+            queue_url=self.queue_url,
+            message_body=message_body,
+            message_attributes={
+                "session_id": {"DataType": "String", "StringValue": session_id},
+                "event": {"DataType": "String", "StringValue": "metadata_update"},
+            },
+        )
 
-        except ImportError as e:
-            logger.error(f"Import error in metadata SQS hook: {e}")
-        except Exception as e:
-            # Log error but don't raise to avoid breaking the main operation
-            # The metadata update should succeed even if the hook fails
-            logger.exception(
-                f"Error sending metadata to SQS for session {session_id}: {e}"
-            )
+        logger.info(
+            f"Sent metadata {operation} to SQS for session {session_id} "
+            f"with fields: {list(relevant_metadata.keys())}"
+        )
 
 
 def create_metadata_hook(
@@ -243,7 +247,7 @@ def create_metadata_hook(
                 result = original_func(kwargs["metadata"])
                 dispatch_async(
                     sqs_hook.on_metadata_change(session_id, kwargs["metadata"], action),
-                    "sending metadata update to SQS",
+                    f"sending metadata update to SQS for session {session_id}",
                     loop=dispatch_loop,
                     order_key=f"sqs:{session_id}",
                 )
@@ -252,7 +256,7 @@ def create_metadata_hook(
                 deleted_metadata = {key: None for key in kwargs["keys"]}
                 dispatch_async(
                     sqs_hook.on_metadata_change(session_id, deleted_metadata, action),
-                    "sending metadata delete to SQS",
+                    f"sending metadata delete to SQS for session {session_id}",
                     loop=dispatch_loop,
                     order_key=f"sqs:{session_id}",
                 )

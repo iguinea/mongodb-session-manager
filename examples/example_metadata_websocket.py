@@ -226,7 +226,8 @@ def demo_websocket_hook():
     print("   1. connection_id must be stored in metadata for hook to work")
     print("   2. Only fields in metadata_fields are sent (minimizes bandwidth)")
     print("   3. Updates are sent asynchronously (non-blocking)")
-    print("   4. Connection errors (GoneException) are logged, not raised")
+    print("   4. A disconnected client (GoneException) is a normal outcome;")
+    print("      any other AWS error is counted in hooks_background_stats().failed")
     print("   5. Perfect for real-time UIs (Session Viewer, dashboards, chat)")
     print("\n📖 For production usage, see: docs/user-guide/aws-integrations.md\n")
 

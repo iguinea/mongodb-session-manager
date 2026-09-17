@@ -404,7 +404,8 @@ def feedback_hook(
 - Sends feedback to different SNS topics based on rating
 - Routing: "up" → topic_arn_good, "down" → topic_arn_bad, None → topic_arn_neutral
 - Async operation with thread-safe execution
-- Graceful degradation if SNS fails
+- The feedback is stored even if SNS fails; the notification runs afterwards,
+  and its failure is counted in `failed`, not swallowed
 
 **MetadataSQSHook** (`metadata_sqs_hook.py`):
 - Propagates metadata changes to SQS queue

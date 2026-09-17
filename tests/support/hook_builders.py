@@ -6,15 +6,22 @@ here so the patch targets — module paths that move when a hook is renamed —
 are written once.
 """
 
+from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
 import pytest
+from botocore.exceptions import ClientError
 
 from mongodb_session_manager.hooks import (
     feedback_sns_hook,
     metadata_sqs_hook,
     metadata_websocket_hook,
 )
+
+
+def client_error(code: str, operation: str = "Notify") -> ClientError:
+    """The error boto3 raises when AWS refuses an operation."""
+    return ClientError({"Error": {"Code": code, "Message": code}}, operation)
 
 
 def build_sqs_hook(**kwargs):
@@ -64,6 +71,60 @@ def fire_feedback(hook, session_id: str = "s1", rating: str = "up") -> None:
     """Make a feedback hook dispatch a notification."""
     hook(MagicMock(), "add", session_id, feedback={"rating": rating, "comment": "ok"})
 
+
+# ---------------------------------------------------------------------------
+# Notifications that actually run
+# ---------------------------------------------------------------------------
+#
+# The builders above hand back a wrapper to fire with `captured_dispatch`. What
+# follows hands back the coroutine itself, with its AWS call patched for as long
+# as it takes to run it — the only way to watch a real hook through a real
+# dispatcher and read the counters afterwards.
+
+
+@contextmanager
+def sqs_notification(side_effect=None, session_id: str = "s1"):
+    """A metadata SQS notification, ready to dispatch. Fire it inside the `with`."""
+    with patch("mongodb_session_manager.hooks.metadata_sqs_hook.send_message") as send:
+        send.side_effect = side_effect
+        hook = metadata_sqs_hook.MetadataSQSHook(
+            "https://sqs.example.com/q", ["status"]
+        )
+        yield hook.on_metadata_change(session_id, {"status": "active"}, "update")
+
+
+@contextmanager
+def websocket_notification(side_effect=None, session_id: str = "s1"):
+    """A metadata WebSocket notification, ready to dispatch."""
+    with patch("mongodb_session_manager.hooks.metadata_websocket_hook.boto3") as boto3:
+        client = MagicMock()
+        client.post_to_connection.side_effect = side_effect
+        boto3.client.return_value = client
+        hook = metadata_websocket_hook.MetadataWebSocketHook(
+            "https://api.example.com", ["status"]
+        )
+        yield hook.on_metadata_change(
+            session_id, {"connection_id": "c1", "status": "active"}, "update"
+        )
+
+
+@contextmanager
+def sns_notification(side_effect=None, session_id: str = "s1"):
+    """A feedback SNS notification, ready to dispatch."""
+    with patch(
+        "mongodb_session_manager.hooks.feedback_sns_hook.publish_message"
+    ) as publish:
+        publish.side_effect = side_effect
+        hook = feedback_sns_hook.FeedbackSNSHook("arn:good", "arn:bad", "arn:neutral")
+        yield hook.on_feedback_add(session_id, {"rating": "up", "comment": "ok"})
+
+
+# The three notifications, for the tests that ask the same of all of them.
+LIVE_NOTIFICATIONS = [
+    pytest.param(sqs_notification, id="sqs"),
+    pytest.param(websocket_notification, id="websocket"),
+    pytest.param(sns_notification, id="sns"),
+]
 
 # The metadata hooks share a policy, so most tests want both at once.
 METADATA_HOOKS = [

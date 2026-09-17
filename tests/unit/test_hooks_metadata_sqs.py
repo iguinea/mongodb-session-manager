@@ -103,11 +103,18 @@ class TestOnMetadataChange:
         assert "status" not in body["metadata"]
         assert "priority" in body["metadata"]
 
-    def test_handles_error_gracefully(self, sqs_hook):
+    def test_an_sqs_error_reaches_the_dispatcher(self, sqs_hook):
+        """The notification does not swallow it: nobody is waiting on this.
+
+        By the time the coroutine runs, the metadata write has returned to its
+        caller. Raising here reaches `BackgroundWork`, which counts it as
+        failed and logs it once, with its context and its traceback.
+        """
         hook, mock_send = sqs_hook
         mock_send.side_effect = Exception("SQS error")
-        # Should not raise
-        asyncio.run(hook.on_metadata_change("s1", {"status": "x"}, "update"))
+
+        with pytest.raises(Exception, match="SQS error"):
+            asyncio.run(hook.on_metadata_change("s1", {"status": "x"}, "update"))
 
 
 # ---------------------------------------------------------------------------

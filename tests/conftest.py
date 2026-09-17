@@ -42,6 +42,16 @@ def server_loop():
     loop.close()
 
 
+@pytest.fixture
+def work():
+    """A dispatcher of its own, closed with the test that used it."""
+    from mongodb_session_manager.hooks.background_work import BackgroundWork
+
+    dispatcher = BackgroundWork()
+    yield dispatcher
+    dispatcher.shutdown(timeout=2.0)
+
+
 # ---------------------------------------------------------------------------
 # Unit-test fixtures (no MongoDB required)
 # ---------------------------------------------------------------------------
