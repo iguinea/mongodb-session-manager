@@ -8,6 +8,7 @@ file — and `--compare` refuses to subtract when it differs.
 
 from __future__ import annotations
 
+import importlib.metadata
 import platform
 import sys
 import time
@@ -55,6 +56,7 @@ class Environment:
     pymongo_version: str
     python_version: str
     package_version: str
+    strands_version: str
     label: str
     notes: list[str] = field(default_factory=list)
 
@@ -71,6 +73,7 @@ class Environment:
             "pymongo_version": self.pymongo_version,
             "python_version": self.python_version,
             "package_version": self.package_version,
+            "strands_version": self.strands_version,
             "label": self.label,
             "notes": [*_COMPARABILITY_NOTES, *self.notes],
         }
@@ -125,6 +128,15 @@ def capture(
     except Exception:
         package_version = "unknown"
 
+    # The SDK version decides how many times sync_agent() runs and what each
+    # call writes, so a results file that does not name it cannot be re-read
+    # later (#69). It is recorded, not compared: changing it against the same
+    # server is the measurement, the way changing branch is.
+    try:
+        strands_version = importlib.metadata.version("strands-agents")
+    except importlib.metadata.PackageNotFoundError:
+        strands_version = "unknown"
+
     return Environment(
         server_version=build_info.get("version", "unknown"),
         engine_hint=_engine_hint(build_info, max_wire_version),
@@ -142,6 +154,7 @@ def capture(
         pymongo_version=pymongo.version,
         python_version=platform.python_version(),
         package_version=package_version,
+        strands_version=strands_version,
         label=label or f"{platform.system()} {platform.machine()} · {sys.platform}",
         notes=notes or [],
     )

@@ -248,6 +248,8 @@ Session Document (Root)
                 ├── storage_id (string, uuid4 hex)
                 ├── role (string)
                 ├── content (string/array)
+                ├── tracking_id (string, uuid4, optional; strands >= 1.56)
+                ├── metadata (object, optional; strands >= 1.56)
                 ├── created_at (ISODate)
                 ├── updated_at (ISODate)
                 └── event_loop_metrics (object, optional)
@@ -274,6 +276,8 @@ Session Document (Root)
 | Message | storage_id | string | uuid4 hex | Yes (since v0.12.0) |
 | Message | role | string | user/assistant/system | Yes |
 | Message | content | string/array | message content | Yes |
+| Message | tracking_id | string | uuid4 | On SDK-appended messages (strands >= 1.56) |
+| Message | metadata | object | per-cycle usage/metrics | No (since strands 1.56) |
 | Message | created_at | ISODate | UTC timestamp | Yes |
 | Message | updated_at | ISODate | UTC timestamp | Yes |
 | Message | event_loop_metrics | object | metrics data | No |
@@ -640,6 +644,47 @@ def create_agent(self, session_id, session_agent, **kwargs):
     ]
 }
 ```
+
+#### tracking_id
+```json
+{
+    "tracking_id": "1fed4a51-2e22-4914-a756-e7a326be63ef"
+}
+```
+
+**Type**: String (uuid4)
+**Written by**: The Strands SDK, inside `message`, next to `role` and `content`
+**Purpose**: The SDK's own durable identifier for a message. It survives save and restore, and is stripped before model calls.
+
+**Not guaranteed.** The SDK stamps it on the messages *it* appends. A message that application or hook code appends to `agent.messages` by hand is persisted verbatim, without one. Messages written by strands < 1.56 have none either.
+
+It does **not** replace [`storage_id`](#storage_id): `storage_id` is this library's identity for the stored document, the one writes target, and it is on **every** message since v0.12.0. To identify a message, use `storage_id`.
+
+#### metadata (Optional)
+```json
+{
+    "metadata": {
+        "usage": {
+            "inputTokens": 1200,
+            "outputTokens": 80,
+            "totalTokens": 1280
+        },
+        "metrics": {
+            "latencyMs": 900
+        }
+    }
+}
+```
+
+**Type**: Object
+**Written by**: The Strands SDK, inside `message`
+**Present on**: `assistant` messages produced by a model call
+
+**Purpose**: The cost of **the single cycle** that produced this message. It is the per-message attribution that [`event_loop_metrics`](#event_loop_metrics-optional) cannot give: those are the totals accumulated over the invocation, written once on its last message.
+
+It travels inside the `$push` of `create_message()`, so it costs **no extra write**.
+
+**Compatibility**: Present since strands 1.56 (the field itself landed in 1.40). Additive: nothing else about the message changed. Messages stored before the upgrade simply have no `metadata`.
 
 #### Message Timestamps
 ```json

@@ -437,6 +437,16 @@ closed its ten connections every 30 seconds for ever — 33.596 a day, per proce
 and per node, each one a TLS handshake and an authentication nobody asked for.
 The default idle timeout is 5 minutes for that reason.
 
+!!! warning "Raising the default does not reach you if you pass the option"
+    Since v0.19.0 a default applies **only to an option nobody named**, by keyword
+    or in the URI. So an application already passing `maxIdleTimeMS=30000` next to
+    a `minPoolSize` keeps the 30-second churn above: the new 5-minute default
+    never reaches it. That is the intended precedence — your value wins — but it
+    means the applications most likely to be affected, the ones tuning the pool
+    explicitly, are exactly the ones the change does not fix. **Check for an
+    explicit `maxIdleTimeMS` when upgrading**, and against DocumentDB especially,
+    where reopening a connection costs 603 ms against 2,77 ms on MongoDB.
+
 Pick the pairing that matches the deployment:
 
 | Deployment | `minPoolSize` | `maxIdleTimeMS` | Why |

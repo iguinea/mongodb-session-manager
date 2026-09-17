@@ -161,6 +161,24 @@ compressors, **no delta is computed**: both columns are printed with the field
 that differs. That is also the rule for MongoDB versus DocumentDB — side by side,
 never a delta, because there the latency is dominated by the tunnel.
 
+## Comparing two versions of the Strands SDK
+
+The SDK decides how many times `sync_agent()` runs and what each call writes, so
+it belongs in the same list as the branch. Pin it for one of the two runs and
+leave everything else alone:
+
+```bash
+uv run python -m benchmarks --json-out /tmp/head.json                      # the lock
+uv run --with 'strands-agents==1.30.0' python -m benchmarks \
+  --json-out /tmp/base.json                                                # the old one
+uv run python -m benchmarks --compare /tmp/base.json /tmp/head.json
+```
+
+The version is recorded as `environment.strands_version` and is **not** part of
+the comparability key: changing it against the same server is the measurement,
+the way changing branch is. Worked example, MongoDB and DocumentDB side by side,
+in [`artifacts/issue-69-benchmark-strands-1-56.md`](../artifacts/issue-69-benchmark-strands-1-56.md).
+
 ## Against the development DocumentDB
 
 Export `MONGODB_CONNECTION_STRING` through the SSH tunnel exactly as described in

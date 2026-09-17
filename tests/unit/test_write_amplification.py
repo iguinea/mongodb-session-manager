@@ -18,8 +18,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from pymongo.errors import PyMongoError
+from strands.agent.state import AgentState
 from strands.hooks import AfterInvocationEvent, HookRegistry, MessageAddedEvent
-from strands.interrupt import _InterruptState
 from strands.types.session import SessionAgent, SessionMessage
 
 from mongodb_session_manager.message_identity import MessageRef, attach_storage_id
@@ -390,8 +390,6 @@ def _manager_writes(mock_repo):
 def _ready_to_sync(mgr, mock_agent):
     """Build an agent with one tracked message, ready to be synced."""
     agent = mock_agent(agent_id="a1", latency_ms=100, system_prompt="p", model_id="m1")
-    agent.state._get_version.return_value = 1
-    agent._interrupt_state._get_version.return_value = 1
     agent.conversation_manager.get_state.return_value = {}
     mgr._latest_agent_message["a1"] = SessionMessage(
         message_id=2, message={"role": "assistant", "content": [{"text": "x"}]}
@@ -560,21 +558,46 @@ class TestRootUpdatedAtInvariant:
 # ---------------------------------------------------------------------------
 
 
-def persisted_agent():
+def value_objects(agent):
+    """Give the mock agent the real `state` the SDK reads off it.
+
+    Not cosmetic: `SessionAgent.from_agent()` stores `agent.state.get()`, and a
+    MagicMock there would reach `AgentState()` in the SDK's restore, which
+    rejects anything that is not JSON. A `{}` written by hand never tripped it
+    because it is falsy and skips that validation.
+
+    `state` is the only field a mock exercises. `from_agent()` fills
+    `_internal_state` and `conversation_manager_state` only for a real `Agent`
+    (`strands/types/session.py`, since 1.56), so for a double they are `{}` on
+    both sides of the comparison. What proves the deduplication of #67 against
+    those two is `tests/unit/test_agent_rewrites.py`, which drives a real
+    `Agent`. This file counts round-trips, which is what a double does well.
+    """
+    agent.state = AgentState()
+    return agent
+
+
+def persisted_agent(agent):
     """Agente guardado en un turno anterior, con su configuración y dos mensajes.
 
-    Lleva el `_internal_state` que Strands escribe, para que el agente
-    restaurado sea, campo a campo, el mismo que se leyó (#67).
+    El `agent_data` lo compone el propio SDK, `SessionAgent.from_agent()`, en vez
+    de escribirse a mano: lo que Strands guarda ahí cambia de un minor a otro
+    —1.34 añadió `model_state`, 1.56 dejó de rellenarlo para lo que no es un
+    `Agent`— y una copia congelada hacía que el primer sync del turno reescribiera
+    un agente que no había cambiado (#69).
+
+    Se apoya en que el restore del SDK sea idempotente: lo que `from_agent()`
+    devuelve tras `initialize()` es lo mismo que se guardó. Si un minor rompe esa
+    propiedad, el fallo señala al SDK y no a un dato inventado aquí.
     """
+    agent_data = SessionAgent.from_agent(agent).to_dict()
+    # Los pone el repositorio al escribir, y la dedup de contenido los ignora.
+    for timestamp in ("created_at", "updated_at"):
+        agent_data.pop(timestamp, None)
+    agent_data["model"] = "m1"
+    agent_data["system_prompt"] = "p1"
     return {
-        "agent_data": {
-            "agent_id": "a1",
-            "state": {},
-            "conversation_manager_state": {},
-            "_internal_state": {"interrupt_state": _InterruptState().to_dict()},
-            "model": "m1",
-            "system_prompt": "p1",
-        },
+        "agent_data": agent_data,
         "messages": [
             {"message_id": 0, "message": {"role": "user", "content": [{"text": "a"}]}},
             {
@@ -585,29 +608,33 @@ def persisted_agent():
     }
 
 
-def restored_manager(mock_agent, stored_agents, system_prompt="p1"):
+def restored_manager(mock_agent, stored=persisted_agent, system_prompt="p1"):
     """Manager nuevo sobre una sesión existente, con el agente a1 ya inicializado.
+
+    `stored` construye el documento del agente a partir del agente ya montado, y
+    por eso este helper arma el agente primero. Con `stored=None` la sesión
+    existe pero no lo contiene: es el sub-agente invocado por primera vez en una
+    conversación empezada.
 
     El agente usa el modelo m1 y aún no tiene métricas. Devuelve
     (manager, agente, colección), con los contadores de la colección a cero.
     """
     client, collection = make_client()
+    agent = value_objects(
+        mock_agent(
+            agent_id="a1", latency_ms=0, model_id="m1", system_prompt=system_prompt
+        )
+    )
+
+    # Antes de construir el manager: su __init__ lee la sesión, y sin documento
+    # la da por nueva y se salta read_agent() y toda la hidratación.
     collection.find_one.return_value = {
         "_id": "s1",
         "session_id": "s1",
         "session_type": "AGENT",
-        "agents": stored_agents,
+        "agents": {"a1": stored(agent)} if stored else {},
     }
     mgr = make_manager(client)
-    agent = mock_agent(
-        agent_id="a1", latency_ms=0, model_id="m1", system_prompt=system_prompt
-    )
-    # Real, not a mock: update_agent() compares what the agent would write with
-    # what was read, and a MagicMock only ever equals itself.
-    agent._interrupt_state = _InterruptState()
-    agent.conversation_manager.restore_from_session.return_value = None
-    agent.conversation_manager.removed_message_count = 0
-    agent.conversation_manager.get_state.return_value = {}
 
     mgr.initialize(agent)
     collection.update_one.reset_mock()
@@ -630,7 +657,7 @@ class TestAgentConfigHydratedOnRestore:
         read_agent() ya trae model y system_prompt. Sin aprovecharlos, el
         primer sync de cada request reescribía el system prompt entero.
         """
-        mgr, agent, collection = restored_manager(mock_agent, {"a1": persisted_agent()})
+        mgr, agent, collection = restored_manager(mock_agent)
 
         mgr.sync_agent(agent)
 
@@ -644,9 +671,7 @@ class TestAgentConfigHydratedOnRestore:
         Guardarraíl: pasa también sin hidratar. Está para que la caché
         hidratada no se trague un cambio real de configuración.
         """
-        mgr, agent, collection = restored_manager(
-            mock_agent, {"a1": persisted_agent()}, system_prompt="p2"
-        )
+        mgr, agent, collection = restored_manager(mock_agent, system_prompt="p2")
 
         mgr.sync_agent(agent)
 
@@ -659,7 +684,7 @@ class TestAgentConfigHydratedOnRestore:
         Guardarraíl: read_agent() no encuentra nada que hidratar. Es el caso
         del sub-agente invocado por primera vez en una conversación empezada.
         """
-        mgr, agent, collection = restored_manager(mock_agent, {})
+        mgr, agent, collection = restored_manager(mock_agent, stored=None)
 
         mgr.sync_agent(agent)
 
@@ -712,7 +737,7 @@ class TestTurnWriteBudget:
         estaba persistida (issue #65). El estado tampoco: el primer sync del
         manager lleva justo lo que read_agent() acaba de leer (issue #67).
         """
-        mgr, agent, collection = restored_manager(mock_agent, {"a1": persisted_agent()})
+        mgr, agent, collection = restored_manager(mock_agent)
         summary = agent.event_loop_metrics.get_summary.return_value
 
         def first_cycle_done():
@@ -741,14 +766,10 @@ class TestTurnWriteBudget:
         client, collection = make_client()
         mgr = make_manager(client)
 
-        agent = mock_agent(
-            agent_id="a1", latency_ms=100, system_prompt="p", model_id="m1"
+        agent = value_objects(
+            mock_agent(agent_id="a1", latency_ms=100, system_prompt="p", model_id="m1")
         )
-        agent.state._get_version.return_value = 1
-        agent._interrupt_state._get_version.return_value = 1
-        agent.conversation_manager.get_state.return_value = {}
         mgr._latest_agent_message["a1"] = None
-        mgr._last_synced_internal_state = {}
 
         collection.update_one.reset_mock()
         collection.find_one.reset_mock()

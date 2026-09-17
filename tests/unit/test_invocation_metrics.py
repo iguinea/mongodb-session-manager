@@ -3,8 +3,8 @@
 Con un `Agent` de Strands real, el doble in-memory y un modelo guionizado. Lo que
 se prueba es el orden de los eventos del SDK, que un `MagicMock` no reproduce:
 Strands dispara `MessageAddedEvent` *antes* de acumular el uso y las métricas del
-ciclo (`event_loop.py:409-414`), así que el sync de cada mensaje veía las del
-ciclo anterior.
+ciclo (`event_loop.py:699-703` en 1.56), así que el sync de cada mensaje veía las
+del ciclo anterior.
 
 El contrato (`features/8_invocation_metrics_on_last_message/plan.md`):
 
@@ -26,6 +26,7 @@ from strands import Agent, tool
 from strands.hooks import (
     AfterInvocationEvent,
     BeforeToolCallEvent,
+    HookOrder,
     HookProvider,
     HookRegistry,
     MessageAddedEvent,
@@ -188,6 +189,23 @@ class TestOneWritePerInvocation:
         assert [(mid, tokens) for mid, tokens, _ in repo.metrics_writes] == [
             (last_id, final_tokens)
         ]
+
+    def test_an_agent_that_lost_its_event_loop_fails_loudly(self):
+        """La guarda que deja pasar al `BidiAgent` no puede tragarse un renombrado.
+
+        `sync_agent()` admite desde strands 1.56 agentes sin event loop, porque
+        un `BidiAgent` no lo tiene (#69). Un `Agent` sí, así que si un minor del
+        SDK moviera `event_loop_metrics` el fallo tiene que salir: tragárselo
+        dejaría de escribir métricas en todas las sesiones sin ninguna señal,
+        que es el síntoma de #66 y peor, porque nadie lo vería.
+        """
+        repo = RecordingRepository()
+        manager = new_manager(repo)
+        agent = new_agent(repo, tool_turns(0), session_manager=manager)
+        del agent.event_loop_metrics
+
+        with pytest.raises(AttributeError, match="event_loop_metrics"):
+            manager.sync_agent(agent)
 
     def test_a_new_prompt_does_not_inherit_the_previous_invocation_metrics(self):
         """Mismo Agent: su acumulado ya no es 0 cuando llega el segundo prompt."""
@@ -406,6 +424,42 @@ class TestInvocationShapes:
         new_agent(repo, tool_turns(0), hooks=[AppendOnClose()])("hola")
 
         assert tokens_by_message(repo) == [(0, None), (1, None), (2, TOKENS_PER_CYCLE)]
+
+    def test_a_message_added_by_an_sdk_last_hook_does_not_get_the_metrics(self):
+        """El mismo hook en SDK_LAST corre después del cierre: el límite de #66.
+
+        `HookOrder` llegó en strands 1.45, y los grupos de prioridad corren en
+        orden ascendente también en los eventos de orden inverso
+        (`hooks/registry.py`, `get_callbacks_for`). Un hook en `SDK_LAST` (100)
+        va, por tanto, después del sync de cierre del manager (`DEFAULT`, 0), y
+        el mensaje que añada se queda sin métricas: las tiene el anterior, que
+        es el ciclo al que pertenecen.
+
+        Es el escenario que quedó pendiente de comprobar en #66 y que aquí se
+        fija con un `Agent` real (#69). No se corrige: mover nuestro sync a
+        `SDK_LAST` dependería del orden de registro dentro del grupo.
+        """
+
+        class AppendLast(HookProvider):
+            def register_hooks(self, registry: HookRegistry, **kwargs: Any) -> None:
+                registry.add_callback(
+                    AfterInvocationEvent, self.append, order=HookOrder.SDK_LAST
+                )
+
+            def append(self, event: AfterInvocationEvent) -> None:
+                message: Message = {
+                    "role": "assistant",
+                    "content": [{"text": "resumen"}],
+                }
+                event.agent.messages.append(message)
+                event.agent.hooks.invoke_callbacks(
+                    MessageAddedEvent(agent=event.agent, message=message)
+                )
+
+        repo = RecordingRepository()
+        new_agent(repo, tool_turns(0), hooks=[AppendLast()])("hola")
+
+        assert tokens_by_message(repo) == [(0, None), (1, TOKENS_PER_CYCLE), (2, None)]
 
     def test_an_interrupted_invocation_puts_its_metrics_on_the_tool_use_message(
         self,

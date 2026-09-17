@@ -4,6 +4,9 @@ import warnings
 from unittest.mock import MagicMock, patch
 
 import pytest
+from strands.agent.state import AgentState
+from strands.experimental.bidi.hooks import BidiAgentStopEvent
+from strands.hooks import HookRegistry
 from strands.types.exceptions import SessionException
 from strands.types.session import SessionAgent, SessionMessage
 
@@ -99,13 +102,18 @@ def guardrail_events(fake_repo):
 
 @pytest.fixture
 def syncable_agent(mock_agent):
-    """Build an agent the parent class can sync without tripping over mocks."""
+    """Build an agent the parent class can sync without tripping over mocks.
+
+    `state` es real porque `SessionAgent.from_agent()` guarda `state.get()`, y un
+    MagicMock ahí solo se compara consigo mismo. Las versiones que el SDK miraba
+    (`state._get_version()`, `_interrupt_state._get_version()`) ya no hacen falta:
+    desde strands 1.56 `sync_agent()` ni las consulta para lo que no es un
+    `Agent`, y un mock nunca lo es (#69).
+    """
 
     def _build(**kwargs):
         agent = mock_agent(agent_id="a1", **kwargs)
-        agent.state._get_version.return_value = 1
-        agent._interrupt_state._get_version.return_value = 1
-        agent.conversation_manager.get_state.return_value = {}
+        agent.state = AgentState()
         return agent
 
     return _build
@@ -331,6 +339,41 @@ class TestSyncAgent:
         assert fake_repo.count_messages("test-session", "a1") == 0
         # La configuración sí se persiste: va por su propia rama de escritura.
         assert agent_in_session.get_agent_config("a1")["model"] == "m1"
+
+
+# ---------------------------------------------------------------------------
+# Agentes sin event loop: el BidiAgent (#69)
+# ---------------------------------------------------------------------------
+
+
+class TestAgentWithoutEventLoop:
+    """Un `BidiAgent` no tiene event loop, y desde strands 1.56 llega aquí.
+
+    Hasta 1.55 el SDK lo sincronizaba por `sync_bidi_agent()`, un método aparte
+    que este manager no sobrescribía. 1.56 borra esa familia de métodos y
+    enruta `BidiAgentStopEvent` al mismo `sync_agent()` que usa un `Agent`.
+    """
+
+    def test_the_bidi_stop_event_syncs_without_metrics(
+        self, stored_message, fake_repo, mock_agent
+    ):
+        """Pedirle las métricas a un agente que no las tiene no puede reventar.
+
+        El evento se dispara por el registry de verdad, en vez de llamar a
+        `sync_agent()` a mano: lo que hay que fijar es el camino entero, porque
+        es el SDK quien decidió mandar los dos tipos de agente al mismo sitio.
+        """
+        agent = mock_agent(agent_id="a1", latency_ms=100, model_id="m1")
+        agent.state = AgentState()
+        del agent.event_loop_metrics  # como un BidiAgent: no hay event loop
+
+        registry = HookRegistry()
+        stored_message.register_hooks(registry)
+        registry.invoke_callbacks(BidiAgentStopEvent(agent=agent))
+
+        assert "event_loop_metrics" not in fake_repo.message("test-session", "a1", 5)
+        # La configuración sí viaja: esa no sale del event loop.
+        assert stored_message.get_agent_config("a1")["model"] == "m1"
 
 
 # ---------------------------------------------------------------------------
@@ -1205,21 +1248,23 @@ class TestToolUsageProcessing:
 
 
 class TestNamesInPaths:
-    @pytest.mark.parametrize("method", ["initialize", "initialize_bidi_agent"])
     def test_an_invalid_agent_id_fails_the_same_way_every_time(
-        self, manager_fake, fake_repo, mock_agent, method
+        self, manager_fake, fake_repo, mock_agent
     ):
         """Rejected before Strands registers the id, so a retry does not lie.
 
         Strands records the agent_id in `_latest_agent_message` before it touches
         the repository. Failing after that would turn the second attempt into a
         misleading "agent_id must be unique" SessionException.
+
+        Un solo camino desde strands 1.56: el SDK borró `initialize_bidi_agent()`
+        y manda también el `BidiAgent` por aquí (#69).
         """
         agent = mock_agent(agent_id="a.b")
 
         for _ in range(2):
             with pytest.raises(ValueError, match="agent_id"):
-                getattr(manager_fake, method)(agent)
+                manager_fake.initialize(agent)
 
         assert "a.b" not in manager_fake._latest_agent_message
         assert fake_repo.session("test-session")["agents"] == {}

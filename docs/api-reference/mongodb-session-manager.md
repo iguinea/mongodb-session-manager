@@ -251,7 +251,7 @@ manager.redact_latest_message(redacted, agent, action=GUARDRAIL_ACTION_BLOCKED)
 ### `sync_agent`
 
 ```python
-def sync_agent(self, agent: Agent, **kwargs: Any) -> None
+def sync_agent(self, agent: LocalAgent, **kwargs: Any) -> None
 ```
 
 Synchronize agent data and automatically capture event loop metrics and agent configuration.
@@ -269,15 +269,23 @@ Strands calls `sync_agent()` on its own at two points, and they do not write the
 |---|---|
 | After each message is added (`MessageAddedEvent`) | **Not written.** The event fires before the event loop accumulates the usage and metrics of the model call behind the message, so they would still be the previous cycle's |
 | At the end of the invocation (`AfterInvocationEvent`) | Written once, on the last message of the invocation |
+| When a bidirectional agent stops (`BidiAgentStopEvent`) | **Not written.** A `BidiAgent` has no event loop, so there are no metrics to take. Its state and config still sync |
 | Any explicit call to `sync_agent()` | Written, with the values at that moment |
 
 So only the last message of each invocation carries `event_loop_metrics`; tool use, tool results and the next prompt carry none. An explicit call still writes, which is what lets an application add a value to the metrics after the invocation (for instance a time-to-first-token it measured) and then sync. If an invocation does not reach its closing sync -- a hook registered for `AfterInvocationEvent` or the conversation manager raising first -- it is left without metrics. Before v0.15.0 every sync wrote them, and intermediate messages got the previous cycle's values (issue #66).
+
+!!! warning "A hook registered with `HookOrder.SDK_LAST`"
+    Strands runs priority groups in ascending order, in reverse-order events too, so a hook registered for `AfterInvocationEvent` with `order=HookOrder.SDK_LAST` (100) runs *after* the closing sync of this manager (`DEFAULT`, 0). A message that such a hook appends is stored, but it carries no `event_loop_metrics`: the metrics stay on the previous message, which is the cycle they belong to. A hook at the default order runs before the closing sync and its message does get them. Both orders are pinned by `tests/unit/test_invocation_metrics.py` ([issue #69](https://github.com/iguinea/mongodb-session-manager/issues/69)).
+
+    **This only applies where the `Agent` was built with `session_manager=`.** An application that builds a manager to call `update_metadata()` or `add_feedback()`, and does not hand it to the `Agent`, has no `SessionManager` lifecycle in that agent at all: there is no closing sync for a hook to get ahead of, whatever the plugins registered. The guarantee comes from the wiring, not from the hook configuration — so it disappears the day that agent is given a `session_manager=`.
+
+Since strands 1.56 every `assistant` message also carries the SDK's own per-cycle attribution in `message.metadata`, which is finer-grained and costs no extra write. See [`message.metadata`](../architecture/data-model.md#metadata-optional).
 
 The agent configuration (model and system_prompt) is automatically extracted from the Agent object and stored in `agents.{agent_id}.agent_data` for later retrieval via `get_agent_config()`. It is only written when it differs from the config already persisted for that agent, as known from this manager's previous writes or from the restore read (see [`initialize`](#initialize)).
 
 #### Parameters
 
-- **agent** (`Agent`): The Strands Agent instance to synchronize.
+- **agent** (`LocalAgent`): The Strands agent to synchronize -- an `Agent` or, since strands 1.56, a `BidiAgent`.
 
 - **kwargs** (`Any`): Additional keyword arguments passed to the parent class.
 
@@ -321,7 +329,7 @@ It registers exactly what Strands' `SessionManager` does, through a wrapper arou
 ### `initialize`
 
 ```python
-def initialize(self, agent: Agent, **kwargs: Any) -> None
+def initialize(self, agent: LocalAgent, **kwargs: Any) -> None
 ```
 
 Initialize an agent with the session, loading conversation history.
@@ -332,13 +340,16 @@ If the agent already exists in the session, its state and conversation history a
 
 #### Parameters
 
-- **agent** (`Agent`): The Strands Agent instance to initialize with session history.
+- **agent** (`LocalAgent`): The Strands agent to initialize with session history -- an `Agent` or, since strands 1.56, a `BidiAgent`.
 
 - **kwargs** (`Any`): Additional keyword arguments passed to the parent class.
 
 #### Raises
 
-- `ValueError`: If the `agent_id` cannot be stored as `agents.<agent_id>`: it contains `.`, starts with `$`, is empty or holds a NUL byte (see [names that become paths](mongodb-session-repository.md#names-that-become-paths)). The error surfaces when the `Agent` is created, and it is raised before Strands registers the id, so retrying on the same manager fails the same way instead of with `SessionException`. `initialize_bidi_agent()` applies the same check.
+- `ValueError`: If the `agent_id` cannot be stored as `agents.<agent_id>`: it contains `.`, starts with `$`, is empty or holds a NUL byte (see [names that become paths](mongodb-session-repository.md#names-that-become-paths)). The error surfaces when the `Agent` is created, and it is raised before Strands registers the id, so retrying on the same manager fails the same way instead of with `SessionException`.
+
+!!! note "Bidirectional agents"
+    Since strands 1.56 a `BidiAgent` is initialized here too: the SDK dropped `initialize_bidi_agent()` and fires `AgentInitializedEvent` for both kinds of agent, so the check above covers both. Versions of this library before 0.21.0 overrode `initialize_bidi_agent()`, which no longer exists on the base class ([issue #69](https://github.com/iguinea/mongodb-session-manager/issues/69)).
 
 #### Example
 

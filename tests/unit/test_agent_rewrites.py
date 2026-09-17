@@ -110,6 +110,37 @@ class TestUnchangedAgentIsNotRewritten:
         assert agent_data(repo)["model"] == "m1"
 
 
+class TestAgentStoredByAnOlderSdk:
+    """Subir el SDK cuesta una escritura por sesión, y solo una (#69)."""
+
+    def test_an_internal_state_without_model_state_is_rewritten_once(self, repo):
+        """strands 1.34 añadió `model_state` al snapshot interno del agente.
+
+        Una sesión escrita por una versión anterior no lo lleva, así que el
+        primer sync tras el bump ve un contenido distinto y escribe. El
+        documento ya lo lleva en el turno siguiente, y la deduplicación vuelve a
+        saltarse el sync: no es un coste por turno.
+        """
+        run_turn(repo, "hola")
+        stored = agent_data(repo)["_internal_state"]
+        assert "model_state" in stored, "el SDK dejó de guardar model_state"
+
+        # El snapshot tal y como lo habría dejado un SDK anterior a 1.34.
+        legacy = {k: v for k, v in stored.items() if k != "model_state"}
+        repo.update_agent_fields(SESSION, "a1", {"agent_data._internal_state": legacy})
+        before_upgrade = agent_data(repo)["updated_at"]
+
+        run_turn(repo, "otra")
+        migrated = agent_data(repo)["updated_at"]
+
+        run_turn(repo, "y otra")
+
+        assert migrated > before_upgrade, "el snapshot antiguo no se migró"
+        assert agent_data(repo)["updated_at"] == migrated, (
+            "el turno siguiente reescribió un agente que ya no cambiaba"
+        )
+
+
 class TestChangedAgentIsPersisted:
     def test_state_set(self, repo):
         run_turn(repo, "hola")

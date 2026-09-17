@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 MongoDB Session Manager - A MongoDB session manager library for Strands Agents that provides persistent storage for agent conversations and state, with connection pooling optimized for stateless environments.
 
-**Tech Stack:** Python 3.12+, UV package manager, MongoDB, Strands Agents SDK
+**Tech Stack:** Python 3.12+, UV package manager, MongoDB, Strands Agents SDK (`strands-agents>=1.56.0`)
 
 ## Development Commands
 
@@ -49,7 +49,7 @@ cd playground/chat && make frontend                   # Port 8881
    - `get_metadata_tool()`: Returns Strands tool for agent metadata management
    - Metadata/Feedback hooks for intercepting operations
    - Agent config persistence (model, system_prompt), written only when it changes; `initialize()` seeds the cache from `read_agent()`
-   - `initialize()` / `initialize_bidi_agent()` validate the `agent_id` **before** `super()` (Strands registers the id before touching the repository), and the metadata hook wrappers validate keys before calling the hook (#79)
+   - `initialize()` validates the `agent_id` **before** `super()` (Strands registers the id before touching the repository), and the metadata hook wrappers validate keys before calling the hook (#79). Since strands 1.56 it is also the entry point of a `BidiAgent`: the SDK dropped `initialize_bidi_agent()`/`sync_bidi_agent()` and sends both kinds of agent through `initialize()` and `sync_agent()`. A `BidiAgent` has no event loop, so its sync writes state and config but no metrics — asking it for `event_loop_metrics` was an `AttributeError` at the end of every bidi session (#69)
    - **Never touches `session_repository.collection`**: every data access goes through the repository. Accepts `session_repository=` to inject the in-memory double in tests; a replacement must implement the whole repository surface (the contract lives in `tests/support/repository_contract.py`, not as a `Protocol`)
 
 2. **MongoDBSessionRepository** (`mongodb_session_repository.py`): Implements `SessionRepository` interface
@@ -110,6 +110,8 @@ Sessions stored as single documents with embedded data:
 The last message of each invocation that closes carries `event_loop_metrics` with: `accumulated_usage` (tokens, cache), `accumulated_metrics` (latency, TTFB), `cycle_metrics`, `tool_usage`. Intermediate messages (`toolUse`, `toolResult`, the next prompt) carry none. The values accumulate over the life of the `Agent` object, so with the factory (one `Agent` per request) they are that invocation's. An invocation that does not close (a user hook or the conversation manager raising before the closing sync) is left without metrics (#66). Redacted messages may include `guardrail_event` with `action`, `timestamp`, and optionally `stop_reason`, `policies_triggered`, and `trace` (full GuardrailTrace).
 
 Every message also carries a `storage_id` (uuid4 hex), its stable identity: `message_id` is an index Strands derives in memory, so two managers on the same agent can duplicate it. Writes name the message by `storage_id` (`message_identity.MessageRef`); messages stored before v0.12.0 have none and fall back to `message_id` (#78).
+
+Inside `message`, strands 1.56 adds two fields of its own that are persisted verbatim and cost no extra write: `tracking_id` (uuid4, on the messages the SDK itself appends — one appended by application code has none, so `storage_id` is still what identifies a message) and `metadata` with the `usage` and `metrics` of **that cycle**, on each `assistant` message. It is the per-message attribution `event_loop_metrics` cannot give, which is the accumulated total of the invocation. A hook registered with `order=HookOrder.SDK_LAST` runs after the closing sync, so a message it appends is stored **without** metrics — they stay on the message of the cycle they belong to (#69).
 
 ## Key Usage Patterns
 
@@ -213,7 +215,7 @@ When releasing, update version in **three places**:
 2. `pyproject.toml` (`version`)
 3. `CHANGELOG.md` (add release entry)
 
-Current version: **0.20.0**
+Current version: **0.21.0**
 
 ## Workflow Rules
 

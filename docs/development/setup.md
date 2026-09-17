@@ -143,19 +143,24 @@ The `uv sync` command will:
 
 ### Understanding Dependencies
 
-**Core Dependencies** (required for the library):
-- `pymongo>=4.13.2`: MongoDB Python driver
-- `strands-agents>=1.0.1`: Strands Agents SDK
-- `strands-agents-tools>=0.2.1`: Strands tools
-- `fastapi>=0.116.1`: For FastAPI integration
-- `uvloop>=0.21.0`: High-performance event loop
-- `python-helpers`: Custom AWS integrations (from git repo)
+The authoritative list is `pyproject.toml`; this section summarises it.
 
-**Development Dependencies** (for testing and development):
-- `pytest>=7.4.0`: Testing framework
-- `pytest-cov>=4.1.0`: Coverage reporting
-- `pytest-mock>=3.11.0`: Mocking utilities
-- `pytest-asyncio>=0.21.0`: Async test support
+**Core Dependencies** (required for the library):
+- `pymongo>=4.16.0`: MongoDB Python driver
+- `strands-agents>=1.56.0`: Strands Agents SDK
+- `strands-agents-tools>=0.2.19`: Strands tools
+- `fastapi>=0.128.0`: For FastAPI integration
+- `uvicorn>=0.40.0`: ASGI server
+- `uvloop>=0.22.1`: High-performance event loop
+- `pydantic-settings>=2.12.0`: Typed settings
+- `boto3>=1.42.88`: AWS SDK, for the bundled hooks
+
+**Development Dependencies** (the `dev` extra, for testing and development):
+- `pytest>=9.0.2`: Testing framework
+- `pytest-cov>=6.0.0`: Coverage reporting
+- `pytest-mock>=3.15.1`: Mocking utilities
+- `pytest-asyncio>=1.3.0`: Async test support
+- `ruff>=0.16.7`: Formatter and linter
 
 ## MongoDB Setup
 
