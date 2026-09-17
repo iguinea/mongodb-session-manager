@@ -59,6 +59,14 @@ There is no mean anywhere: it hides the tail this exists to expose.
 
 ## Reading the numbers honestly
 
+- **A percentile marked `*` is the maximum**, not a tail estimate. Percentiles
+  use nearest-rank, which puts p99 on rank `ceil(0.99n)` — and that rank *is* `n`
+  for every sample below 100, as p95 is below 20. With the default 30
+  repetitions the p99 is therefore the worst observation, which is a real
+  number but the least repeatable one in the table: measured on one DocumentDB
+  scenario, its lag p99 swung between 1.767 and 5.754 ms across four runs while
+  its p95 stayed within 10%. Raise `--repetitions` to 100 for a p99 that
+  resolves, and read the marked columns as "worst of n" until then.
 - **Bytes** are re-encoded from the decoded reply. They exclude the OP_MSG
   header and do **not** reflect a negotiated compressor — which is why the
   results file records the compressors in use.

@@ -28,6 +28,15 @@ escenarios grandes.
 Percentiles por rango mas cercano sobre la muestra ordenada: con 30 repeticiones,
 un p99 interpolado es un numero que nadie midio. No se reporta ninguna media.
 
+**Corregido despues de publicar (17/09):** ese mismo rango mas cercano hace que
+el p99 sea la ultima muestra para cualquier n < 100, y el p95 para n < 20. Las
+columnas p99 de este documento son por tanto **la peor de 30 observaciones** (15
+en DocumentDB), no una estimacion de cola: son medidas reales, pero las menos
+repetibles de la tabla. Se detecto al repetir cuatro veces `turn.tool/h5000` en
+DocumentDB: su lag «p99» fue de 1.767, 1.771, 2.836 y 5.754 ms mientras el p95 se
+mantuvo entre 1.634 y 1.984. El harness marca ahora esos valores con `*` y
+`--repetitions 100` hace que el p99 tenga resolucion. Comparar por p50 y p95.
+
 Salvedades que viajan dentro del propio JSON: los bytes excluyen la cabecera
 OP_MSG, son una recodificacion y no bytes de cable, y no reflejan un compresor
 negociado. Una sonda de `ping` antes y despues de la matriz detecta que el camino
@@ -137,6 +146,28 @@ driver bloquea ese loop y con el al resto de peticiones del worker.
 La linea base del loop ocioso (2,1-2,8 ms en esta maquina) se reporta al lado y
 **no se resta nunca**. En DocumentDB, un turno sobre una sesion larga deja al
 worker sin atender nada durante mas de un segundo.
+
+### Repetibilidad del lag: cuatro ejecuciones de `turn.tool/h5000`
+
+Un «p99» de 5.754 ms en la primera ejecucion motivo repetir el escenario tres
+veces mas contra el mismo cluster, con los mismos parametros:
+
+| Ejecucion | n | p50 | p95 | p99 (= max) |
+|---|---:|---:|---:|---:|
+| 1.ª | 30 | 705,0 ms | 1.752,3 ms | 5.753,8 ms |
+| 2.ª | 30 | 523,5 ms | 1.984,1 ms | 2.836,0 ms |
+| 3.ª | 30 | 973,0 ms | 1.634,3 ms | 1.767,0 ms |
+| 4.ª | 30 | 546,5 ms | 1.699,0 ms | 1.771,7 ms |
+
+El p95 se mantiene entre 1.634 y 1.984 ms —un 10 % de dispersion— mientras el
+«p99» va de 1.767 a 5.754. La latencia del turno se comporto igual de bien: p50
+entre 1.274 y 1.444 ms en las cuatro. **El pico era una sola muestra**, y la
+lectura util del escenario es p50 entre 0,5 y 1 s de bloqueo del loop, con un
+p95 alrededor de 1,7-2,0 s.
+
+El `n` de 30 latidos en una ventana de casi dos minutos dice algo por si mismo:
+el loop esta bloqueado tan continuamente que el latido de 20 ms apenas consigue
+ejecutarse una o dos veces por repeticion.
 
 ## Espera del pool: cero, y por que
 

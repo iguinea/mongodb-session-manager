@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from benchmarks.report import compare_runs
+from benchmarks.report import compare_runs, human_summary
 
 BASE_ENVIRONMENT = {
     "engine_hint": "mongodb",
@@ -130,3 +130,53 @@ class TestNotComparable:
             "Primary()",
             "SecondaryPreferred()",
         )
+
+
+class TestSaturationIsVisible:
+    """The table has to say it, or the reader quotes the p99 as a tail."""
+
+    def _document(self, n: int) -> dict:
+        return {
+            "schema_version": 1,
+            "run": {"run_id": "r1"},
+            "environment": {
+                "engine_hint": "mongodb",
+                "server_version": "8.2.7",
+                "topology": "Single",
+                "read_preference": "Primary()",
+            },
+            "cleanup": {"describe": "ok"},
+            "failed_checks": [],
+            "results": [
+                {
+                    "scenario": "turn.tool/h5000/c1",
+                    "latency": {
+                        "p50_ms": 1314.9,
+                        "p95_ms": 1976.8,
+                        "p99_ms": 1976.8,
+                        "n": n,
+                        "saturated": ["p95", "p99"] if n < 20 else [],
+                    },
+                    "commands": {"per_operation": 9.0},
+                    "bytes": {"reply": 33356},
+                    "pool": {},
+                    "loop_lag": None,
+                }
+            ],
+        }
+
+    def test_a_saturated_percentile_is_marked(self):
+        text = human_summary(self._document(n=15))
+
+        assert "1976.800*" in text or "1976.800 *" in text.replace("  ", " ")
+
+    def test_the_mark_is_explained_once(self):
+        text = human_summary(self._document(n=15))
+
+        assert "--repetitions" in text
+        assert text.count("--repetitions") == 1
+
+    def test_a_healthy_sample_is_not_marked(self):
+        text = human_summary(self._document(n=100))
+
+        assert "*" not in text
