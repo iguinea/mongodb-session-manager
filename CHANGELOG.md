@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.17.0] - 2026-09-17
+
+### Added
+- **Benchmark reproducible para MongoDB y DocumentDB** (#60), en `benchmarks/`, ejecutable con `uv run python -m benchmarks`. Ejerce agentes Strands reales con un modelo guionizado y **sale con código 1 si un escenario no puede demostrar que hizo el trabajo** que midió: mensajes persistidos, métricas en el último mensaje (#66), comandos en la ventana, cero `createIndexes` y cero errores
+- Matriz de escenarios `create`, `restore`, `turn.simple`, `turn.tool` y `turn.supervisor`, cruzada con historiales de 10, 100, 1.000 y 5.000 mensajes y concurrencia 1, 4 y 16. Por celda: latencia min/p50/p95/p99/max, comandos por nombre y por operación, bytes, espera del pool, lag del event loop y errores
+- Tres pases por celda: calentamiento (reportado aparte), latencia (sin serializar nada) y volumen (pesa bytes y descarta sus tiempos, porque recodificar la respuesta dentro del callback del driver falsearía los escenarios grandes)
+- Guardarraíles antes de conectar: por encima de 20.000 mensajes sintéticos o concurrencia 8 el run se rechaza sin `--allow-large`, y `--dry-run` imprime la matriz con la base de datos apagada
+- Los datos sintéticos se borran por `_id` exacto en un `finally` y en un manejador de SIGINT/SIGTERM, y el recuento de sobrantes viaja en el JSON de resultados. Nunca se elimina una base ni una colección
+- `--compare base.json head.json` empareja escenarios por su clave y **se niega a calcular deltas** cuando motor, versión, topología, preferencia de lectura o compresores difieren; en ese caso muestra ambas columnas
+
+### Changed
+- `docs/architecture/performance.md` sustituye sus cifras de laboratorio por medidas del harness. Las anteriores procedían de `examples/example_performance.py`, cuyo bucle de operaciones era un `pass`
+
+### Removed
+- `examples/example_performance.py`. Sus referencias en README, docs y guías apuntan ahora a `benchmarks/`
+
+### Notes
+- Medido en MongoDB 8.2.7 local y en Amazon DocumentDB 5.0 DEV por túnel SSH; evidencia completa en `artifacts/issue-60-benchmark.md` y ficheros de resultados en `artifacts/bench-*.json`
+- **Hallazgo para #56**: restaurar 5.000 mensajes cuesta 1 `getMore` y 31 ms en MongoDB local, y **49 `getMore` y 5,04 s en DocumentDB**, transfiriendo los mismos 3,77 MB. La diferencia es el tamaño de lote del cursor, no el volumen
+- **Hallazgo para #59**: `_ensure_indexes()` tiene una carrera check-then-act; 16 repositorios creados a la vez sobre un cliente frío envían 64 `createIndexes` en lugar de 4
+- La espera de checkout del pool es 0 ms por construcción con un único event loop y un driver síncrono: la sonda se mantiene porque sí mide cuando varios workers comparten cliente
+
 ## [2026-09-16] PR #90 - Mover paginación, búsqueda y conteo al servidor (@iguinea)
 
 - Optimize server-side message reads (#58)

@@ -276,7 +276,7 @@ uv run python examples/example_calculator_tool.py
 uv run python examples/example_fastapi.py
 
 # Performance benchmarks
-uv run python examples/example_performance.py
+uv run python -m benchmarks
 
 # Async streaming example
 uv run python examples/example_stream_async.py

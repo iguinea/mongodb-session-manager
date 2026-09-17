@@ -255,7 +255,7 @@ class MongoDBConnectionPool:
 1. **Performance**:
    - Benchmark: 10-50ms → 0ms per request (after first)
    - Throughput: 10x improvement in concurrent tests
-   - See: `/workspace/examples/example_performance.py`
+   - Reproduce with: `uv run python -m benchmarks --profile full --allow-large`
 
 2. **Resource Efficiency**:
    - One MongoClient instance per application

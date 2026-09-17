@@ -512,7 +512,7 @@ python3.14 -m pip install git+https://github.com/iguinea/python-helpers@latest
 - [ ] Performance benchmarks in staging environment:
   ```bash
   # Compare Python 3.13 vs 3.14 (when dependencies ready)
-  uv run python examples/example_performance.py
+  uv run python -m benchmarks
   ```
 
 **Exit Criteria:**
@@ -580,7 +580,7 @@ uv run pytest tests/ -v -k hook
 **Commands:**
 ```bash
 # Run performance comparison
-uv run python examples/example_performance.py
+uv run python -m benchmarks
 
 # Verify improvements:
 # - Connection overhead: should be ~0ms (unchanged)

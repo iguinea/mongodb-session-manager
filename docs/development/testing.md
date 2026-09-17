@@ -602,6 +602,27 @@ Fixtures delete every session document they register. Ad-hoc benchmarks must
 use unique ids and delete only those exact ids in a `finally` block. Never drop
 a shared database or collection as test cleanup.
 
+### Benchmarking through the same tunnel
+
+The harness of [#60](https://github.com/iguinea/mongodb-session-manager/issues/60)
+reads `MONGODB_CONNECTION_STRING` like everything else, so the tunnel above is
+all it needs. It knows nothing about which engine answers: it records what it
+found and refuses to subtract two runs whose environments differ.
+
+```bash
+uv run python -m benchmarks --profile full --concurrency 1 --allow-large \
+  --warmups 3 --repetitions 15 --volume-repetitions 1 \
+  --label "Amazon DocumentDB 5.0 DEV (eu-west-1) over SSH tunnel" \
+  --note "Latency includes the tunnel; not comparable with a local server." \
+  --json-out artifacts/bench-documentdb-dev.json
+```
+
+Keep the matrix smaller than on a local server: every write costs 40-55 ms
+there, and the defaults (30 repetitions, the whole matrix) turn into a long run
+holding the tunnel open. `--dry-run` prints the cost first. The harness deletes
+its synthetic sessions by exact id and reports anything left behind; see
+[benchmarks/README.md](../../benchmarks/README.md).
+
 ### Read-preference caveat
 
 `directConnection=true` is appropriate for the full suite over one local port,

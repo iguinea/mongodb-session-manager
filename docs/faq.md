@@ -388,7 +388,7 @@ factory = initialize_global_factory(
 Yes! Run the performance example:
 
 ```bash
-uv run python examples/example_performance.py
+uv run python -m benchmarks
 ```
 
 Typical results:

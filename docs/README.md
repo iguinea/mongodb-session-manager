@@ -97,7 +97,9 @@ Run these scripts to see features in action:
 | [example_metadata_update.py](../examples/example_metadata_update.py) | Metadata update with field preservation | [Guide](examples/metadata-patterns.md) |
 | [example_metadata_production.py](../examples/example_metadata_production.py) | Production customer support scenario | [Guide](examples/metadata-patterns.md) |
 | [example_metadata_websocket.py](../examples/example_metadata_websocket.py) | WebSocket metadata hook pattern | [Guide](examples/aws-patterns.md) |
-| [example_performance.py](../examples/example_performance.py) | Performance benchmarks (pooling vs no pooling) | [Guide](architecture/performance.md) |
+
+Performance is measured by the benchmark harness, not by an example: see
+[benchmarks/README.md](../benchmarks/README.md).
 
 **Run any example:**
 ```bash
