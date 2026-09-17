@@ -1,5 +1,12 @@
 # Changelog
 
+## [2026-09-17] PR #103 - Feat: strands-agents 1.56 y el BidiAgent por el camino unificado (#69) (@iguinea)
+
+- Feat: strands-agents 1.56 y el BidiAgent por el camino unificado (#69)
+- Test: benchmark del bump de strands en MongoDB y DocumentDB (#69)
+- Docs: precisar el aviso de hooks y el default de maxIdleTimeMS (#69)
+- Merge remote-tracking branch 'origin/main' into actualizar-strands-ag…
+
 ## [0.21.0] - 2026-09-17
 
 ### Changed
