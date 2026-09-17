@@ -1,5 +1,9 @@
 # Changelog
 
+## [2026-09-17] PR #100 - Feat: pool que respeta la configuración, health check acotado e índices que no se pierden (#59) (@iguinea)
+
+- Feat: pool que respeta la configuración, health check acotado e índic…
+
 ## [0.19.0] - 2026-09-17
 
 ### Added
