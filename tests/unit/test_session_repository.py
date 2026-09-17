@@ -1,10 +1,11 @@
 """Unit tests for MongoDBSessionRepository."""
 
+import logging
 from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
-from pymongo.errors import PyMongoError
+from pymongo.errors import OperationFailure, PyMongoError
 from strands.types.session import Session, SessionMessage
 
 from mongodb_session_manager.message_identity import (
@@ -12,7 +13,10 @@ from mongodb_session_manager.message_identity import (
     attach_storage_id,
     storage_id_of,
 )
-from mongodb_session_manager.mongodb_session_repository import MongoDBSessionRepository
+from mongodb_session_manager.mongodb_session_repository import (
+    MongoDBSessionRepository,
+    _reset_index_registry,
+)
 from tests.support.repository_contract import AGENT_SCOPED_CALLS
 
 # ---------------------------------------------------------------------------
@@ -158,6 +162,153 @@ class TestEnsureIndexes:
         )
 
 
+class TestOneIndexFailingDoesNotTakeTheOthers:
+    """Every index used to share a single try (#59).
+
+    Reproduced against MongoDB 8.2.7 by filling a collection to 62 indexes, two
+    below the server limit: `session_id` failed with `CannotCreateIndex`, and
+    `application_name` and every `metadata.*` were never even attempted.
+    """
+
+    def test_the_ones_after_the_failure_are_still_attempted(
+        self, mock_mongo_client, mock_mongo_collection
+    ):
+        def fail_on_session_id(field, *args, **kwargs):
+            if field == "session_id":
+                raise PyMongoError("too many indexes")
+
+        mock_mongo_collection.create_index.side_effect = fail_on_session_id
+
+        MongoDBSessionRepository(
+            client=mock_mongo_client,
+            database_name="db",
+            collection_name="coll",
+            metadata_fields=["status"],
+        )
+
+        attempted = [
+            call.args[0] for call in mock_mongo_collection.create_index.call_args_list
+        ]
+        assert "application_name" in attempted
+        assert "metadata.status" in attempted
+
+    def test_application_name_goes_before_the_fields_someone_configured(
+        self, mock_mongo_client, mock_mongo_collection
+    ):
+        """A bad `metadata_fields` must not be able to cost the library its own index."""
+        MongoDBSessionRepository(
+            client=mock_mongo_client,
+            database_name="db",
+            collection_name="coll",
+            metadata_fields=["status"],
+        )
+
+        attempted = [
+            call.args[0] for call in mock_mongo_collection.create_index.call_args_list
+        ]
+        assert attempted.index("application_name") < attempted.index("metadata.status")
+
+
+class TestRetryingIndexCreation:
+    """Whether the next manager tries again depends on what went wrong (#59).
+
+    With a manager per request, retrying something that will always fail is an
+    extra round-trip per request for ever -- and creating an index costs
+    78-248 ms in DocumentDB.
+    """
+
+    def test_a_transient_failure_is_tried_again(
+        self, mock_mongo_client, mock_mongo_collection
+    ):
+        _reset_index_registry()
+        mock_mongo_collection.create_index.side_effect = PyMongoError("no primary")
+
+        MongoDBSessionRepository(
+            client=mock_mongo_client, database_name="db", collection_name="coll"
+        )
+        first = mock_mongo_collection.create_index.call_count
+        MongoDBSessionRepository(
+            client=mock_mongo_client, database_name="db", collection_name="coll"
+        )
+
+        assert mock_mongo_collection.create_index.call_count > first
+
+    def test_a_permanent_failure_is_not(
+        self, mock_mongo_client, mock_mongo_collection, caplog
+    ):
+        _reset_index_registry()
+        refusal = OperationFailure("too many indexes", code=67)
+        mock_mongo_collection.create_index.side_effect = refusal
+
+        with caplog.at_level(logging.WARNING):
+            MongoDBSessionRepository(
+                client=mock_mongo_client, database_name="db", collection_name="coll"
+            )
+        first = mock_mongo_collection.create_index.call_count
+        MongoDBSessionRepository(
+            client=mock_mongo_client, database_name="db", collection_name="coll"
+        )
+
+        assert mock_mongo_collection.create_index.call_count == first
+        assert any(record.levelname == "WARNING" for record in caplog.records)
+
+
+class TestHotPathLogging:
+    """What a turn writes to INFO is what someone pays to ingest (#59).
+
+    A reference turn emitted 14 INFO records and 1.900 bytes, eight of them
+    repeated for every manager -- and with the factory pattern there is a
+    manager per request plus one per sub-agent. The level is the contract here:
+    an event of the session stays at INFO, the per-message and per-manager
+    bookkeeping goes to DEBUG.
+    """
+
+    def test_creating_a_message_says_nothing_at_info(
+        self, mock_repository, mock_mongo_collection, caplog
+    ):
+        mock_mongo_collection.update_one.return_value = MagicMock(matched_count=1)
+
+        with caplog.at_level(logging.INFO):
+            mock_repository.create_message(
+                "s1",
+                "a1",
+                SessionMessage(
+                    message_id=1,
+                    message={"role": "user", "content": [{"text": "hi"}]},
+                ),
+            )
+
+        assert [record.message for record in caplog.records] == []
+
+    def test_but_it_is_still_traceable_at_debug(
+        self, mock_repository, mock_mongo_collection, caplog
+    ):
+        mock_mongo_collection.update_one.return_value = MagicMock(matched_count=1)
+
+        with caplog.at_level(logging.DEBUG):
+            mock_repository.create_message(
+                "s1",
+                "a1",
+                SessionMessage(
+                    message_id=1,
+                    message={"role": "user", "content": [{"text": "hi"}]},
+                ),
+            )
+
+        assert any("Created message" in record.message for record in caplog.records)
+
+    def test_creating_a_session_is_worth_an_info_record(self, mock_repository, caplog):
+        with caplog.at_level(logging.INFO):
+            mock_repository.create_session(
+                Session(session_id="s1", session_type="default")
+            )
+
+        assert any(
+            record.levelname == "INFO" and "Created session" in record.message
+            for record in caplog.records
+        )
+
+
 # ---------------------------------------------------------------------------
 # create_session
 # ---------------------------------------------------------------------------
@@ -222,6 +373,61 @@ class TestCreateSession:
         doc = mock_mongo_collection.insert_one.call_args[0][0]
         assert doc["metadata"]["status"] == ""
         assert doc["metadata"]["priority"] == ""
+
+    def test_seeds_a_dotted_field_where_it_is_indexed(
+        self, mock_mongo_client, mock_mongo_collection
+    ):
+        """The index is on `metadata.user.name`, so the seed goes there (#59).
+
+        Seeded as the literal key `user.name` it matched neither its own index
+        nor what `update_metadata({"user.name": ...})` writes, and it stayed in
+        the document for ever as a key nothing read.
+        """
+        with patch.object(MongoDBSessionRepository, "_ensure_indexes"):
+            repo = MongoDBSessionRepository(
+                client=mock_mongo_client,
+                database_name="db",
+                collection_name="coll",
+                metadata_fields=["user.name", "plain"],
+            )
+        repo.create_session(Session(session_id="s1", session_type="default"))
+
+        doc = mock_mongo_collection.insert_one.call_args[0][0]
+        assert doc["metadata"] == {"user": {"name": ""}, "plain": ""}
+
+    def test_two_sessions_do_not_share_the_seed(
+        self, mock_mongo_client, mock_mongo_collection
+    ):
+        """The seed is nested now, so handing out the same dict would alias it."""
+        with patch.object(MongoDBSessionRepository, "_ensure_indexes"):
+            repo = MongoDBSessionRepository(
+                client=mock_mongo_client,
+                database_name="db",
+                collection_name="coll",
+                metadata_fields=["user.name"],
+            )
+        repo.create_session(Session(session_id="s1", session_type="default"))
+        first = mock_mongo_collection.insert_one.call_args[0][0]
+        first["metadata"]["user"]["name"] = "ana"
+
+        repo.create_session(Session(session_id="s2", session_type="default"))
+        second = mock_mongo_collection.insert_one.call_args[0][0]
+
+        assert second["metadata"] == {"user": {"name": ""}}
+
+    def test_conflicting_metadata_fields_fail_before_connecting(
+        self, mock_mongo_client, mock_mongo_collection
+    ):
+        """`user` and `user.name` cannot both be seeded: one buries the other."""
+        with pytest.raises(ValueError, match="conflict"):
+            MongoDBSessionRepository(
+                client=mock_mongo_client,
+                database_name="db",
+                collection_name="coll",
+                metadata_fields=["user", "user.name"],
+            )
+
+        mock_mongo_collection.create_index.assert_not_called()
 
     def test_returns_session(self, mock_repository):
         session = Session(session_id="s1", session_type="default")

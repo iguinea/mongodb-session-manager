@@ -7,6 +7,7 @@ import secrets
 import threading
 import weakref
 from collections.abc import Mapping
+from copy import deepcopy
 from datetime import UTC, datetime
 from typing import Any
 
@@ -18,7 +19,7 @@ from strands.session.session_repository import SessionRepository
 from strands.types.session import Session, SessionAgent, SessionMessage
 
 from .agent_content import LastPersistedAgents
-from .field_names import validate_agent_id, validate_field_paths
+from .field_names import nested_document, validate_agent_id, validate_field_paths
 from .message_identity import (
     STORAGE_ID_FIELD,
     MessageRef,
@@ -83,6 +84,21 @@ _INDEX_REGISTRY: weakref.WeakKeyDictionary[Any, set[tuple]] = (
     weakref.WeakKeyDictionary()
 )
 _INDEX_REGISTRY_LOCK = threading.Lock()
+
+# Server errors that another attempt cannot fix (#59).
+#
+# With a session manager per request, retrying something that will always fail
+# is a wasted round-trip per request for ever, and creating an index costs
+# 78-248 ms in DocumentDB. A collection at the 64-index limit, or a user without
+# the right to index, answers the same way every time.
+_PERMANENT_INDEX_ERRORS = frozenset(
+    [
+        67,  # CannotCreateIndex
+        13,  # Unauthorized
+        85,  # IndexOptionsConflict
+        86,  # IndexKeySpecsConflict
+    ]
+)
 
 
 def _reset_index_registry() -> None:
@@ -235,25 +251,29 @@ class MongoDBSessionRepository(SessionRepository):
             **kwargs: Additional arguments for MongoClient (ignored if client is provided)
 
         Raises:
-            ValueError: If a metadata field is not a valid dot-notation path. It
-                is checked before any client is created: an invalid name cannot
-                be indexed, and that failure used to be swallowed together with
-                every index created after it.
+            ValueError: If a metadata field is not a valid dot-notation path, or
+                if two of them cannot coexist in one document (`user` and
+                `user.name`, where one would have to be both a value and a
+                subdocument). Both are checked before any client is created: an
+                invalid name cannot be indexed, and a pair that conflicts would
+                lose one of the two silently when the session is seeded.
         """
-        validate_field_paths(metadata_fields or (), "metadata field")
+        # Built here, before any client, so a configuration that cannot be
+        # seeded fails the application's startup and not every create_session().
+        self._metadata_seed = nested_document(metadata_fields or ())
         self.application_name = application_name
         if client is not None:
             # Use provided client
             self.client: MongoClient = client
             self._owns_client = False  # Don't close a client we didn't create
-            logger.info("Using provided MongoDB client")
+            logger.debug("Using provided MongoDB client")
         else:
             # Create new client (legacy behavior)
             if connection_string is None:
                 raise ValueError("Connection string is required")
             self.client = MongoClient(connection_string, **kwargs)
             self._owns_client = True  # We created it, we should close it
-            logger.info("Created new MongoDB client")
+            logger.debug("Created new MongoDB client")
 
         self.database: Database = self.client[database_name]
         self.collection: Collection = self.database[collection_name]
@@ -265,10 +285,30 @@ class MongoDBSessionRepository(SessionRepository):
         # Create indexes for timestamp ordering (only once per collection)
         self._ensure_indexes()
 
-        logger.info(
+        logger.debug(
             f"Initialized MongoDB session repository - "
             f"Database: {database_name}, Collection: {collection_name}"
         )
+
+    def _indexed_fields(self) -> list[str]:
+        """The indexes this collection needs, in the order they are created.
+
+        The library's own go first, and `application_name` with them: it used to
+        be last, behind the `metadata_fields` that whoever configures the
+        application chooses. A failure no longer takes the rest down -- there is
+        a `try` per index now -- but the order still decides who gets served
+        when the collection runs out of its 64 index slots (#59). Messages are a
+        nested array and MongoDB does not accept a
+        positional operator in an index definition, so they are reached through
+        the `_id` index of their session.
+        """
+        return [
+            "created_at",
+            "updated_at",
+            "session_id",
+            "application_name",
+            *(f"metadata.{field}" for field in self.metadata_fields or ()),
+        ]
 
     def _ensure_indexes(self) -> None:
         """Ensure necessary indexes exist on the collection.
@@ -276,6 +316,11 @@ class MongoDBSessionRepository(SessionRepository):
         Idempotent per client: the indexes are only sent to the server the first
         time this collection is seen through a given MongoClient. See
         _INDEX_REGISTRY for why.
+
+        Each index is created on its own: they shared a single `try`, so the
+        first failure skipped every index after it and the collection silently
+        went without them (#59). Whether the next manager tries again depends on
+        what failed -- see _PERMANENT_INDEX_ERRORS.
         """
         registry_key = (
             self.database.name,
@@ -288,24 +333,23 @@ class MongoDBSessionRepository(SessionRepository):
                 logger.debug("MongoDB indexes already ensured for this client")
                 return
 
-        try:
-            # Index on session timestamps
-            self.collection.create_index("created_at")
-            self.collection.create_index("updated_at")
-            # Index on session_id for efficient searches in Session Viewer
-            self.collection.create_index("session_id")
-            # Note: MongoDB doesn't support positional operators ($) in index definitions
-            # Messages are nested arrays, so we rely on the _id index for document lookup
-            if self.metadata_fields:
-                for field in self.metadata_fields:
-                    self.collection.create_index("metadata." + field)
-            # Index on application_name for filtering sessions by application
-            self.collection.create_index("application_name")
+        worth_retrying = False
+        for field in self._indexed_fields():
+            try:
+                self.collection.create_index(field)
+            except PyMongoError as e:
+                if getattr(e, "code", None) in _PERMANENT_INDEX_ERRORS:
+                    logger.warning(
+                        f"Index on {field!r} cannot be created and will not be "
+                        f"retried; queries filtering on it will scan the "
+                        f"collection: {e}"
+                    )
+                else:
+                    worth_retrying = True
+                    logger.warning(f"Failed to create index on {field!r}: {e}")
 
-            logger.info("MongoDB indexes created successfully")
-        except PyMongoError as e:
-            # Not recorded in the registry: a later manager should retry.
-            logger.warning(f"Failed to create indexes: {e}")
+        if worth_retrying:
+            # Not recorded: the next manager should try the whole set again.
             return
 
         try:
@@ -390,14 +434,12 @@ class MongoDBSessionRepository(SessionRepository):
             "created_at": now,
             "updated_at": now,
             "agents": {},
-            "metadata": {},
+            # A copy: the seed is nested now, so sharing it would let one
+            # session's metadata reach into the next one's document.
+            "metadata": deepcopy(self._metadata_seed),
             "feedbacks": [],
             "guardrail_events": [],
         }
-
-        if self.metadata_fields:
-            for field in self.metadata_fields:
-                session_doc["metadata"][field] = ""
 
         try:
             self.collection.insert_one(session_doc)
@@ -588,7 +630,7 @@ class MongoDBSessionRepository(SessionRepository):
             # Only a write that landed counts as persisted: one that raised or
             # matched nothing must be tried again by the next sync.
             self._persisted_agents.remember(session_id, session_agent)
-            logger.info(
+            logger.debug(
                 f"Updated agent {session_agent.agent_id} in session {session_id}"
             )
 
@@ -635,7 +677,7 @@ class MongoDBSessionRepository(SessionRepository):
                 raise ValueError(f"Session {session_id} not found")
 
             attach_storage_id(session_message, storage_id)
-            logger.info(
+            logger.debug(
                 f"Created message {session_message.message_id} for agent {agent_id}"
             )
 
@@ -920,7 +962,7 @@ class MongoDBSessionRepository(SessionRepository):
         if not matched:
             raise self._missing_message_error(session_id, agent_id, ref)
 
-        logger.info(
+        logger.debug(
             f"Updated message {session_message.message_id} for agent {agent_id}"
         )
 
@@ -1024,9 +1066,9 @@ class MongoDBSessionRepository(SessionRepository):
         """Close the MongoDB connection."""
         if self._owns_client:
             self.client.close()
-            logger.info("MongoDB connection closed")
+            logger.debug("MongoDB connection closed")
         else:
-            logger.info("Skipping close - using shared MongoDB client")
+            logger.debug("Skipping close - using shared MongoDB client")
 
     # CUSTOM METHODS
     def update_metadata(self, session_id: str, metadata: dict[str, Any]) -> None:

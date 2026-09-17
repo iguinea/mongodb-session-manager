@@ -43,6 +43,7 @@ from strands.types.session import Session, SessionAgent, SessionMessage
 
 from mongodb_session_manager.agent_content import LastPersistedAgents
 from mongodb_session_manager.field_names import (
+    nested_document,
     validate_agent_id,
     validate_field_paths,
 )
@@ -95,9 +96,17 @@ def _unset_dotted(document: dict[str, Any], path: str) -> None:
 class InMemorySessionRepository(SessionRepository):
     """SessionRepository backed by a dict. Single-threaded, for unit tests."""
 
-    def __init__(self, application_name: str | None = None) -> None:
+    def __init__(
+        self,
+        application_name: str | None = None,
+        metadata_fields: list[str] | None = None,
+    ) -> None:
         """Start with no sessions stored."""
         self.application_name = application_name
+        self.metadata_fields = metadata_fields
+        # Same rule and same moment as the MongoDB repository: an unusable
+        # configuration raises here, before anything is stored.
+        self._metadata_seed = nested_document(metadata_fields or ())
         self._sessions: dict[str, dict[str, Any]] = {}
         self._last_read_agent_config: dict[tuple[str, str], dict[str, Any]] = {}
         self._persisted_agents = LastPersistedAgents()
@@ -176,7 +185,7 @@ class InMemorySessionRepository(SessionRepository):
             "created_at": now,
             "updated_at": now,
             "agents": {},
-            "metadata": {},
+            "metadata": copy.deepcopy(self._metadata_seed),
             "feedbacks": [],
             "guardrail_events": [],
         }

@@ -65,10 +65,19 @@ cd playground/chat && make frontend                   # Port 8881
    - `update_agent()` writes each `SessionAgent` field on its own path, so the manager's config fields in `agent_data` survive
    - `update_agent()` does not write an agent whose content (every `SessionAgent` field but `created_at`/`updated_at`) is what this repository last read, created or wrote: `agent_content.LastPersistedAgents`, shared with the in-memory double. It compares content, not Strands' versions, so a hook that replaces `agent.state` is still written. Saves the first sync of every manager and the post-tool sync (13 → 10 per reference turn) (#67)
    - `update_message()` locates the message with the positional `$` (no read first) and writes an allowlist of fields, so `event_loop_metrics` and `guardrail_event` survive a redaction
+   - `_ensure_indexes()` creates each index in its **own** `try`, and `application_name` before the `metadata_fields` someone configures: they shared one `try`, so the first failure skipped every index after it (at MongoDB's 64-index limit, `application_name` and every `metadata.*` were silently never created). A permanent failure (`_PERMANENT_INDEX_ERRORS`: `CannotCreateIndex`, `Unauthorized`, index conflicts) is recorded so it is not retried; a transient one is not, so the next manager tries again — with a manager per request, retrying forever costs a round-trip per request, and an index costs 78-248 ms in DocumentDB (#59)
+   - `create_session()` seeds `metadata_fields` **nested**, via `field_names.nested_document()`: a dot is a path here too, and the literal key `user.name` matched neither its own index (`metadata.user.name`) nor what `update_metadata()` writes. Two paths that cannot coexist (`user` and `user.name`) raise at construction, before connecting (#59)
    - `collection` stays public and supported for ad-hoc queries
    - Smart connection lifecycle (owns vs borrowed client)
+   - **Log levels are contract**: the per-message and per-manager path is `DEBUG`; `INFO` is for events of the session (`Created session`, `Created agent`, `Added feedback`). A reference turn emitted 14 `INFO` records and 1.900 B, eight of them repeated per manager — and the factory builds one per request (#59)
 
 3. **MongoDBConnectionPool** (`mongodb_connection_pool.py`): Singleton for connection reuse
+   - `_POOL_DEFAULTS` applies **only to options the caller did not express**, by keyword or in the URI (`_resolve_options()`). pymongo gives the keyword precedence over the connection string, so the old defaults silently overruled it — and DocumentDB, which requires `retryWrites=false`, answered `OperationFailure 301` to every `update_one`. The default `minPoolSize` follows a smaller `maxPoolSize` the caller asked for, which pymongo would otherwise refuse. The singleton is still keyed on `_user_kwargs` (#59)
+   - `maxIdleTimeMS` is 300.000: with `minPoolSize` refilling whatever the idle timer expires, 30 s meant an idle pool opening and closing ten connections every half minute, for ever — 33.596 a day per process **and per node** (#59)
+   - `health_check(timeout_ms)`: `ping` under `pymongo.timeout()`, returns instead of raising. Without a timeout a health check took 20 s against a mute server with an open connection. `ping` and `server_info()` cost the same; `server_info()` is `buildInfo` pinned to the primary, which calls a cluster unhealthy during a failover (#59)
+   - `get_pool_stats()` caches `server_version` and adds utilisation from `pool_telemetry.PoolTelemetry`, a CMAP listener — pymongo publishes no other way to know. 3,33 µs per command (#59)
+   - Sizing: `maxPoolSize` is **per server**, plus two SDAM sockets per server. `nodes × (maxPoolSize + 2)` per process, against a ceiling of 1.000 on a DocumentDB `db.t4g.medium`. See `docs/user-guide/connection-pooling.md`
+
    - Thread-safe, configurable pool sizes
 
 4. **MongoDBSessionManagerFactory** (`mongodb_session_factory.py`): Factory for stateless environments
@@ -203,7 +212,7 @@ When releasing, update version in **three places**:
 2. `pyproject.toml` (`version`)
 3. `CHANGELOG.md` (add release entry)
 
-Current version: **0.18.0**
+Current version: **0.19.0**
 
 ## Workflow Rules
 

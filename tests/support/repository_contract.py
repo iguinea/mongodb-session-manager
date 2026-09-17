@@ -124,6 +124,11 @@ class SessionRepositoryContract:
         return "contract-session"
 
     @pytest.fixture
+    def seeded_store(self) -> Any:
+        """Build a repository that seeds given metadata fields. Overridden."""
+        raise NotImplementedError
+
+    @pytest.fixture
     def populated(self, store, session_id):
         """Create a session with one agent and two messages."""
         store.create_session(
@@ -523,6 +528,41 @@ class SessionRepositoryContract:
         assert store.pop_read_agent_config(populated, "a1") is None
 
     # -- Metadata ----------------------------------------------------------
+
+    def test_metadata_fields_are_seeded_where_they_are_indexed(
+        self, seeded_store, session_id
+    ):
+        """A dot is a path here too, so `user.name` seeds a nested field (#59).
+
+        Seeded as a literal key it matched neither the index, which is on
+        `metadata.user.name`, nor what `update_metadata({"user.name": ...})`
+        writes -- and it stayed in the document as a key nothing ever read.
+        """
+        store = seeded_store(["user.name", "plain"])
+        store.create_session(
+            Session(session_id=session_id, session_type=SessionType.AGENT)
+        )
+
+        assert self._raw_session(store, session_id)["metadata"] == {
+            "user": {"name": ""},
+            "plain": "",
+        }
+
+    def test_a_seeded_field_is_the_one_update_metadata_writes_to(
+        self, seeded_store, session_id
+    ):
+        store = seeded_store(["user.name"])
+        store.create_session(
+            Session(session_id=session_id, session_type=SessionType.AGENT)
+        )
+        store.update_metadata(session_id, {"user.name": "ana"})
+
+        assert store.get_metadata(session_id)["metadata"] == {"user": {"name": "ana"}}
+
+    def test_metadata_fields_that_cannot_coexist_are_refused(self, seeded_store):
+        """`user` cannot be a value and a subdocument at once."""
+        with pytest.raises(ValueError, match="conflict"):
+            seeded_store(["user", "user.name"])
 
     def test_delete_metadata_reaches_dotted_keys(self, store, populated):
         """A dotted key is a path, not a flat key that happens to have dots."""

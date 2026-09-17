@@ -304,7 +304,7 @@ async def lifespan(app: FastAPI):
         # Optimized for production
         maxPoolSize=100,
         minPoolSize=10,
-        maxIdleTimeMS=30000,
+        maxIdleTimeMS=300000,
     )
 
     # Store in app state (optional but recommended)

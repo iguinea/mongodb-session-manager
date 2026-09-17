@@ -8,7 +8,11 @@ from __future__ import annotations
 
 import pytest
 
-from mongodb_session_manager.field_names import validate_agent_id, validate_field_paths
+from mongodb_session_manager.field_names import (
+    nested_document,
+    validate_agent_id,
+    validate_field_paths,
+)
 
 
 class TestAgentId:
@@ -40,6 +44,64 @@ class TestAgentId:
         """BSON cannot encode it: pymongo would fail with InvalidDocument instead."""
         with pytest.raises(ValueError, match="NUL"):
             validate_agent_id("a\x00b")
+
+
+class TestNestedDocument:
+    """The document a set of paths describes, for seeding it in one insert (#59).
+
+    `create_session()` used to seed `metadata_fields` as literal keys, so
+    `user.name` landed as a flat key while its index and `update_metadata()`
+    both went to the nested `metadata.user.name`. The seeded value did not match
+    its own index, and nothing ever touched that key again.
+    """
+
+    def test_a_plain_name_is_a_plain_key(self):
+        assert nested_document(["status", "priority"]) == {
+            "status": "",
+            "priority": "",
+        }
+
+    def test_a_dotted_path_nests(self):
+        assert nested_document(["user.name"]) == {"user": {"name": ""}}
+
+    def test_paths_that_share_a_prefix_share_the_subdocument(self):
+        assert nested_document(["user.name", "user.role"]) == {
+            "user": {"name": "", "role": ""}
+        }
+
+    def test_nests_as_deep_as_the_path_goes(self):
+        assert nested_document(["a.b.c.d"]) == {"a": {"b": {"c": {"d": ""}}}}
+
+    def test_nothing_in_nothing_out(self):
+        assert nested_document([]) == {}
+
+    def test_the_seeded_value_can_be_chosen(self):
+        assert nested_document(["n"], value=0) == {"n": 0}
+
+    def test_a_path_that_would_bury_another_is_rejected(self):
+        """`user` and `user.name` cannot both be a value: one overwrites the other."""
+        with pytest.raises(ValueError, match="conflict"):
+            nested_document(["user", "user.name"])
+
+    def test_the_conflict_is_caught_whichever_way_round_it_comes(self):
+        with pytest.raises(ValueError, match="conflict"):
+            nested_document(["user.name", "user"])
+
+    def test_it_validates_before_it_builds(self):
+        with pytest.raises(ValueError, match=r"cannot start with '\$'"):
+            nested_document(["ok", "$where"])
+
+    def test_a_one_shot_iterable_is_not_consumed_by_the_validation(self):
+        """The signature says Iterable, so a generator has to work.
+
+        Validating and then building walked `paths` twice: a generator was
+        exhausted by the first pass and the second built nothing, so the seed
+        vanished without an error and `create_session()` wrote empty metadata.
+        """
+        assert nested_document(path for path in ["user.name", "status"]) == {
+            "user": {"name": ""},
+            "status": "",
+        }
 
 
 class TestFieldPath:
