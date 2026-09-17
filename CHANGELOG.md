@@ -8,6 +8,23 @@
 
 - Feat: pool que respeta la configuración, health check acotado e índic…
 
+## [0.20.0] - 2026-09-17
+
+### Changed
+- **Breaking: los tres hooks bundled dejan salir el error de AWS** (#99). `MetadataSQSHook.on_metadata_change()`, `MetadataWebSocketHook.on_metadata_change()` y `FeedbackSNSHook.on_feedback_add()` capturaban su propio `ClientError`, lo registraban y **retornaban con normalidad**. Ahora lo propagan, y quien lo recoge es `BackgroundWork`, que ya estaba esperándolo. **Solo cambia para quien llame a esas tres corrutinas con `await` directo**; a través de las factorías —`create_metadata_sqs_hook()`, `create_metadata_websocket_hook()`, `create_feedback_sns_hook()`, que es como las usa todo consumidor conocido— no cambia nada observable salvo el log y los contadores. El `except` que lo justificaba —«don't raise to avoid breaking the main operation»— era de cuando la corrutina corría en el camino del llamante; desde 0.17.3 (#95) y 0.18.0 (#62) viaja en segundo plano, así que cuando corre, la escritura en MongoDB ya terminó y ya se devolvió al llamante. No queda operación que romper
+- **Un fallo deja un solo registro, y con la sesión dentro.** Antes eran dos y ninguno completo: un `ERROR` del hook, que sabía de qué sesión hablaba, y un `DEBUG` `Finished:` del dispatcher, que no. Ahora lo registra solo el dispatcher, y el `error_context` de las cinco llamadas a `dispatch_async()` lleva el `session_id` — `sending metadata update to SQS for session <id>`, y así las cinco. De propina lo dicen también los `Dropped hook work while…`, `Cancelled while…` y `Accepting guaranteed hook work over the limit…`, que hasta ahora identificaban la operación pero no la sesión
+- **`GoneException` sigue sin ser un fallo, pero ya no tapa a sus vecinos.** El `except ClientError` del hook de WebSocket envolvía el método entero y absorbía cualquier código de error, no solo el de la conexión cerrada; ahora envuelve la llamada a `post_to_connection()` y **relanza todo lo que no sea `GoneException`**. Que el cliente haya colgado no es una avería: es como termina una sesión de WebSocket, se registra a `INFO` y cuenta como completada
+
+### Fixed
+- **`hooks_background_stats().completed` contaba como entregada una notificación que AWS rechazó** (#99). `BackgroundWork._count_outcome()` solo puede observar si la corrutina terminó o lanzó; con los hooks tragándose su error, una notificación fallida llegaba indistinguible de una buena. Donde más pesaba era en el feedback: se despacha como `Delivery.GUARANTEED` precisamente porque nada vuelve a producir una queja de cliente, y la garantía se quedaba sin la métrica que la haría verificable. Medido con un `AccessDenied` de SQS, el camino completo pasa de un `ERROR` del hook más `{'completed': 1, 'failed': 0}` a una sola línea —`Error sending metadata update to SQS for session sess-smoke-1: An error occurred (AccessDenied)…`, con traza— y `{'completed': 0, 'failed': 1}`
+- **El `except ImportError` de los hooks de SQS y SNS era código muerto**: dentro de esos métodos no hay ningún `import`, y el que podía fallar lo hace al construir el hook, donde ya se comprueba
+
+### Notes
+- **Sin cambios de esquema ni migración.** Este cambio no toca MongoDB: managers 0.19 y 0.20 conviven sobre la misma colección, y DocumentDB no aplica —nada de esto persiste
+- **Lo que `completed` sigue sin poder prometer** es un hook **de tu propiedad** que capture su propio error y retorne: desde el dispatcher es indistinguible de uno que funcionó. Si quieres sus fallos en el contador, déjalos salir — nadie espera a esa corrutina, y el dispatch los registra con su contexto. `docs/api-reference/hooks.md` separa ahora las dos mitades de un hook: el **wrapper**, que corre en el camino del llamante y sí debe contener su error, y la **notificación**, que no
+- **Los cinco tests que fijaban el comportamiento anterior están reescritos, no eliminados** — tres a `pytest.raises`, y el de `GoneException` mantiene su contrato y además comprueba que registra a `INFO` sin ningún `ERROR`. `tests/unit/test_hooks_failure_counting.py` cubre el hueco que no cubría nada: hook real, dispatcher real y contadores. Los que existían usan `captured_dispatch`, que cierra la corrutina sin ejecutarla, o la corren suelta; ninguno podía ver qué hacía `BackgroundWork` con el resultado
+- Se desprendió del gate de revisión de #62 (0.18.0), que la documentó como limitación conocida antes de arreglarla
+
 ## [0.19.0] - 2026-09-17
 
 ### Added
