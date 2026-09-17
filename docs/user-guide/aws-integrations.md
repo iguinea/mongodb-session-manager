@@ -590,19 +590,23 @@ The notifications travel in the background, so a process that exits while some
 are in flight loses them. Drain them where you shut down:
 
 ```python
-from mongodb_session_manager import close_global_factory, shutdown_hooks
+from mongodb_session_manager import close_global_factory, shutdown_hooks_async
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     yield
-    stats = shutdown_hooks(timeout=5.0)
+    stats = await shutdown_hooks_async(timeout=5.0)
     logger.info("hook notifications drained", extra=stats.as_dict())
     close_global_factory()
 ```
 
+Inside a loop it has to be the `_async` one: the blocking `shutdown_hooks()`
+would stop the very loop the notifications are riding. Outside a loop — a
+`SIGTERM` handler, a plain `main()` — `shutdown_hooks()` is the same close.
+
 A server with no lifespan of its own — a `BedrockAgentCoreApp` entrypoint, for
-instance — needs the same call from a `SIGTERM` handler. See
+instance — needs the call from a `SIGTERM` handler. See
 [Background work](../api-reference/hooks.md#closing-the-process-without-losing-notifications)
 for why an `atexit` alone does not cover it, and for the limit, the ordering
 guarantee and the counters the background work exposes.

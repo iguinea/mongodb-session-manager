@@ -1092,10 +1092,12 @@ it. Nothing is ever queued silently.
 with other work for that same key, and never overtakes it. The metadata hooks
 pass the `session_id`, so two updates of the same session cannot arrive
 swapped — which matters when the receiving client just applies whatever
-arrives last. Per key there is at most one notification in flight and one
-waiting; a newer one **replaces** the one waiting, because for a metadata
-update the last state is the only one that matters. The replaced work is
-dropped loudly, never delivered late. Different keys still run in parallel.
+arrives last. Per key there is at most one notification in flight; the rest
+**queue in the order they were submitted** (8 deep by default), because a
+metadata notification carries the dict the caller passed — a partial update,
+not the whole state. Dropping `{"progress": 50}` because `{"status": "done"}`
+came after it would lose `progress` for good. Only when the queue is full does
+the oldest give way, with a `WARNING`. Different keys still run in parallel.
 
 **Delivery.** `Delivery.GUARANTEED` opts out of the limit: the work is accepted
 over it, with a `WARNING`, instead of being dropped. The feedback hook uses it,
@@ -1121,33 +1123,46 @@ dispatch_async(
 
 #### Closing the process without losing notifications
 
-Call `shutdown_hooks()` where your process shuts down. It waits for the
+Close the background work where your process shuts down. It waits for the
 notifications in flight, cancels whatever does not make it in time, stops the
 reserve loop, and returns the counters. Work dispatched afterwards is refused,
 loudly.
+
+There are two calls, and which one you want depends on where you are. From
+inside an event loop — a FastAPI lifespan, an async signal handler — use
+**`shutdown_hooks_async()`**: the notifications are riding that very loop, and
+blocking it is what would stop them from finishing.
 
 ```python
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from mongodb_session_manager import close_global_factory, shutdown_hooks
+from mongodb_session_manager import close_global_factory, shutdown_hooks_async
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     yield
-    stats = shutdown_hooks(timeout=5.0)  # synchronous, and immediate if idle
+    stats = await shutdown_hooks_async(timeout=5.0)
     logger.info("hook notifications drained", extra=stats.as_dict())
     close_global_factory()
 ```
 
-Without that call, a process that exits loses whatever was still in flight. The
-library registers an `atexit` that closes the work and logs the counters, but it
-is a safety net, not a guarantee: Python shuts its thread pools down *before*
-any `atexit` runs, and the bundled hooks make their AWS call on one of those
-pools. A server without a lifespan — a `BedrockAgentCoreApp` entrypoint, say —
-needs the call in a signal handler to actually drain:
+From a thread with no loop of its own — a plain `main()`, a synchronous signal
+handler — `shutdown_hooks()` is the same close, blocking. It warns if you call
+it from inside the loop it is draining, rather than silently spending the whole
+budget and cancelling work it could have delivered.
+
+A process that never makes that call still drains on the way out: the library
+registers the close with `threading._register_atexit()`, which runs *before*
+Python shuts its thread pools down — `atexit` runs after, too late for hooks
+that make their AWS call on one of those pools. Measured, with 20 notifications
+in flight: 20 delivered either way, against 0 before v0.18.0.
+
+What no hook can survive is a signal. `SIGTERM` without a handler runs no
+Python at all — not `atexit`, not the thread shutdown — so a service whose
+orchestrator stops it that way (ECS does) still needs the call in a handler:
 
 ```python
 import signal
@@ -1180,10 +1195,26 @@ stats = hooks_background_stats()
 notifications slower than the events producing them. `in_flight` staying high
 means the same thing before it starts costing anything.
 
+One caveat on `completed`: it counts coroutines that returned, not
+notifications AWS accepted. The three bundled hooks catch their own boto3
+errors and log them, so a notification that failed to publish still comes back
+completed — the error is in the log, not in the counter. `dispatched`,
+`dropped`, `cancelled`, `in_flight` and `queued` are the background work's own
+bookkeeping and mean exactly what they say.
+
+#### Forking after the first notification
+
+A child of `os.fork()` inherits this whole machinery but only the thread that
+forked, so the reserve loop it inherits is an object with no thread behind it.
+The library resets itself in the child (`os.register_at_fork`): new loop, new
+locks, counters from zero, and the parent's work in flight left to the parent.
+Nothing to do from a prefork server (gunicorn `--preload`) beyond closing in
+each worker.
+
 #### How long a notification may talk to AWS
 
 The three bundled hooks build their boto3 clients with a bounded config: 3 s to
-connect, 5 s to read, 3 attempts in the `standard` retry mode. botocore's
+connect, 5 s to read, 2 attempts in the `standard` retry mode. botocore's
 defaults (60 s, 60 s, legacy mode) suit a request somebody is waiting for; a
 notification nobody waits for would hold a thread for minutes, and the thread is
 what the limit above protects. The worst case stays under the 30 s an

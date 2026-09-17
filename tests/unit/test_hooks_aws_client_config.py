@@ -5,15 +5,19 @@ a notification against an unreachable endpoint keeps its thread for minutes,
 and the thread is the resource the limit on work in flight is meant to protect.
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
+from botocore.retries.standard import ExponentialBackoff
 
 from mongodb_session_manager.hooks import utils_sns, utils_sqs
 from mongodb_session_manager.hooks.aws_client_config import (
     CONNECT_TIMEOUT_SECONDS,
+    MAX_BACKOFF_SECONDS,
     READ_TIMEOUT_SECONDS,
+    RETRY_AFTER_ALLOWANCE_SECONDS,
     TOTAL_ATTEMPTS,
+    backoff_seconds,
     notification_config,
     worst_case_seconds,
 )
@@ -37,6 +41,44 @@ class TestNotificationConfig:
     def test_the_worst_case_fits_inside_the_shutdown_grace(self):
         """A stuck notification must not outlive the task it belongs to."""
         assert worst_case_seconds() < ECS_STOP_TIMEOUT_SECONDS
+
+
+class TestTheBackoffBudgetIsBotocoreS:
+    """The numbers are copied from botocore; an upgrade that moves them fails here.
+
+    The worst case is what keeps a notification inside the shutdown grace, so it
+    cannot be a guess. `AWS_NEW_RETRIES_2026` turns on a path that honours
+    `x-amz-retry-after`, which adds seconds the old path never did — this asks
+    botocore itself what the longest wait is.
+    """
+
+    @staticmethod
+    def _throttled_delay(retry: int) -> float:
+        """The longest botocore waits before `retry`, throttled and told to wait."""
+        throttling = Mock()
+        throttling.is_throttling_error_from_context.return_value = True
+        backoff = ExponentialBackoff(
+            random=lambda: 1.0,  # worst-case jitter
+            throttling_detector=throttling,
+        )
+        context = Mock(attempt_number=retry)
+        context.http_response.headers = {"x-amz-retry-after": "600"}
+        return backoff.delay_amount(context)
+
+    @pytest.mark.parametrize("retry", range(1, TOTAL_ATTEMPTS))
+    def test_the_allowance_covers_what_botocore_can_wait(self, retry, monkeypatch):
+        monkeypatch.setattr(
+            "botocore.retries.standard.NEW_RETRIES_ENABLED", True, raising=False
+        )
+
+        assert self._throttled_delay(retry) <= backoff_seconds(retry)
+
+    def test_the_constants_are_the_ones_botocore_holds(self):
+        assert (
+            RETRY_AFTER_ALLOWANCE_SECONDS
+            == ExponentialBackoff._RETRY_AFTER_MAX_ADDITIONAL
+        )
+        assert MAX_BACKOFF_SECONDS == ExponentialBackoff._MAX_BACKOFF
 
 
 @pytest.mark.parametrize(

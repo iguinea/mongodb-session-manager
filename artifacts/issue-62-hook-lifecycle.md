@@ -14,10 +14,11 @@ en `hooks/background_work.py`, con cuatro reglas y un cierre explícito:
    best-effort se descarta: la corrutina se cierra, un WARNING dice qué se
    descartó y un contador lo registra.
 3. **Orden por clave donde se pide.** El trabajo con `order_key` no corre en
-   paralelo con otro de la misma clave ni lo adelanta. Por clave hay como mucho
-   uno en vuelo y uno esperando; uno nuevo sustituye al que esperaba, que se
-   descarta en voz alta y **nunca se entrega tarde**.
-4. **Un cierre que dice qué pasó.** `shutdown_hooks(timeout)` drena lo que puede,
+   paralelo con otro de la misma clave ni lo adelanta. Por clave hay uno en
+   vuelo y el resto **espera en cola, en el orden en que se envió** (8 por
+   defecto); solo al desbordarse se descarta, la más antigua y en voz alta.
+4. **Un cierre que dice qué pasó.** `shutdown_hooks(timeout)` —o
+   `shutdown_hooks_async(timeout)` desde dentro de un loop— drena lo que puede,
    cancela el resto y devuelve los contadores.
 
 Política por hook, acordada con el consumidor que los registra en producción
@@ -75,21 +76,110 @@ executor por defecto del loop, `min(32, cpu + 4)`.
 | Antes, hilo daemon | 0/20 | **ninguno** |
 | Antes, loop propio sin cierre ordenado | 0/20 | ninguno |
 | Antes, cierre ordenado del loop | 0/20 | 20 × `WARNING Cancelled while …` |
-| Ahora, sin llamar a nada | 0/20 | los contadores, vía `atexit` |
+| Ahora, sin llamar a nada | **20/20** | los contadores |
 | Ahora, con `shutdown_hooks()` | **20/20** | los contadores |
 
 La política de facto era *pérdida silenciosa no observable*, que no es una
-política. Ahora el proceso que cierra bien entrega, y el que no cierra bien al
-menos lo cuenta.
+política.
 
-**`atexit` no salva al que no tiene punto de cierre.** Se probó: Python cierra
-sus thread pools *antes* de ejecutar cualquier `atexit`, así que el trabajo que
-no había llegado al pool ya no puede llegar (1/20 entregadas y un
-`RuntimeError: cannot schedule new futures after interpreter shutdown` por
-cada una). El `atexit` se conserva porque deja los contadores en el log, y ese
-RuntimeError se degrada a un WARNING legible en vez de un traceback. Para un
-proceso sin lifespan — `BedrockAgentCoreApp`, por ejemplo — la única entrega
-real es un handler de SIGTERM que llame a `shutdown_hooks()`.
+**El gancho importa, y `atexit` era el equivocado.** La primera versión
+registraba el cierre con `atexit.register()` y entregaba **1 de 20**: Python
+cierra sus thread pools *antes* de ejecutar cualquier `atexit`, y los hooks
+hacen su llamada AWS en uno de ellos, así que lo que no había llegado al pool ya
+no podía llegar — con un `RuntimeError: cannot schedule new futures…` por cada
+una. Se registra ahora con `threading._register_atexit()`, el mismo gancho que
+usa `concurrent.futures`, que corre **antes** de ese cierre. Los handlers se
+ejecutan en orden inverso de registro, así que el nuestro tiene que registrarse
+*después* del suyo: de ahí el `import concurrent.futures.thread` que parece
+inútil en `register_close_at_exit()` y no lo es — es lo que registra
+`_python_exit`, porque `concurrent.futures` carga sus executors de forma
+perezosa. Es API privada, con degradación a `atexit` si un día no está.
+
+Qué cubre y qué no: un proceso que **termina de forma ordenada** (fin de
+`main`, `sys.exit`, `SystemExit`) drena ahora sin que nadie llame a nada. Un
+`SIGTERM` sin handler no ejecuta *nada* de Python, ni `atexit` ni
+`threading._shutdown`, así que ahí sigue haciendo falta un handler que llame a
+`shutdown_hooks()` — el caso de un servicio en ECS.
+
+## Lo que encontró la revisión
+
+Cuatro revisiones en paralelo (reutilización, simplificación, eficiencia y
+altitud) sobre el diff ya terminado. Los dos hallazgos que cambiaron el
+resultado:
+
+**Un loop que muere dejaba una sesión muda para siempre.** Si el loop pasado
+por `loop=` se para sin que nadie llame a `shutdown_hooks()` — una recarga de
+uvicorn, un lifespan que cierra en otro orden — el trabajo que viajaba en él
+queda `PENDING` y su callback no corre nunca: el hueco del límite no se
+devuelve y, peor, su `order_key` queda ocupado. Reproducido: tres sesiones
+varadas, y a partir de ahí **toda** notificación posterior de esas sesiones se
+retenía y se descartaba, con `completed` clavado en 0. Ahora, al detectar que
+el loop dado ya no corre, se desaloja lo que quedó atrapado en él, se cuenta
+como cancelado y se registra — con nivel de error si era `GUARANTEED`. Cubierto
+por `TestStrandedWork`.
+
+**El logging se hacía dentro del lock que comparte todo el proceso.** Medido:
+un `logger.error(..., exc_info=…)` cuesta 49 µs, y `_finish()` corre en el hilo
+del event loop, así que 64 fallos simultáneos — un endpoint de AWS caído —
+formateaban 3,1 ms de tracebacks dentro del lock, en el loop. Las líneas se
+componen ahora bajo el lock y se emiten fuera (`_Note`).
+
+## Lo que encontró el gate formal
+
+Sobre el diff ya completo: `/simplify`, revisión de principios y una revisión
+adversarial externa (Codex sobre el mismo diff, con sondeos ejecutables). Lo
+que cambió el código:
+
+**La clave quedaba libre un instante antes de arrancar su sucesor.** `_finish()`
+soltaba el lock, contaba, y solo después arrancaba lo que esperaba. En esa
+ventana la clave no era de nadie: un `submit` que cayera ahí arrancaba al
+momento, y acto seguido arrancaba también el que esperaba — dos notificaciones
+de una sesión en vuelo, y la vieja podía llegar la última, que es justo lo que
+el orden existe para impedir. El relevo pasa a ocurrir dentro del lock.
+
+**La política de «gana la última» perdía datos.** El consumidor pidió que una
+actualización nueva sustituyera a la que espera, y así estaba implementado. Pero
+los hooks de metadata publican *el dict que les pasa el llamante*: un delta, no
+el estado completo. Descartar `{"progress": 50}` porque después llega
+`{"status": "done"}` pierde `progress` para siempre — ningún mensaje posterior
+lo lleva. Pasa a ser una cola FIFO acotada (8 por clave); solo el desbordamiento
+descarta, y la más antigua.
+
+**`session_id` a secas colisionaba entre hooks.** Registrar el de SQS y el de
+WebSocket a la vez serializaba uno contra otro sin motivo: son destinos
+distintos. La clave va prefijada (`sqs:`, `websocket:`).
+
+**El cierre síncrono desde dentro del loop se saboteaba.** `shutdown_hooks()`
+bloquea el hilo que lo llama; llamado desde un lifespan de FastAPI, ese hilo es
+el del loop en el que viajan las notificaciones, así que el drenaje gastaba su
+presupuesto entero sin que ninguna pudiera avanzar y luego las cancelaba. Se
+añade `shutdown_hooks_async()`, que es el que hay que usar ahí, y el síncrono
+avisa si se le llama así.
+
+**Un `fork()` dejaba mudo al hijo.** El hijo hereda el objeto entero pero solo
+el hilo que forkeó: el loop de reserva sobrevive como objeto y sigue diciendo
+`is_running()`. Reproducido en un subproceso: el padre entrega, el hijo acepta
+la notificación y no la entrega nunca. Con `os.register_at_fork()` el hijo
+empieza con loop, locks y contadores propios.
+
+**El presupuesto de AWS estaba mal calculado.** `BACKOFF_ALLOWANCE_SECONDS = 4`
+suponía ~1 s y ~2 s de backoff. Preguntándole a botocore 1.43.95: en la ruta
+que activa `AWS_NEW_RETRIES_2026`, una respuesta con `x-amz-retry-after` añade
+hasta 5 s **por reintento**, así que con 3 intentos el peor caso eran 37 s — por
+encima de los 30 s de gracia de ECS, justo lo que el presupuesto debía
+garantizar. Se baja a 2 intentos (22 s) y el cálculo pasa a derivarse de las
+constantes de botocore, con un test que se las pregunta y falla si se mueven.
+
+Se anota sin arreglar, por quedar fuera de esta issue: los tres hooks capturan
+su propio error de boto3 y retornan, así que `completed` cuenta corrutinas que
+terminan, no notificaciones que AWS aceptó. Documentado en el contador y en
+`docs/api-reference/hooks.md`.
+
+De la revisión anterior salió el cambio de gancho de cierre descrito arriba, y el
+descarte de dos propuestas: sacar el `run_coroutine_threadsafe` fuera del lock
+(10,7 µs que no justifican reservar hueco y reindexar, con 0-3 notificaciones
+por turno) y sustituir el sondeo del drenaje por un `Event` (~25 ms una vez por
+proceso).
 
 ## Requisitos por hook
 
@@ -130,7 +220,7 @@ límite de trabajo en vuelo protege.
 
 Los tres hooks pasan a construir sus clientes con
 `hooks/aws_client_config.notification_config()`: **3 s de connect, 5 s de read y
-3 intentos** en modo `standard`. Peor caso ≈ 24 s con el backoff incluido, por
+2 intentos** en modo `standard`. Peor caso 22 s con el backoff incluido, por
 debajo de los 30 s de gracia de ECS. Está fijado con un test
 (`test_the_worst_case_fits_inside_the_shutdown_grace`).
 
@@ -159,7 +249,7 @@ ajustará con dato si aparece, no antes.
 | **Executor compartido** (`ThreadPoolExecutor` global) | Las corrutinas de los hooks ya son async y hacen `to_thread` dentro; un executor obligaría a envolverlas o a reescribirlas en síncrono. El loop de reserva da el mismo techo de hilos sin tocar los hooks |
 | **Cola acotada con workers propios** | Es lo que hay, pero sin la cola: con un límite de trabajo en vuelo y descarte explícito, una cola solo añade latencia entre el evento y su entrega. La única cola necesaria es la de profundidad 1 por clave, que existe para el orden, no para el encolado |
 | **Outbox persistente en Mongo** | Daría entrega garantizada de verdad, pero añade escrituras por notificación al camino que #56 lleva un mes adelgazando (21 → 8 por turno), obliga a un consumidor aparte y arrastra la dimensión DocumentDB. Para un volumen de 0-3 notificaciones por turno y una pérdida aceptable en metadata, es desproporcionado |
-| **Reintentos propios** | botocore ya reintenta (3 intentos, modo `standard`, con backoff). Un reintento encima duplicaría el tiempo de retención del hilo sin añadir garantía |
+| **Reintentos propios** | botocore ya reintenta (2 intentos, modo `standard`, con backoff). Un reintento encima duplicaría el tiempo de retención del hilo sin añadir garantía |
 | **Orden global** | Serializaría sesiones que no tienen nada que ver. El orden se pide por `session_id`, que es donde el consumidor lo necesita |
 
 ## MongoDB y DocumentDB
@@ -178,8 +268,10 @@ DocumentDB hay que hacerla entonces, no ahora.
       una ráfaga de 200; el trabajo en vuelo tiene un techo de 64 y el descarte
       es explícito. Fijado con dos tests de regresión.
 - [x] **El proceso termina limpiamente con una política observable.**
-      `shutdown_hooks()` entrega 20/20 donde antes se perdían 20/20 en silencio;
-      sin él, el `atexit` deja los contadores en el log.
+      `shutdown_hooks()` entrega 20/20 donde antes se perdían 20/20 en silencio,
+      y un cierre ordenado sin llamar a nada también, gracias al gancho que
+      corre antes que los thread pools. `SIGTERM` sin handler sigue siendo
+      muerte inmediata, y está documentado como tal.
 - [x] **Cualquier dependencia de MongoDB/DocumentDB queda probada o marcada como
       no aplicable.** Marcada como no aplicable, con el motivo.
 

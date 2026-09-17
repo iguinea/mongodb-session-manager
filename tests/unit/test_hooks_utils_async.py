@@ -10,36 +10,15 @@ import asyncio
 import gc
 import logging
 import threading
-import time
-from collections.abc import Callable
 from concurrent.futures import Future
 from unittest.mock import MagicMock
 
 import pytest
 
 from mongodb_session_manager.hooks.utils_async import capture_loop, dispatch_async
+from tests.conftest import wait_until
 
-
-@pytest.fixture
-def server_loop():
-    """An event loop running in its own thread, like a server's main loop."""
-    loop = asyncio.new_event_loop()
-    thread = threading.Thread(target=loop.run_forever, name="server-loop", daemon=True)
-    thread.start()
-    yield loop
-    loop.call_soon_threadsafe(loop.stop)
-    thread.join(timeout=5)
-    loop.close()
-
-
-def wait_until(predicate: Callable[[], bool], timeout: float = 2.0) -> bool:
-    """Poll a predicate until it holds or the timeout expires."""
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if predicate():
-            return True
-        time.sleep(0.01)
-    return predicate()
+# `server_loop` and `wait_until` are shared, in tests/conftest.py.
 
 
 # ---------------------------------------------------------------------------
@@ -285,8 +264,11 @@ class TestFailureLogging:
 
     def test_a_broken_dispatch_does_not_reach_the_caller(self, caplog):
         """The hook writes first; a dispatch failure must not undo that."""
+        # Every way of inspecting it raises, so the test does not depend on
+        # which question the dispatch asks first.
         broken_loop = MagicMock()
         broken_loop.is_closed.side_effect = RuntimeError("no loop here")
+        broken_loop.is_running.side_effect = RuntimeError("no loop here")
 
         async def coro():
             return None

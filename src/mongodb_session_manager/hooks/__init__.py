@@ -22,6 +22,7 @@ from .utils_async import (
     dispatch_async,
     hooks_background_stats,
     shutdown_hooks,
+    shutdown_hooks_async,
 )
 
 # Import hook creators if available
@@ -70,6 +71,7 @@ __all__ = [
     "dispatch_async",
     "hooks_background_stats",
     "shutdown_hooks",
+    "shutdown_hooks_async",
 ]
 
 if feedback_sns_available:

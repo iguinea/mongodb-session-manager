@@ -6,8 +6,8 @@ hooks use, on the process-wide instance.
 """
 
 import asyncio
-import atexit
 import logging
+import os
 from collections.abc import Coroutine
 from concurrent.futures import Future
 from typing import Any
@@ -17,12 +17,19 @@ from .background_work import (
     BackgroundWork,
     BackgroundWorkStats,
     Delivery,
+    _running_loop,
+    register_close_at_exit,
 )
 
 logger = logging.getLogger(__name__)
 
-# How long a process that never called `shutdown_hooks()` waits on its way out.
+# How long the drain of a process that never called `shutdown_hooks()` waits.
 # Short on purpose: it is a safety net, not the supported way to close.
+#
+# It bounds the drain, not the exit. Right after it, Python joins the threads of
+# its own pools, and cancelling a notification blocked on `asyncio.to_thread`
+# stops the waiting without interrupting the AWS call underneath — so the exit
+# still lasts as long as that call, which is what `aws_client_config` bounds.
 ATEXIT_TIMEOUT = 2.0
 
 # The background work of every hook in the process. One reserve loop, one
@@ -31,27 +38,24 @@ _background_work = BackgroundWork()
 
 
 def _drain_at_exit() -> None:
-    """Close the background work if the process never did it itself.
-
-    A last resort, not a guarantee: Python closes its thread pools before any
-    atexit runs, so a notification that had not yet reached one cannot be
-    delivered from here. What this does give every process is a close that
-    ends with the counters in the log instead of in silence.
-    """
+    """Close the background work if the process never did it itself."""
     stats = _background_work.shutdown(timeout=ATEXIT_TIMEOUT)
     if stats.dispatched:
         logger.info(f"Hook background work closed at exit: {stats.as_dict()}")
 
 
-atexit.register(_drain_at_exit)
+register_close_at_exit(_drain_at_exit)
+
+# A child of `fork()` inherits this object but none of the threads working it —
+# the reserve loop's above all. A prefork server (gunicorn `--preload`) that
+# notified before forking would otherwise accept every notification in its
+# workers and deliver none.
+os.register_at_fork(after_in_child=_background_work.reset_after_fork)
 
 
 def capture_loop() -> asyncio.AbstractEventLoop | None:
     """Return the event loop running in this thread, or None if there is none."""
-    try:
-        return asyncio.get_running_loop()
-    except RuntimeError:
-        return None
+    return _running_loop()
 
 
 def dispatch_async(
@@ -75,8 +79,8 @@ def dispatch_async(
             loop instead of a loop of the library's own.
         order_key: Work sharing a key runs one at a time and in order — the
             session id, for the metadata hooks, so two updates of the same
-            session cannot arrive swapped. Only the newest waits per key; an
-            older one still waiting is dropped rather than delivered late.
+            session cannot arrive swapped. What cannot start yet waits its turn
+            in a queue; on overflow the oldest is dropped, loudly.
         delivery: ``Delivery.GUARANTEED`` for work that nothing will produce
             again, such as a feedback notification: it is accepted over the
             limit instead of dropped.
@@ -109,6 +113,25 @@ def shutdown_hooks(timeout: float = DEFAULT_SHUTDOWN_TIMEOUT) -> BackgroundWorkS
         The counters as they stand once it is closed.
     """
     return _background_work.shutdown(timeout=timeout)
+
+
+async def shutdown_hooks_async(
+    timeout: float = DEFAULT_SHUTDOWN_TIMEOUT,
+) -> BackgroundWorkStats:
+    """Close the background work from inside an event loop.
+
+    The one to call in a FastAPI lifespan or an async signal handler. The
+    blocking `shutdown_hooks()` would stop the very loop the notifications are
+    riding, so the drain would spend its whole budget and then cancel work it
+    could have delivered.
+
+    Args:
+        timeout: Seconds to wait for the work in flight before cancelling it.
+
+    Returns:
+        The counters as they stand once it is closed.
+    """
+    return await _background_work.shutdown_async(timeout=timeout)
 
 
 def hooks_background_stats() -> BackgroundWorkStats:

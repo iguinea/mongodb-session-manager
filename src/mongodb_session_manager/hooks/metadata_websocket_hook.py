@@ -362,7 +362,7 @@ def create_metadata_hook(
                     ),
                     "sending metadata update to WebSocket",
                     loop=dispatch_loop,
-                    order_key=session_id,
+                    order_key=f"websocket:{session_id}",
                 )
             elif action == "delete" and "keys" in kwargs:
                 result = original_func(kwargs["keys"])
@@ -373,7 +373,7 @@ def create_metadata_hook(
                     ),
                     "sending metadata delete to WebSocket",
                     loop=dispatch_loop,
-                    order_key=session_id,
+                    order_key=f"websocket:{session_id}",
                 )
             else:
                 result = original_func()

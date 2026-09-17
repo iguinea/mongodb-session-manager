@@ -1,7 +1,11 @@
 """MongoDB Session Manager for Strands Agents."""
 
 from .hooks.background_work import BackgroundWorkStats
-from .hooks.utils_async import hooks_background_stats, shutdown_hooks
+from .hooks.utils_async import (
+    hooks_background_stats,
+    shutdown_hooks,
+    shutdown_hooks_async,
+)
 from .message_identity import MessageRef, ref_of
 from .mongodb_connection_pool import MongoDBConnectionPool
 from .mongodb_session_factory import (
@@ -74,6 +78,7 @@ __all__ = [  # noqa: RUF022  agrupado por categorías a propósito; ordenarlo al
     "BackgroundWorkStats",
     "hooks_background_stats",
     "shutdown_hooks",
+    "shutdown_hooks_async",
     # Constants
     "GUARDRAIL_STOP_REASONS",
     # Factory functions

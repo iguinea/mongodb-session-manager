@@ -245,7 +245,7 @@ def create_metadata_hook(
                     sqs_hook.on_metadata_change(session_id, kwargs["metadata"], action),
                     "sending metadata update to SQS",
                     loop=dispatch_loop,
-                    order_key=session_id,
+                    order_key=f"sqs:{session_id}",
                 )
             elif action == "delete" and "keys" in kwargs:
                 result = original_func(kwargs["keys"])
@@ -254,7 +254,7 @@ def create_metadata_hook(
                     sqs_hook.on_metadata_change(session_id, deleted_metadata, action),
                     "sending metadata delete to SQS",
                     loop=dispatch_loop,
-                    order_key=session_id,
+                    order_key=f"sqs:{session_id}",
                 )
             else:
                 result = original_func()

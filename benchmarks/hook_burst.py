@@ -23,17 +23,15 @@ The work each event does is the shape the bundled hooks have: an
 
 import argparse
 import asyncio
-import statistics
 import sys
 import threading
 import time
 
+from benchmarks.instruments import summarize
 from mongodb_session_manager.hooks.background_work import BackgroundWork
 
 DEFAULT_BURST = 200
 DEFAULT_WORK_MS = 50.0
-# Percentile of the dispatch cost, which is what the caller actually pays.
-_P99 = 0.99
 
 
 class _BlockingCall:
@@ -111,13 +109,16 @@ def measure(path: str, burst: int, work_seconds: float, quiet_threads: int) -> d
         loop.close()
     _settle(quiet_threads)
 
-    ordered = sorted(latencies)
+    # The same nearest-rank rule the rest of the suite uses: a percentile here
+    # is a dispatch that actually happened, not an interpolation between two.
+    dispatch = summarize([value * 1e6 for value in latencies])
     return {
         "path": path,
         "threads_added": peak_threads - quiet_threads,
         "peak_concurrent_calls": call.peak_concurrent,
-        "dispatch_p50_us": statistics.median(latencies) * 1e6,
-        "dispatch_p99_us": ordered[max(int(len(ordered) * _P99) - 1, 0)] * 1e6,
+        "dispatch_p50_us": dispatch.p50_ms,
+        "dispatch_p99_us": dispatch.p99_ms,
+        "dispatch_saturated": dispatch.saturated,
         "drained_ms": drained_ms,
         "delivered": sum(1 for event in done if event.is_set()),
     }
@@ -151,7 +152,7 @@ def main(argv: list[str] | None = None) -> int:
             f"{result['path']:>8} | threads +{result['threads_added']:>4} "
             f"| calls at once {result['peak_concurrent_calls']:>4} "
             f"| dispatch p50 {result['dispatch_p50_us']:>8.1f} us "
-            f"p99 {result['dispatch_p99_us']:>9.1f} us "
+            f"p99 {result['dispatch_p99_us']:>9.1f}{'*' if 'p99' in result['dispatch_saturated'] else ' '} us "
             f"| drained {result['drained_ms']:>8.1f} ms "
             f"| delivered {result['delivered']}/{args.burst}"
         )

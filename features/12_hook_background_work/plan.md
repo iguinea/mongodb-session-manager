@@ -40,8 +40,11 @@ El detalle completo, con las tablas de antes y después, está en
   consumidor que los usa aplica en su cliente lo último que llega, sin timestamp
   ni secuencia, y tiene una ruta que emite tres updates de la misma sesión en
   cascada. Entregar un estado viejo después de uno nuevo le dejaba la vista mal
-  de forma permanente. Por clave hay uno en vuelo y uno esperando; el nuevo
-  sustituye al que espera, que se descarta en voz alta y nunca se entrega tarde.
+  de forma permanente. Por clave hay uno en vuelo y el resto espera en cola, en
+  orden; solo el desbordamiento de la cola descarta, y la más antigua. El
+  consumidor pidió que la nueva sustituyera a la que espera, pero estos hooks
+  publican el dict que les pasa el llamante —un delta, no el estado completo—,
+  así que quedarse solo con la última perdería `{"progress": 50}` para siempre.
 - **`Delivery.GUARANTEED` para el feedback SNS.** Transporta una queja de cliente
   que nada vuelve a producir, así que el límite no lo descarta: lo acepta por
   encima con un WARNING.
@@ -50,9 +53,11 @@ El detalle completo, con las tablas de antes y después, está en
   bloquear ahí no retrasa una petición, congela el servidor. El resultado que le
   importa —no perder ninguna— se consigue igual, sin el riesgo.
 - **Timeouts acotados** en los tres clientes boto3
-  (`hooks/aws_client_config.py`): 3 s connect, 5 s read, 3 intentos. Peor caso
-  ≈ 24 s, por debajo de los 30 s de gracia de ECS, fijado con un test.
-- **`shutdown_hooks(timeout)`** drena, cancela lo que no llega y devuelve los
+  (`hooks/aws_client_config.py`): 3 s connect, 5 s read, 2 intentos. Peor caso
+  22 s, por debajo de los 30 s de gracia de ECS, fijado con un test que le
+  pregunta a botocore cuánto puede esperar entre reintentos.
+- **`shutdown_hooks(timeout)`**, y `shutdown_hooks_async(timeout)` para cerrar
+  desde dentro del loop, drenan, cancelan lo que no llega y devuelven los
   contadores. El trabajo que espera turno **sí** se entrega si su turno llega
   dentro del presupuesto; el timeout es el del cierre entero, no el de cada paso.
 - **Se conserva un `atexit`, sabiendo que no es una garantía.** Medido: Python
