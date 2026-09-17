@@ -1,5 +1,9 @@
 # Changelog
 
+## [2026-09-17] PR #93 - Fix: el benchmark ya no llama p99 al máximo de la muestra (#60) (@iguinea)
+
+- Fix: el benchmark ya no llama p99 al máximo de la muestra (#60)
+
 ## [0.17.1] - 2026-09-17
 
 ### Fixed
