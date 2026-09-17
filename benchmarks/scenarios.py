@@ -13,12 +13,18 @@ from dataclasses import dataclass
 # Messages each repetition of an operation appends. A supervisor turn writes
 # four messages for the supervisor and two for the sub-agent, the shape issue
 # #54 measured and `test_write_amplification_integration.py` still pins.
+CREATE = "create"
+RESTORE = "restore"
+SIMPLE_TURN = "turn.simple"
+TOOL_TURN = "turn.tool"
+SUPERVISOR_TURN = "turn.supervisor"
+
 MESSAGES_PER_REPETITION = {
-    "create": 2,
-    "restore": 0,
-    "turn.simple": 2,
-    "turn.tool": 4,
-    "turn.supervisor": 6,
+    CREATE: 2,
+    RESTORE: 0,
+    SIMPLE_TURN: 2,
+    TOOL_TURN: 4,
+    SUPERVISOR_TURN: 6,
 }
 
 # Above these, a run stops being something you launch by accident: a full matrix
@@ -61,21 +67,21 @@ class Scenario:
 
 
 _FULL_HISTORIES = (10, 100, 1_000, 5_000)
-_FULL_TURNS = ("turn.simple", "turn.tool", "turn.supervisor")
+_FULL_TURNS = (SIMPLE_TURN, TOOL_TURN, SUPERVISOR_TURN)
 
 
 def _smoke() -> list[Scenario]:
-    scenarios = [Scenario(operation="create", history=0)]
+    scenarios = [Scenario(operation=CREATE, history=0)]
     for history in (10, 100):
-        for operation in ("restore", "turn.simple", "turn.supervisor"):
+        for operation in (RESTORE, SIMPLE_TURN, SUPERVISOR_TURN):
             scenarios.append(Scenario(operation=operation, history=history))
     return scenarios
 
 
 def _full() -> list[Scenario]:
-    scenarios = [Scenario(operation="create", history=0)]
+    scenarios = [Scenario(operation=CREATE, history=0)]
     for history in _FULL_HISTORIES:
-        for operation in ("restore", *_FULL_TURNS):
+        for operation in (RESTORE, *_FULL_TURNS):
             for concurrency in (1, 4, 16):
                 scenarios.append(
                     Scenario(

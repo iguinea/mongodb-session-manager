@@ -27,7 +27,7 @@ from strands import Agent, tool
 from strands.types.session import SessionMessage
 
 from benchmarks.run_context import RunContext
-from benchmarks.scenarios import Scenario
+from benchmarks.scenarios import CREATE, RESTORE, SUPERVISOR_TURN, TOOL_TURN, Scenario
 from tests.support.scripted_model import ScriptedModel, text_stream, tool_stream
 
 # A production system prompt is several KB; a short one would make the config
@@ -40,6 +40,9 @@ MESSAGE_TEXT = "m" * 512
 SUPERVISOR_ID = "supervisor"
 SUB_AGENT_ID = "info_suministro_agent"
 _SEED_BATCH = 500
+# Repeated across the two aggregations below.
+_AGENTS = "$agents"
+_IF_NULL = "$ifNull"
 
 
 def _seed_documents(start_index: int, count: int) -> list[dict[str, Any]]:
@@ -164,7 +167,7 @@ class Workload:
 
     def prepare(self) -> None:
         """Sessions, histories and warm managers — all outside the window."""
-        if self._scenario.operation == "create":
+        if self._scenario.operation == CREATE:
             return
         for slot_index in range(self._scenario.concurrency):
             session_id = self._run.session_id(self._scenario.key, slot_index)
@@ -188,9 +191,9 @@ class Workload:
         """A freshly restored agent, with the manager that has to be closed."""
         manager = self._factory.create_session_manager(session_id)
         operation = self._scenario.operation
-        if operation == "turn.tool":
+        if operation == TOOL_TURN:
             agent = tool_agent(manager, [local_tool()])
-        elif operation == "turn.supervisor":
+        elif operation == SUPERVISOR_TURN:
             agent = tool_agent(manager, [sub_agent_tool(self._factory, session_id)])
         else:
             agent = scripted_agent(manager, SUPERVISOR_ID, "bench-model", "ok")
@@ -199,7 +202,7 @@ class Workload:
     async def run_repetition(self) -> list[float]:
         """One repetition of the scenario. Returns the latency of each turn."""
         operation = self._scenario.operation
-        if operation == "restore":
+        if operation == RESTORE:
             return await self._run_restores()
         return await self._run_turns()
 
@@ -217,7 +220,7 @@ class Workload:
     async def _run_turns(self) -> list[float]:
         session_ids = (
             [self._new_session_id() for _ in range(self._scenario.concurrency)]
-            if self._scenario.operation == "create"
+            if self._scenario.operation == CREATE
             else list(self._session_ids)
         )
         built = [self._build_agent(session_id) for session_id in session_ids]
@@ -243,13 +246,13 @@ class Workload:
         """
         pipeline = [
             {"$match": self._run_query()},
-            {"$project": {"agents": {"$objectToArray": {"$ifNull": ["$agents", {}]}}}},
-            {"$unwind": "$agents"},
+            {"$project": {"agents": {"$objectToArray": {_IF_NULL: [_AGENTS, {}]}}}},
+            {"$unwind": _AGENTS},
             {
                 "$group": {
                     "_id": None,
                     "total": {
-                        "$sum": {"$size": {"$ifNull": ["$agents.v.messages", []]}}
+                        "$sum": {"$size": {_IF_NULL: ["$agents.v.messages", []]}}
                     },
                 }
             },
@@ -271,11 +274,11 @@ class Workload:
                 "$project": {
                     "last_messages": {
                         "$map": {
-                            "input": {"$objectToArray": {"$ifNull": ["$agents", {}]}},
+                            "input": {"$objectToArray": {_IF_NULL: [_AGENTS, {}]}},
                             "as": "agent",
                             "in": {
                                 "$arrayElemAt": [
-                                    {"$ifNull": ["$$agent.v.messages", []]},
+                                    {_IF_NULL: ["$$agent.v.messages", []]},
                                     -1,
                                 ]
                             },

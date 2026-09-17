@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from benchmarks.scenarios import Scenario
+from benchmarks.scenarios import RESTORE, Scenario
 
 WRITE_COMMANDS = frozenset({"update", "insert", "findAndModify", "delete"})
 READ_COMMANDS = frozenset({"find", "aggregate", "getMore", "count", "distinct"})
@@ -53,7 +53,7 @@ def expectation_for(scenario: Scenario, *, repetitions: int) -> Expectation:
         requires_write=writes,
         # A turn measures the invocation on an already restored agent, so reads
         # are not guaranteed inside its window; a restore is nothing but reads.
-        requires_read=scenario.operation == "restore",
+        requires_read=scenario.operation == RESTORE,
         requires_metrics=writes,
     )
 

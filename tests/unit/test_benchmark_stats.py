@@ -26,9 +26,9 @@ class TestWarmup:
 
         measured = samples.summary()
         assert measured.n == 3
-        assert measured.min_ms == 1.0
-        assert measured.max_ms == 3.0
-        assert measured.p50_ms == 2.0
+        assert measured.min_ms == pytest.approx(1.0)
+        assert measured.max_ms == pytest.approx(3.0)
+        assert measured.p50_ms == pytest.approx(2.0)
 
     def test_warmup_is_reported_on_its_own(self):
         """The issue asks to separate warmup time, not to throw it away."""
@@ -37,7 +37,7 @@ class TestWarmup:
             samples.record(value)
 
         assert samples.warmup_summary().n == 2
-        assert samples.warmup_summary().max_ms == 1000.0
+        assert samples.warmup_summary().max_ms == pytest.approx(1000.0)
 
     def test_completed_counts_every_repetition(self):
         """Guards against a silently partial run: the invariant compares this."""
@@ -61,11 +61,11 @@ class TestPercentiles:
 
         distribution = summarize(values)
 
-        assert distribution.p50_ms == 50.0
-        assert distribution.p95_ms == 95.0
-        assert distribution.p99_ms == 99.0
-        assert distribution.min_ms == 1.0
-        assert distribution.max_ms == 100.0
+        assert distribution.p50_ms == pytest.approx(50.0)
+        assert distribution.p95_ms == pytest.approx(95.0)
+        assert distribution.p99_ms == pytest.approx(99.0)
+        assert distribution.min_ms == pytest.approx(1.0)
+        assert distribution.max_ms == pytest.approx(100.0)
         assert distribution.n == 100
 
     def test_order_of_arrival_does_not_matter(self):
@@ -78,9 +78,9 @@ class TestPercentiles:
         distribution = summarize([7.5])
 
         assert distribution.n == 1
-        assert distribution.min_ms == 7.5
-        assert distribution.p99_ms == 7.5
-        assert distribution.max_ms == 7.5
+        assert distribution.min_ms == pytest.approx(7.5)
+        assert distribution.p99_ms == pytest.approx(7.5)
+        assert distribution.max_ms == pytest.approx(7.5)
 
     def test_summarizing_nothing_raises(self):
         with pytest.raises(ValueError, match="no measured samples"):

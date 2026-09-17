@@ -9,6 +9,8 @@ evidence followed by hand.
 
 from __future__ import annotations
 
+import pytest
+
 from benchmarks.report import compare_runs
 
 BASE_ENVIRONMENT = {
@@ -46,9 +48,9 @@ class TestComparable:
 
         assert report.comparable is True
         row = report.rows[0]
-        assert row.base_p50 == 10.0
-        assert row.head_p50 == 5.0
-        assert row.p50_change_pct == -50.0
+        assert row.base_p50 == pytest.approx(10.0)
+        assert row.head_p50 == pytest.approx(5.0)
+        assert row.p50_change_pct == pytest.approx(-50.0)
 
     def test_scenarios_are_paired_by_their_key(self):
         base = _run(**{"a": 10.0, "b": 20.0})
@@ -57,8 +59,8 @@ class TestComparable:
         report = compare_runs(base, head)
 
         by_key = {row.scenario: row for row in report.rows}
-        assert by_key["a"].head_p50 == 5.0
-        assert by_key["b"].head_p50 == 10.0
+        assert by_key["a"].head_p50 == pytest.approx(5.0)
+        assert by_key["b"].head_p50 == pytest.approx(10.0)
 
     def test_a_scenario_missing_from_one_side_is_reported_not_dropped(self):
         base = _run(**{"a": 10.0, "b": 20.0})
