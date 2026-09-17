@@ -18,6 +18,15 @@ uv run python -m benchmarks --profile full --dry-run
 # The full matrix of the issue, with results on disk
 uv run python -m benchmarks --profile full --allow-large \
   --json-out artifacts/bench-$(date +%Y%m%d).json
+
+# Issue #61: same workload on the server loop and in worker threads
+uv run python -m benchmarks --profile full --execution-mode direct \
+  --operation turn.supervisor --history 100 --concurrency 16 \
+  --allow-large --json-out /tmp/direct.json
+uv run python -m benchmarks --profile full --execution-mode thread \
+  --operation turn.supervisor --history 100 --concurrency 16 \
+  --allow-large --json-out /tmp/thread.json
+uv run python -m benchmarks --compare /tmp/direct.json /tmp/thread.json
 ```
 
 Exit codes: `0` the run proved its work · `1` a scenario did not, or synthetic
@@ -36,15 +45,25 @@ data was left behind · `2` the run was refused before it started.
 Crossed with history sizes (10, 100, 1.000, 5.000 previous messages) and
 concurrency (1, 4, 16 simultaneous invocations).
 
-**Concurrency N means N invocations in flight on one event loop**, the way N
-requests share a FastAPI worker — not N parallel driver calls. pymongo is
-synchronous, so those serialise, and the queue they form is exactly what the
-event-loop lag measures.
+In the default `--execution-mode direct`, **concurrency N means N invocations in
+flight on one event loop**, the way N streaming requests share a FastAPI worker.
+pymongo is synchronous, so its calls serialise, and the queue they form is
+exactly what the event-loop lag measures. In `--execution-mode thread`, each
+complete request path (agent restoration, invocation and manager cleanup) is
+sent to asyncio's shared worker pool. That is the non-streaming integration from
+issue [#61](https://github.com/iguinea/mongodb-session-manager/issues/61), and it
+allows pymongo calls to overlap up to the pool limits.
 
-For every cell: latency `min/p50/p95/p99/max`, MongoDB commands by name and per
-operation — a read that needs several round-trips to drain its cursor shows them
-as `getMore` — bytes in and out, connection-pool checkout wait, event-loop lag, and errors.
-There is no mean anywhere: it hides the tail this exists to expose.
+For every cell: latency `min/p50/p95/p99/max`, throughput over the complete timed
+window, MongoDB commands by name and per operation — a read that needs several
+round-trips to drain its cursor shows them as `getMore` — bytes in and out,
+connection-pool checkout wait, event-loop lag, and errors. There is no latency
+mean anywhere: it hides the tail this exists to expose.
+
+For turn scenarios the latency samples cover the invocation itself; throughput
+and event-loop lag cover the complete repeated request path, including manager
+and agent construction/restoration. Restore scenarios time that construction
+directly.
 
 ## Three passes per cell, and why
 
@@ -77,12 +96,17 @@ There is no mean anywhere: it hides the tail this exists to expose.
   window shorter than one heartbeat reports `null` and says so, rather than a
   zero that would read as "never blocked". The idle-loop baseline is printed
   beside it and is **never subtracted**: it is the machine's own jitter.
-- **Pool wait** reads zero here, and that is structural, not a bug: one event
-  loop driving a synchronous driver never has two checkouts in flight. A profile
-  that saturated a four-connection pool with sixteen concurrent invocations was
-  tried and removed — it still waited 0 ms. The probe stays because it does
-  measure something real once several workers or threads share a client, which
-  this harness does not simulate.
+- **Pool wait** reads zero in `direct`, and that is structural, not a bug: one
+  event loop driving a synchronous driver never has two checkouts in flight. In
+  `thread` it can become non-zero because several workers really can share the
+  client at once. The probe therefore distinguishes event-loop queuing from
+  connection-pool contention.
+- **`thread` is the current Strands workaround, not an async session-manager
+  implementation.** `Agent.__call__` bridges back to `invoke_async` with an
+  isolated event loop in the installed Strands release. The benchmark includes
+  that cost because it measures the integration applications can deploy today.
+  Replacing PyMongo with an async driver inside this package is not safe while
+  Strands session callbacks remain synchronous.
 - **A `ping` probe** runs before and after the matrix. If it drifts, something
   outside the benchmark changed and the run is not comparable.
 

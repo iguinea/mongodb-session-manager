@@ -80,6 +80,21 @@ class TestComparable:
         assert "turn_simple" in text
         assert "-50" in text
 
+    def test_the_text_compares_throughput_and_event_loop_lag(self):
+        base = _run(**{"turn_simple": 10.0})
+        head = _run(**{"turn_simple": 5.0})
+        base["results"][0]["throughput"] = {"operations_per_second": 100.0}
+        head["results"][0]["throughput"] = {"operations_per_second": 180.0}
+        base["results"][0]["loop_lag"] = {"lag": {"p99_ms": 90.0}}
+        head["results"][0]["loop_lag"] = {"lag": {"p99_ms": 4.0}}
+
+        text = compare_runs(base, head).describe()
+
+        assert "base op/s" in text
+        assert "head op/s" in text
+        assert "100.0" in text and "180.0" in text
+        assert "90.0" in text and "4.0" in text
+
 
 class TestNotComparable:
     def test_differing_engines_are_reported_as_not_comparable(self):

@@ -113,6 +113,65 @@ The baseline is the machine's own scheduling jitter, printed beside the lag and
 never subtracted from it. The reading is not "the turn took 28 ms" but "for
 about 20 ms of it, nothing else on that worker could run".
 
+#### Async-server decision (#61)
+
+The repository remains synchronous. Strands registers `initialize`,
+`append_message` and `sync_agent` as ordinary synchronous callbacks, so an
+async MongoDB driver cannot be awaited there without changing the Strands
+session-manager contract. A write-behind queue was also rejected: it would
+break the read-after-write, message-order and root `updated_at` guarantees that
+the Control Center and runtime consumers rely on.
+
+For a **non-streaming FastAPI endpoint**, put the complete synchronous path in
+the framework's shared worker pool, as
+[`examples/example_fastapi.py`](../../examples/example_fastapi.py) does. The
+helper creates/restores the agent, invokes it, reads its in-memory metrics and
+closes the per-request manager on the same worker. Moving only `agent(prompt)`
+is insufficient because constructing the agent restores the session and also
+performs remote reads.
+
+This is a bounded compatibility workaround, not a new persistence contract:
+
+- cancelling the awaiting HTTP task cannot stop Python code already running in
+  a thread; the turn finishes and its result is persisted, so the next request
+  restores an answer the user never saw. The helper's `finally` still closes the
+  manager, and database/model timeouts must bound the underlying calls;
+- the optional hooks dispatch through `dispatch_async()`, which branches on
+  whether a loop runs in the *calling* thread: from a worker it starts a daemon
+  thread per event instead of a task on the server loop. Any integration that
+  registers a metadata or feedback hook must check this before wrapping;
+- a process that mutates shared configuration from a background coroutine may
+  depend on the turn never yielding the loop; wrapping the turn removes that
+  guarantee;
+- graceful shutdown drains requests before the lifespan closes the shared
+  MongoDB factory;
+- the installed Strands `Agent.__call__` creates an isolated event loop for its
+  `invoke_async` bridge, so this is not the final zero-overhead async design;
+- the streaming example keeps `stream_async` on the server loop because moving
+  a stream requires an explicit cross-thread backpressure and cancellation
+  protocol. Until Strands offers async session callbacks, use several server
+  workers and bounded restored histories there as the operational fallback.
+
+The reproducible harness accepts `--execution-mode direct|thread` and records
+throughput plus event-loop lag under the same workload, so the tradeoff is
+measured on both engines rather than inferred from isolated driver timings.
+
+Measured on the supervisor turn with 100 previous messages, at concurrency 16:
+
+| Engine | Mode | p50 | Throughput | Loop lag p99 |
+|---|---|---:|---:|---:|
+| MongoDB 8.2.7 local | direct | 68,3 ms | 139,9 op/s | 101,2 ms |
+| MongoDB 8.2.7 local | thread | 58,2 ms | 206,7 op/s | 4,6 ms |
+| DocumentDB 5.0 dev | direct | 5.430,7 ms | 1,6 op/s | 5.509,6 ms |
+| DocumentDB 5.0 dev | thread | 1.245,8 ms | 9,7 op/s | 5,7 ms |
+
+The effect is far larger on DocumentDB, where network latency widens the window
+in which the synchronous driver holds the loop: lag p99 drops by 99,9 % and
+throughput multiplies by 6,1. In `thread` mode the lag stays flat (4,7–5,8 ms)
+across the whole matrix instead of scaling with load. At concurrency 1 the trade
+reverses into a small scheduling cost on both engines — the goal is not a faster
+isolated turn but a turn that does not stall every other request.
+
 
 ### Real-World Performance
 

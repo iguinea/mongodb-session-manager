@@ -114,11 +114,19 @@ class Runner:
             collection_name=self._collection_name,
             application_name=APPLICATION_NAME,
         )
-        workload = Workload(factory, collection, self._run, scenario)
+        workload = Workload(
+            factory,
+            collection,
+            self._run,
+            scenario,
+            execution_mode=self._plan.execution_mode,
+        )
 
         workload.prepare()
         messages_before = workload.persisted_messages()
-        samples, loop_lag, tally = await self._timed_passes(workload, scenario, probes)
+        samples, loop_lag, tally, throughput = await self._timed_passes(
+            workload, scenario, probes
+        )
         volume = await self._volume_pass(workload, probes)
         messages_after = workload.persisted_messages()
 
@@ -147,6 +155,7 @@ class Runner:
             volume=volume,
             loop_lag=loop_lag,
             measured_operations=measured_operations,
+            throughput=throughput,
             reasons=reasons,
         )
 
@@ -160,6 +169,7 @@ class Runner:
         volume: dict[str, int],
         loop_lag: dict[str, Any],
         measured_operations: int,
+        throughput: dict[str, Any],
         reasons: list[str],
     ) -> ScenarioResult:
         return ScenarioResult(
@@ -167,6 +177,7 @@ class Runner:
             operation=scenario.operation,
             history=scenario.history,
             concurrency=scenario.concurrency,
+            execution_mode=self._plan.execution_mode,
             latency=samples.summary().as_dict(),
             warmup=samples.warmup_summary().as_dict() if self._plan.warmups else None,
             commands={
@@ -184,13 +195,14 @@ class Runner:
                 "reasons": pool_tally.reasons,
             },
             loop_lag=loop_lag,
+            throughput=throughput,
             errors=tally.failures,
             checks=reasons,
         )
 
     async def _timed_passes(
         self, workload: Workload, scenario: Scenario, probes: Probes
-    ) -> tuple[Samples, dict[str, Any], CommandTally]:
+    ) -> tuple[Samples, dict[str, Any], CommandTally, dict[str, Any]]:
         """Warmups with the probes closed, then the window that gets reported."""
         samples = Samples(warmups=self._plan.warmups * scenario.concurrency)
         for _ in range(self._plan.warmups):
@@ -201,10 +213,13 @@ class Runner:
 
         probes.open()
         loop_probe = LoopProbe()
+        loop = asyncio.get_running_loop()
         async with loop_probe:
+            started = loop.time()
             for _ in range(self._plan.repetitions):
                 for latency in await workload.run_repetition():
                     samples.record(latency)
+            elapsed_seconds = loop.time() - started
         probes.close()
 
         # Taken before the volume pass resets the counters.
@@ -227,7 +242,15 @@ class Runner:
                 f"{loop_probe.interval_ms:.0f} ms heartbeat; raise --repetitions "
                 "to measure lag for this scenario"
             )
-        return samples, loop_lag, tally
+        operations = self._plan.repetitions * scenario.concurrency
+        throughput = {
+            "operations": operations,
+            "elapsed_seconds": elapsed_seconds,
+            "operations_per_second": (
+                operations / elapsed_seconds if elapsed_seconds > 0 else 0.0
+            ),
+        }
+        return samples, loop_lag, tally, throughput
 
     async def _volume_pass(self, workload: Workload, probes: Probes) -> dict[str, int]:
         """Weighs the traffic, then throws the timings away.

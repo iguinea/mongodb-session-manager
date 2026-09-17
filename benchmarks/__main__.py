@@ -24,7 +24,7 @@ from benchmarks.environment import capture, ping_probe
 from benchmarks.report import build_document, compare_runs, human_summary
 from benchmarks.run_context import RunContext
 from benchmarks.runner import Probes, build_client, run_matrix
-from benchmarks.scenarios import LoadTooLarge, build_matrix, plan_run
+from benchmarks.scenarios import EXECUTION_MODES, LoadTooLarge, build_matrix, plan_run
 
 DEFAULT_DATABASE = "benchmark_mongodb_session_manager"
 DEFAULT_COLLECTION = "sessions"
@@ -60,6 +60,15 @@ def _add_matrix_arguments(parser: argparse.ArgumentParser) -> None:
         type=float,
         default=1.0,
         help="idle-loop calibration taken before each scenario",
+    )
+    parser.add_argument(
+        "--execution-mode",
+        choices=EXECUTION_MODES,
+        default="direct",
+        help=(
+            "direct awaits Strands on the server loop; thread runs the complete "
+            "request path in the shared asyncio worker pool"
+        ),
     )
 
 
@@ -134,6 +143,7 @@ def main(argv: list[str] | None = None) -> int:
             repetitions=args.repetitions,
             volume_repetitions=args.volume_repetitions,
             allow_large=args.allow_large,
+            execution_mode=args.execution_mode,
         )
     except (ValueError, LoadTooLarge) as refusal:
         print(f"refused: {refusal}", file=sys.stderr)
@@ -162,6 +172,7 @@ def _configuration(args: argparse.Namespace, plan: Any) -> dict[str, Any]:
         "repetitions": args.repetitions,
         "volume_repetitions": args.volume_repetitions,
         "baseline_seconds": args.baseline_seconds,
+        "execution_mode": plan.execution_mode,
         "database_name": args.database_name,
         "collection_name": args.collection_name,
         "synthetic_messages_planned": plan.synthetic_messages,

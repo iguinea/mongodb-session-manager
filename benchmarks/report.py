@@ -25,6 +25,7 @@ class ScenarioResult:
     operation: str
     history: int
     concurrency: int
+    execution_mode: str
     latency: dict[str, Any]
     warmup: dict[str, Any] | None
     commands: dict[str, Any]
@@ -32,6 +33,7 @@ class ScenarioResult:
     bytes: dict[str, int]
     pool: dict[str, Any]
     loop_lag: dict[str, Any] | None
+    throughput: dict[str, Any]
     errors: int
     checks: list[str] = field(default_factory=list)
 
@@ -45,6 +47,7 @@ class ScenarioResult:
             "operation": self.operation,
             "history": self.history,
             "concurrency": self.concurrency,
+            "execution_mode": self.execution_mode,
             "latency": self.latency,
             "warmup": self.warmup,
             "commands": self.commands,
@@ -52,6 +55,7 @@ class ScenarioResult:
             "bytes": self.bytes,
             "pool": self.pool,
             "loop_lag": self.loop_lag,
+            "throughput": self.throughput,
             "errors": self.errors,
             "checks": self.checks,
             "passed": self.passed,
@@ -140,7 +144,8 @@ def human_summary(document: dict[str, Any]) -> str:
         commands = result["commands"]
         extra = (
             f"{commands.get('per_operation', 0):.1f} cmd/op, "
-            f"{result['bytes'].get('reply', 0):,} B reply"
+            f"{result['bytes'].get('reply', 0):,} B reply, "
+            f"{result.get('throughput', {}).get('operations_per_second', 0):.1f} op/s"
         )
         lines.append(_row(result["scenario"], result["latency"], extra))
         lag = result["loop_lag"] or {}
@@ -188,6 +193,10 @@ class ComparisonRow:
     head_p95: float | None
     base_bytes: int | None
     head_bytes: int | None
+    base_throughput: float | None
+    head_throughput: float | None
+    base_loop_lag_p99: float | None
+    head_loop_lag_p99: float | None
     p50_change_pct: float | None
 
 
@@ -208,15 +217,34 @@ class Comparison:
                 for name, (base, head) in self.differences.items()
             )
             lines.append("")
-        header = f"  {'scenario':<26}{'base p50':>11}{'head p50':>11}"
-        lines.append(header if not self.comparable else f"{header}{'change':>10}")
-        lines.append(f"  {'-' * (len(header) + 8)}")
+        header = (
+            f"  {'scenario':<26}{'base p50':>11}{'head p50':>11}"
+            f"{'change':>10}{'base op/s':>12}{'head op/s':>12}"
+            f"{'base lag':>11}{'head lag':>11}"
+        )
+        lines.append(header)
+        lines.append(f"  {'-' * (len(header) - 2)}")
         for row in self.rows:
             base = "—" if row.base_p50 is None else f"{row.base_p50:.3f}"
             head = "—" if row.head_p50 is None else f"{row.head_p50:.3f}"
             line = f"  {row.scenario:<26}{base:>11}{head:>11}"
-            if row.p50_change_pct is not None:
-                line += f"{row.p50_change_pct:>9.1f}%"
+            change = "—" if row.p50_change_pct is None else f"{row.p50_change_pct:.1f}%"
+            base_rate = (
+                "—" if row.base_throughput is None else f"{row.base_throughput:.1f}"
+            )
+            head_rate = (
+                "—" if row.head_throughput is None else f"{row.head_throughput:.1f}"
+            )
+            base_lag = (
+                "—" if row.base_loop_lag_p99 is None else f"{row.base_loop_lag_p99:.1f}"
+            )
+            head_lag = (
+                "—" if row.head_loop_lag_p99 is None else f"{row.head_loop_lag_p99:.1f}"
+            )
+            line += (
+                f"{change:>10}{base_rate:>12}{head_rate:>12}"
+                f"{base_lag:>11}{head_lag:>11}"
+            )
             lines.append(line)
         return "\n".join(lines)
 
@@ -249,7 +277,11 @@ def compare_runs(base: dict[str, Any], head: dict[str, Any]) -> Comparison:
     head_results = {r["scenario"]: r for r in head["results"]}
 
     rows = []
-    for scenario in sorted(base_results.keys() | head_results.keys()):
+    scenario_order = [
+        *base_results,
+        *(scenario for scenario in head_results if scenario not in base_results),
+    ]
+    for scenario in scenario_order:
         in_base = base_results.get(scenario)
         in_head = head_results.get(scenario)
         base_p50 = in_base["latency"]["p50_ms"] if in_base else None
@@ -266,6 +298,18 @@ def compare_runs(base: dict[str, Any], head: dict[str, Any]) -> Comparison:
                 head_p95=in_head["latency"]["p95_ms"] if in_head else None,
                 base_bytes=(in_base or {}).get("bytes", {}).get("reply"),
                 head_bytes=(in_head or {}).get("bytes", {}).get("reply"),
+                base_throughput=(in_base or {})
+                .get("throughput", {})
+                .get("operations_per_second"),
+                head_throughput=(in_head or {})
+                .get("throughput", {})
+                .get("operations_per_second"),
+                base_loop_lag_p99=(
+                    ((in_base or {}).get("loop_lag") or {}).get("lag") or {}
+                ).get("p99_ms"),
+                head_loop_lag_p99=(
+                    ((in_head or {}).get("loop_lag") or {}).get("lag") or {}
+                ).get("p99_ms"),
                 p50_change_pct=change,
             )
         )

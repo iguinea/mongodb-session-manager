@@ -19,6 +19,10 @@ SIMPLE_TURN = "turn.simple"
 TOOL_TURN = "turn.tool"
 SUPERVISOR_TURN = "turn.supervisor"
 
+DIRECT_EXECUTION = "direct"
+THREAD_EXECUTION = "thread"
+EXECUTION_MODES = (DIRECT_EXECUTION, THREAD_EXECUTION)
+
 MESSAGES_PER_REPETITION = {
     CREATE: 2,
     RESTORE: 0,
@@ -132,12 +136,14 @@ class RunPlan:
     repetitions: int
     volume_repetitions: int
     synthetic_messages: int
+    execution_mode: str = DIRECT_EXECUTION
 
     def describe(self) -> str:
         lines = [
             f"{len(self.scenarios)} scenarios, "
             f"{self.warmups} warmups + {self.repetitions} timed + "
             f"{self.volume_repetitions} volume repetitions each",
+            f"execution mode: {self.execution_mode}",
             f"{self.synthetic_messages:,} synthetic messages will be written",
             "",
         ]
@@ -156,8 +162,14 @@ def plan_run(
     repetitions: int,
     volume_repetitions: int = 0,
     allow_large: bool,
+    execution_mode: str = DIRECT_EXECUTION,
 ) -> RunPlan:
     """Cost of a run, refusing it when it is larger than anyone meant to launch."""
+    if execution_mode not in EXECUTION_MODES:
+        raise ValueError(
+            f"unknown execution mode: {execution_mode}. "
+            f"Available: {', '.join(EXECUTION_MODES)}"
+        )
     passes = warmups + repetitions + volume_repetitions
     synthetic = sum(
         s.seeded_messages + passes * s.concurrency * s.messages_per_repetition
@@ -186,4 +198,5 @@ def plan_run(
         repetitions=repetitions,
         volume_repetitions=volume_repetitions,
         synthetic_messages=synthetic,
+        execution_mode=execution_mode,
     )
