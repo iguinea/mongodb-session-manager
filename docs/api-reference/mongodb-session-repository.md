@@ -784,6 +784,13 @@ order. `event_loop_metrics` are filtered out from returned messages.
 A direct `$slice` is intentionally not used because it would paginate physical
 array order before sorting and could return a different page.
 
+The page is requested in a single cursor batch, so draining it costs one
+`aggregate` and no `getMore`. The default batch of 101 documents applies to every
+batch on DocumentDB, which made a 5,000-message restoration cost 49 extra
+round-trips; the batch negotiated here is larger than any page a 16 MiB document
+can hold. See
+[Draining the history in one batch](../architecture/performance.md#draining-the-history-in-one-batch).
+
 #### Parameters
 
 - **session_id** (`str`): ID of the session.

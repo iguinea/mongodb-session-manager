@@ -39,6 +39,21 @@ _MATCH = "$match"
 _PROJECT = "$project"
 _IF_NULL = "$ifNull"
 
+# Cursor batch negotiated for the message page (#92).
+#
+# The default batch is 101 documents, and on DocumentDB that applies to every
+# batch and not only the first: draining 5.000 messages cost 49 `getMore` of
+# 94 ms each, 5,04 s of restoration. MongoDB fills each batch up to 16 MiB
+# instead and needed one.
+#
+# A session document cannot exceed 16 MiB, so its messages array cannot hold
+# more entries than that divided by the smallest message create_message()
+# writes -- well under this number. Asking for more than fits costs nothing:
+# the server still caps a batch at 16 MiB and hands over a cursor for the rest.
+# What matters is being strictly greater than the page: a batch of exactly its
+# size returns the page with a live cursor, and closing it costs a round-trip.
+_MESSAGE_BATCH_SIZE = 1_000_000
+
 # Fields stored on message documents that SessionMessage.__init__() does not accept.
 # Used to filter them out when reconstructing SessionMessage objects.
 _MESSAGE_EXCLUDED_FIELDS = frozenset(
@@ -973,6 +988,10 @@ class MongoDBSessionRepository(SessionRepository):
         deterministic tie-breaker, and missing timestamps sort last. The final
         ``$sort`` is intentional: DocumentDB only guarantees aggregation result
         order when sorting is the last pipeline stage.
+
+        The page travels in a single batch: what made restoring a long session
+        expensive was not its bytes but how many round-trips the cursor took to
+        hand them over -- see _MESSAGE_BATCH_SIZE (#92).
         """
         agent_path = self._agent_path(agent_id)
         if offset < 0:
@@ -985,7 +1004,8 @@ class MongoDBSessionRepository(SessionRepository):
 
         try:
             result = []
-            for i, item in enumerate(self.collection.aggregate(pipeline)):
+            cursor = self.collection.aggregate(pipeline, batchSize=_MESSAGE_BATCH_SIZE)
+            for i, item in enumerate(cursor):
                 try:
                     result.append(self._to_session_message(item["message"]))
                 except Exception as e:

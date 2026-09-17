@@ -85,8 +85,15 @@ precedes it, and with it the turn's wall-clock time.
 **A full restoration still transfers the whole history.** The bounded reads of
 [#58](https://github.com/iguinea/mongodb-session-manager/issues/58) keep a
 *page* small — 7 KB whatever the history — but rebuilding an `Agent` asks for
-every message, so 5.000 of them are 3.77 MB and 31 ms before the turn starts.
-Sessions that long are where a conversation manager earns its keep.
+every message, so 5.000 of them are 3.77 MB before the turn starts. Sessions
+that long are where a conversation manager earns its keep — and with the default
+`SlidingWindowConversationManager` they already do: it raises
+`removed_message_count`, which `initialize()` passes as the `offset`, so the
+restoration reads a window and stops growing with the session. The 4.0 commands
+in the two longest rows are the cursor splitting into batches; since
+[#92](https://github.com/iguinea/mongodb-session-manager/issues/92) every
+restoration costs 3.0, whatever the history. See
+[Draining the history in one batch](#draining-the-history-in-one-batch).
 
 ### Event-loop lag: the cost paid by everyone else
 
@@ -622,6 +629,40 @@ Single-message lookup fell from 13.771 to 1.516 ms p50, server count from 13.410
 to 1.122 ms, and config listing from 13.481 to 0.519 ms. Their responses were
 670 B, 16 B and 118 B and contained no `messages` key. Full p50/p95/p99 tables
 and explain summaries are in `artifacts/issue-58-server-side-reads.md`.
+
+### Draining the history in one batch
+
+Bounding the *bytes* of a page left the *round-trips* untouched, and on
+DocumentDB those were the bill. The cursor's default batch is 101 documents;
+MongoDB applies it to the first batch only and fills the rest up to 16 MiB,
+DocumentDB applies it to **every** batch. Restoring 5,000 messages therefore cost
+one `aggregate` plus 49 `getMore` of 94 ms — 5 s of wall clock for the same
+3.77 MB MongoDB handed over in one extra round-trip.
+
+`list_messages()` now negotiates a batch larger than any page a 16 MiB document
+can hold (`_MESSAGE_BATCH_SIZE`), so the cursor is exhausted inside the
+`aggregate` itself. It has to be *strictly* larger: a batch of exactly the page
+size returns the page with a live cursor, because the server does not know it is
+done until a batch comes up short.
+
+Restoration measured with the #60 harness, before and after, on the same machine
+and in the same session. **The two tables are read side by side, never as a
+delta**: the DocumentDB latency includes the SSH tunnel.
+
+| History | MongoDB 8.2.7 local | Amazon DocumentDB 5.0 DEV |
+|---:|---|---|
+| 1,000 | 16.24 → **11.13 ms**, 4.0 → **3.0** cmd | 1,399 → **335 ms**, 12.0 → **3.0** cmd |
+| 5,000 | 69.77 → **47.26 ms**, 4.0 → **3.0** cmd | 5,649 → **525 ms**, 52.0 → **3.0** cmd |
+
+The 10- and 100-message rows already fitted in one batch and do not change their
+command count; their p50 moves in both directions and is tunnel and machine
+dispersion, not an effect of the change.
+
+The ceiling of the design is the **write**, not the read: `create_message()`
+fails once the session document reaches 16 MiB (`Resulting document after update
+is larger than 16777216`). A 15.40 MiB document still reads in a single
+`aggregate`. Full tables, the `batchSize` sweep and the discarded `$group`
+alternative are in `artifacts/issue-92-restore-batch-size.md`.
 
 ### Writes per Turn
 

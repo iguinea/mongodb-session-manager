@@ -788,6 +788,43 @@ class TestMessageOperations:
         assert pipeline[-1] == pipeline[-4]
         mock_mongo_collection.find_one.assert_not_called()
 
+    def test_list_messages_asks_for_the_whole_page_in_one_batch(
+        self, mock_repository, mock_mongo_collection
+    ):
+        """El historial se pide en un lote, no en lotes de 101 (#92).
+
+        DocumentDB corta cada lote del cursor en ~101 documentos, así que
+        restaurar 5.000 mensajes costaba 49 `getMore` de 94 ms. El tamaño de
+        lote se negocia para que quepa cualquier página que un documento de
+        16 MiB pueda contener.
+        """
+        mock_mongo_collection.aggregate.return_value = []
+
+        mock_repository.list_messages("s1", "a1")
+
+        batch_size = mock_mongo_collection.aggregate.call_args.kwargs["batchSize"]
+        # Cota superior de mensajes en un documento, independiente de la
+        # constante de producción: el límite BSON entre el mensaje más pequeño
+        # que `create_message()` puede escribir (un role y un content vacío).
+        bson_document_limit = 16 * 1024 * 1024
+        smallest_message_bson = 80
+        assert batch_size > bson_document_limit // smallest_message_bson
+
+    def test_list_messages_batch_outgrows_the_page_it_asks_for(
+        self, mock_repository, mock_mongo_collection
+    ):
+        """Un lote del tamaño exacto de la página aún cuesta un `getMore`.
+
+        El servidor no sabe que el cursor está agotado hasta que un lote sale
+        corto, así que `batchSize == limit` devuelve la página y un cursor
+        vivo. Estrictamente mayor lo agota en el propio `aggregate`.
+        """
+        mock_mongo_collection.aggregate.return_value = []
+
+        mock_repository.list_messages("s1", "a1", limit=2, offset=1)
+
+        assert mock_mongo_collection.aggregate.call_args.kwargs["batchSize"] > 2
+
     def test_list_messages_returns_empty_for_missing_session(
         self, mock_repository, mock_mongo_collection
     ):
