@@ -1,5 +1,9 @@
 # Changelog
 
+## [2026-09-17] PR #102 - Docs: entrada de CHANGELOG para la v0.20.0 (#99) (@iguinea)
+
+- Docs: entrada de CHANGELOG para la v0.20.0 (#99)
+
 ## [2026-09-17] PR #101 - Fix: el error de AWS sale del hook y cuenta como fallo (#99) (@iguinea)
 
 - Fix: el error de AWS sale del hook y cuenta como fallo (#99)
