@@ -1,5 +1,9 @@
 # Changelog
 
+## [2026-09-17] PR #96 - Fix: evitar que el camino síncrono bloquee el event loop en FastAPI (#61) (@iguinea)
+
+- Fix: evitar que el camino síncrono bloquee el event loop en FastAPI (…
+
 ## [2026-09-17] PR #94 - Fix: la restauración drena el historial en un lote, no en cincuenta (#92) (@iguinea)
 
 - Fix: la restauración drena el historial en un lote, no en cincuenta (…
