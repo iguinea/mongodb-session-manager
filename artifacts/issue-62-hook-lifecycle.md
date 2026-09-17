@@ -210,6 +210,31 @@ petición: congela el servidor. `Delivery.GUARANTEED` consigue lo mismo que les
 importa — no se pierde ninguna — aceptándola por encima del límite con un
 WARNING. El efecto observable es idéntico; el riesgo, no.
 
+### Una segunda desviación, confirmada por ellos
+
+Pidieron también que una actualización nueva **sustituyera** a la que espera. Se
+implementó así y el gate lo tumbó por la forma del payload. Al comunicárselo,
+confirmaron que el descarte les habría metido un bug concreto: sus tres pushes
+de `/crm/start_chat` no son equivalentes.
+
+| Push | Contenido | ¿Delta? |
+|---|---|---|
+| `chat.py:48` | dict completo (`customer_*`, `connection_id`, `case_type`) | No |
+| `chat.py:57` | el anterior enriquecido con SAP, **único que lleva `customer_address`** | No |
+| `chat.py:86` | `{case_type, classification_reason, connection_id}` | **Sí** |
+
+Con «gana la última», una colisión entre el segundo y el tercero descartaba el
+segundo, y `customer_address` no vuelve a viajar nunca — su widget lo usa para
+el título del chat (`websocket-handlers.js:188`). Habrían cambiado un bug de
+orden por uno de pérdida de campos, más difícil de ver. Su propio diagnóstico:
+razonaron sobre `case_type`, que sí es idempotente, y generalizaron al resto del
+dict.
+
+La lección, para la próxima vez que un consumidor fije una política: **el
+requisito lo fija quien consume, pero la forma del payload la fija el código**.
+Un «el último estado gana» solo es correcto si cada mensaje lleva el estado
+entero, y eso no se pregunta, se comprueba.
+
 ## Credenciales, timeouts y shutdown en AWS
 
 Medido sobre botocore 1.43.95: los clientes se creaban con los defaults —
