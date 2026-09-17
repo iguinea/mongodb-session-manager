@@ -60,6 +60,7 @@ cd playground/chat && make frontend                   # Port 8881
    - `record_guardrail_event()`: derives the session-level event from the message one, minus the full `GuardrailTrace`
    - Domain reads: `get_agent_config()`, `list_agent_configs()`, `count_messages()`, `get_last_message_ref()`
    - Restore reads are bounded in MongoDB: `read_session()` fetches only the four `Session` header fields, `read_agent()` only `agent_data`, and `list_messages()` sorts stably by `created_at` before applying `offset`/`limit` in an aggregation. `read_message()`, `count_messages()` and `list_agent_configs()` also compute their result server-side. Do not replace the page pipeline with `$slice`: it slices physical order before chronological order and changes the contract (#57, #58)
+   - `list_messages()` also negotiates the cursor batch (`_MESSAGE_BATCH_SIZE`), so the page is drained in the `aggregate` itself: one round-trip, no `getMore`. The default batch of 101 documents applies to **every** batch on DocumentDB, where a 5.000-message restore cost 49 `getMore` and 5,6 s; it now costs 3 commands and 525 ms. It must be **strictly** larger than the page — a batch of exactly its size returns the page with a live cursor. The history is deliberately **not** truncated: with the default `SlidingWindowConversationManager` the `offset` already bounds it, and truncating below what the caller asked for would change what the model sees (#92)
    - `pop_read_agent_config()`: hands over, once, the config found by the last `read_agent()`. Public because `initialize()` calls it — a method reached from another class is interface, underscore or not
    - `update_agent()` writes each `SessionAgent` field on its own path, so the manager's config fields in `agent_data` survive
    - `update_agent()` does not write an agent whose content (every `SessionAgent` field but `created_at`/`updated_at`) is what this repository last read, created or wrote: `agent_content.LastPersistedAgents`, shared with the in-memory double. It compares content, not Strands' versions, so a hook that replaces `agent.state` is still written. Saves the first sync of every manager and the post-tool sync (13 → 10 per reference turn) (#67)
@@ -199,7 +200,7 @@ When releasing, update version in **three places**:
 2. `pyproject.toml` (`version`)
 3. `CHANGELOG.md` (add release entry)
 
-Current version: **0.17.1**
+Current version: **0.17.2**
 
 ## Workflow Rules
 

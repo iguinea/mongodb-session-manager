@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.17.2] - 2026-09-17
+
+### Fixed
+- **Restaurar un historial largo ya no cuesta una decena de round-trips** (#92). `list_messages()` negocia el lote del cursor (`_MESSAGE_BATCH_SIZE`), así que la página se agota dentro del propio `aggregate`. El lote por defecto es de 101 documentos y DocumentDB lo aplica a **todos**, no solo al primero: 5.000 mensajes salían en 49 `getMore` de 94 ms
+- Medido con el harness de #60, antes → después, en la misma máquina y sesión. **Amazon DocumentDB 5.0 DEV**: 1.000 mensajes de 1.399 a **335 ms** (12,0 → **3,0** comandos), 5.000 de 5.649 a **525 ms** (52,0 → **3,0**). **MongoDB 8.2.7 local**: 1.000 de 16,24 a **11,13 ms** y 5.000 de 69,77 a **47,26 ms** (4,0 → **3,0** en ambos)
+
+### Notes
+- **No se acota el historial restaurado**, la otra palanca que planteaba la issue y que era condicional a que `batchSize` no bastara. Basta. Truncarlo sería un cambio de comportamiento —el modelo vería menos contexto del que pidió la aplicación— y con el `SlidingWindowConversationManager` por defecto el historial **ya está acotado**: sube `removed_message_count`, que `initialize()` pasa como `offset`. Medido con 40 turnos reales: 80 mensajes almacenados, 40 restaurados, 0 `getMore`
+- El escenario de la issue es el peor caso, no el común: aparece cuando ese contador se queda en 0 (`NullConversationManager`, una ventana muy grande o una sesión sembrada), que es lo que monta el escenario `restore` del harness
+- El lote debe ser **estrictamente** mayor que la página: uno del tamaño exacto devuelve la página con el cursor vivo, porque el servidor no sabe que ha terminado hasta que un lote sale corto
+- El techo del diseño sigue siendo el documento de 16 MiB, y es de **escritura**: `create_message()` falla al llegar al límite. A 15,40 MiB la lectura sigue costando un solo `aggregate`
+- Sin migración ni cambio de contrato: `batchSize` es un parámetro del cursor. Mismos mensajes, mismo orden, misma forma del documento
+- Evidencia completa, barrido de `batchSize` y la alternativa con `$group` descartada, en `artifacts/issue-92-restore-batch-size.md`
+
 ## [2026-09-17] PR #93 - Fix: el benchmark ya no llama p99 al máximo de la muestra (#60) (@iguinea)
 
 - Fix: el benchmark ya no llama p99 al máximo de la muestra (#60)

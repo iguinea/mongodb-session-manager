@@ -368,6 +368,54 @@ class TestMessageLifecycle:
         page = repo.list_messages(unique_session_id, "a1", limit=2, offset=1)
         assert len(page) == 2
 
+    def test_a_long_history_is_drained_without_a_second_round_trip(
+        self, projection_repo, unique_session_id
+    ):
+        """Restaurar el historial cuesta un `aggregate` y ningún `getMore` (#92).
+
+        Con el tamaño de lote por defecto, DocumentDB corta el cursor cada ~101
+        documentos: 5.000 mensajes salían en 49 `getMore` de 94 ms, 5,04 s de
+        restauración. Aquí bastan 200 mensajes para pasar de 101 y ver el
+        cursor partirse; el test no mide tiempo, cuenta round-trips.
+        """
+        repo, recorder = projection_repo
+        repo.create_session(Session(session_id=unique_session_id, session_type="chat"))
+        repo.create_agent(
+            unique_session_id,
+            SessionAgent(agent_id="a1", state={}, conversation_manager_state={}),
+        )
+        history = 200
+        now = datetime.now(UTC)
+        repo.collection.update_one(
+            {"_id": unique_session_id},
+            {
+                "$push": {
+                    "agents.a1.messages": {
+                        "$each": [
+                            {
+                                "message_id": i,
+                                "storage_id": f"s{i:04d}",
+                                "message": {
+                                    "role": "user",
+                                    "content": [{"text": "x" * 512}],
+                                },
+                                "created_at": now,
+                                "updated_at": now,
+                            }
+                            for i in range(history)
+                        ]
+                    }
+                }
+            },
+        )
+        recorder.enabled = True
+
+        messages = repo.list_messages(unique_session_id, "a1")
+
+        assert len(messages) == history
+        commands = [name for name, _ in recorder.commands]
+        assert commands == ["aggregate"], f"el cursor necesitó varios lotes: {commands}"
+
     def test_server_sorts_before_paginating_and_puts_missing_dates_last(
         self, projection_repo, unique_session_id
     ):
