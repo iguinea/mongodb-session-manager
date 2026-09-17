@@ -89,14 +89,40 @@ def build_document(
     }
 
 
+SATURATION_LEGEND = (
+    "* the sample is too small to tell this percentile from the maximum; "
+    "raise --repetitions (100 for a p99, 20 for a p95)"
+)
+
+
+def _marked(distribution: dict[str, Any], name: str) -> str:
+    """One percentile, marked when the sample size cannot resolve it."""
+    mark = "*" if name in (distribution.get("saturated") or []) else ""
+    return f"{distribution.get(f'{name}_ms', 0):.1f}{mark}"
+
+
+def _cell(latency: dict[str, Any], name: str) -> str:
+    mark = "*" if name in (latency.get("saturated") or []) else ""
+    return f"{latency.get(f'{name}_ms', 0):>9.3f}{mark:<1}"
+
+
+def _any_saturated(document: dict[str, Any]) -> bool:
+    """Whether any number in the summary carries the mark."""
+    for result in document["results"]:
+        parts = [
+            result["latency"],
+            (result.get("loop_lag") or {}).get("lag"),
+            (result.get("loop_lag") or {}).get("baseline"),
+            result.get("pool", {}).get("wait"),
+        ]
+        if any(part and part.get("saturated") for part in parts):
+            return True
+    return False
+
+
 def _row(label: str, latency: dict[str, Any], extra: str) -> str:
-    return (
-        f"  {label:<26}"
-        f"{latency.get('p50_ms', 0):>9.3f}"
-        f"{latency.get('p95_ms', 0):>9.3f}"
-        f"{latency.get('p99_ms', 0):>9.3f}"
-        f"  {extra}"
-    )
+    cells = "".join(_cell(latency, name) for name in ("p50", "p95", "p99"))
+    return f"  {label:<26}{cells}  {extra}"
 
 
 def human_summary(document: dict[str, Any]) -> str:
@@ -120,17 +146,21 @@ def human_summary(document: dict[str, Any]) -> str:
         lag = result["loop_lag"] or {}
         if lag.get("lag"):
             lines.append(
-                f"  {'':<26}event-loop lag p99 {lag['lag']['p99_ms']:.1f} ms "
-                f"(idle baseline p99 {lag['baseline']['p99_ms']:.1f} ms)"
+                f"  {'':<26}event-loop lag p99 {_marked(lag['lag'], 'p99')} ms "
+                f"(idle baseline p99 {_marked(lag['baseline'], 'p99')} ms)"
             )
         elif lag.get("reason"):
             lines.append(f"  {'':<26}event-loop lag not measured: {lag['reason']}")
         if result["pool"].get("wait"):
             wait = result["pool"]["wait"]
             lines.append(
-                f"  {'':<26}pool wait p99 {wait['p99_ms']:.1f} ms, "
+                f"  {'':<26}pool wait p99 {_marked(wait, 'p99')} ms, "
                 f"{result['pool'].get('timeouts', 0)} timeouts"
             )
+
+    if _any_saturated(document):
+        lines.append("")
+        lines.append(f"  {SATURATION_LEGEND}")
 
     failed = document["failed_checks"]
     lines.append("")

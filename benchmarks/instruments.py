@@ -37,6 +37,14 @@ IGNORED_COMMANDS = frozenset(
 )
 
 
+# Nearest-rank puts a percentile on rank ceil(q/100 * n). That rank reaches n —
+# the maximum — for every sample below 100 at p99, and below 20 at p95. The
+# value is still a real observation, but it is the worst one, not a tail
+# estimate, and it is therefore the least repeatable number in the table.
+P95_MIN_SAMPLES = 20
+P99_MIN_SAMPLES = 100
+
+
 @dataclass(frozen=True)
 class Distribution:
     """Dispersion of a sample. There is no mean on purpose: it hides the tail."""
@@ -48,7 +56,17 @@ class Distribution:
     p99_ms: float
     max_ms: float
 
-    def as_dict(self) -> dict[str, float | int]:
+    @property
+    def saturated(self) -> tuple[str, ...]:
+        """Percentiles that this sample size cannot tell from the maximum."""
+        saturated = []
+        if self.n < P95_MIN_SAMPLES:
+            saturated.append("p95")
+        if self.n < P99_MIN_SAMPLES:
+            saturated.append("p99")
+        return tuple(saturated)
+
+    def as_dict(self) -> dict[str, Any]:
         return {
             "n": self.n,
             "min_ms": self.min_ms,
@@ -56,6 +74,7 @@ class Distribution:
             "p95_ms": self.p95_ms,
             "p99_ms": self.p99_ms,
             "max_ms": self.max_ms,
+            "saturated": list(self.saturated),
         }
 
 

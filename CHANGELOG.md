@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.17.1] - 2026-09-17
+
+### Fixed
+- **El benchmark ya no presenta como p99 lo que es el máximo de la muestra** (#60). Los percentiles usan rango más cercano, cuyo p99 cae en la última muestra para cualquier `n < 100`, y el p95 para `n < 20`: con las 30 repeticiones por defecto, el «p99» era la peor observación. Ahora el harness marca esos valores con `*`, los publica en el JSON como `saturated` y explica en el resumen que hace falta `--repetitions 100` para un p99 con resolución
+- `docs/architecture/performance.md` y `artifacts/issue-60-benchmark.md` etiquetan sus columnas p99 como «peor de N» en vez de como estimación de cola
+
+### Notes
+- Detectado al repetir cuatro veces `turn.tool` con 5.000 mensajes contra DocumentDB 5.0 DEV: su lag «p99» dio 1.767, 1.771, 2.836 y 5.754 ms mientras el p95 se mantuvo entre 1.634 y 1.984 ms. Las medidas eran correctas; la etiqueta prometía una cola que la muestra no resuelve
+- No cambia ningún número ya publicado, solo cómo se nombran y se leen
+
 ## [2026-09-17] PR #91 - Add: benchmark reproducible para MongoDB y DocumentDB (#60) (@iguinea)
 
 - Add: benchmark reproducible para MongoDB y DocumentDB (#60)

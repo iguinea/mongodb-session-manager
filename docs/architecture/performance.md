@@ -49,13 +49,19 @@ macOS arm64, PyMongo 4.18.1, Python 3.12.13, package 0.16.0, primary reads, no
 compressor. 5 warmups and 30 timed repetitions per scenario, messages of 512
 characters. A `ping` probe before and after the matrix stayed at 0.32 ms p50.
 
+**The p99 columns below are the worst of 30 observations, not tail estimates.**
+Percentiles use nearest-rank, whose p99 lands on the last sample for any n under
+100. They are real measurements and the least repeatable ones here; the p50 and
+p95 are what to compare across runs. The harness marks these with `*` and
+`--repetitions 100` makes the p99 resolve.
+
 Every run records its own environment, so two result files can be compared —
 and `--compare` refuses to subtract them when the engine, version, topology,
 read preference or compressors differ.
 
 ### Sequential operations, one at a time
 
-| Scenario | p50 | p95 | p99 | Commands per operation | Reply bytes |
+| Scenario | p50 | p95 | p99 (worst of 30) | Commands per operation | Reply bytes |
 |---|---:|---:|---:|---:|---:|
 | `create` (new session) | 1.57 ms | 2.28 ms | 3.32 ms | 7.0 | 329 B |
 | `restore`, 10 messages | 1.46 ms | 4.05 ms | 4.26 ms | 3.0 | 8.4 KB |
@@ -89,7 +95,7 @@ FastAPI backend awaits `stream_async` directly on the server loop. Every driver
 call inside `sync_agent` therefore blocks that loop, and with it every other
 request the worker is serving. The harness measures it as heartbeat drift:
 
-| Scenario | Event-loop lag p99 | Idle-loop baseline p99 |
+| Scenario | Event-loop lag p99 (worst) | Idle-loop baseline p99 (worst) |
 |---|---:|---:|
 | `turn.supervisor`, 10 messages | 5.3 ms | 2.8 ms |
 | `turn.supervisor`, 1.000 | 13.1 ms | 2.1 ms |
@@ -258,7 +264,7 @@ the same local MongoDB 8.2.7. Concurrency here means N invocations in flight on
 one event loop — the way N requests share a FastAPI worker — not N parallel
 driver calls: pymongo is synchronous, so those serialise.
 
-| Concurrent invocations | p50 | p95 | p99 | Event-loop lag p99 |
+| Concurrent invocations | p50 | p95 | p99 (worst of 20) | Event-loop lag p99 (worst) |
 |---:|---:|---:|---:|---:|
 | 1 | 15.0 ms | 18.9 ms | 30.0 ms | 13.1 ms |
 | 4 | 20.6 ms | 33.5 ms | 45.0 ms | 25.9 ms |

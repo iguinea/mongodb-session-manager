@@ -91,3 +91,43 @@ class TestPercentiles:
         distribution = summarize([1.0, 2.0, 300.0])
 
         assert not hasattr(distribution, "mean_ms")
+
+
+class TestSaturatedPercentiles:
+    """A percentile that lands on the last sample is the maximum, not a tail.
+
+    Nearest-rank puts p99 on rank `ceil(0.99n)`, which equals `n` for every
+    sample below 100; p95 does the same below 20. The values are real
+    observations, but reporting them as tail estimates promises a resolution the
+    sample does not have — and it is what made the event-loop lag of one
+    DocumentDB scenario swing between 1.767 and 5.754 ms across four runs while
+    its p95 stayed within 10%.
+    """
+
+    def test_thirty_samples_cannot_tell_p99_from_the_maximum(self):
+        distribution = summarize([float(v) for v in range(1, 31)])
+
+        assert distribution.p99_ms == distribution.max_ms
+        assert "p99" in distribution.saturated
+
+    def test_a_hundred_samples_can(self):
+        distribution = summarize([float(v) for v in range(1, 101)])
+
+        assert distribution.p99_ms != distribution.max_ms
+        assert "p99" not in distribution.saturated
+
+    def test_fifteen_samples_cannot_tell_p95_apart_either(self):
+        distribution = summarize([float(v) for v in range(1, 16)])
+
+        assert distribution.saturated == ("p95", "p99")
+
+    def test_twenty_samples_are_enough_for_p95(self):
+        distribution = summarize([float(v) for v in range(1, 21)])
+
+        assert distribution.saturated == ("p99",)
+
+    def test_the_saturation_travels_in_the_results_file(self):
+        """A reader of the JSON must see it without recomputing the ranks."""
+        distribution = summarize([float(v) for v in range(1, 31)])
+
+        assert distribution.as_dict()["saturated"] == ["p99"]
