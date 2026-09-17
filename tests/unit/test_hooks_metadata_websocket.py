@@ -41,11 +41,10 @@ class TestMetadataWebSocketHookInit:
         ) as mock_boto:
             mock_boto.client.return_value = MagicMock()
             MetadataWebSocketHook("https://api.example.com", region="eu-west-1")
-            mock_boto.client.assert_called_once_with(
-                "apigatewaymanagementapi",
-                endpoint_url="https://api.example.com",
-                region_name="eu-west-1",
-            )
+            call = mock_boto.client.call_args
+            assert call.args == ("apigatewaymanagementapi",)
+            assert call.kwargs["endpoint_url"] == "https://api.example.com"
+            assert call.kwargs["region_name"] == "eu-west-1"
 
     def test_raises_import_error(self):
         with (
@@ -203,7 +202,7 @@ class TestCreateMetadataHookWebSocket:
             hook = create_metadata_hook("https://api.example.com")
         assert callable(hook)
 
-    def test_handles_update_action(self):
+    def test_handles_update_action(self, captured_dispatch):
         with patch(
             "mongodb_session_manager.hooks.metadata_websocket_hook.boto3"
         ) as mock_boto:
@@ -213,8 +212,9 @@ class TestCreateMetadataHookWebSocket:
         original = MagicMock()
         hook(original, "update", "s1", metadata={"key": "val"})
         original.assert_called_once_with({"key": "val"})
+        assert len(captured_dispatch) == 1
 
-    def test_handles_delete_action(self):
+    def test_handles_delete_action(self, captured_dispatch):
         with patch(
             "mongodb_session_manager.hooks.metadata_websocket_hook.boto3"
         ) as mock_boto:
@@ -224,6 +224,7 @@ class TestCreateMetadataHookWebSocket:
         original = MagicMock()
         hook(original, "delete", "s1", keys=["k1"])
         original.assert_called_once_with(["k1"])
+        assert len(captured_dispatch) == 1
 
     def test_returns_none_on_creation_error(self):
         with patch("mongodb_session_manager.hooks.metadata_websocket_hook.boto3", None):

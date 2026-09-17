@@ -169,6 +169,21 @@ then run the same command. Nothing in this package knows which engine it is
 talking to; it records what it found and lets the reader decide what is
 comparable. Keep the matrix small there: every write costs 40-55 ms.
 
+## The other side: hook notifications
+
+`benchmarks/hook_burst.py` measures what a burst of hook events costs — threads,
+concurrent AWS calls, what the caller pays per dispatch — and needs **no
+database**. It compares the dispatch of #62 with the one before it, reproduced
+in the same process so the comparison is of the same machine:
+
+```bash
+uv run python -m benchmarks.hook_burst
+uv run python -m benchmarks.hook_burst --burst 500 --work-ms 20 --path reserve
+```
+
+The reading behind the numbers is in
+[`artifacts/issue-62-hook-lifecycle.md`](../artifacts/issue-62-hook-lifecycle.md).
+
 ## Notes
 
 This package is intentionally **not installable**. It imports

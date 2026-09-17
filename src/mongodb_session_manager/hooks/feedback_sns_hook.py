@@ -124,6 +124,7 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
+from .background_work import Delivery
 from .utils_async import capture_loop, dispatch_async
 
 logger = logging.getLogger(__name__)
@@ -416,6 +417,10 @@ def create_feedback_hook(
                     ),
                     "sending feedback notification to SNS",
                     loop=dispatch_loop,
+                    # A feedback notification carries a customer complaint:
+                    # nothing produces it again, so it is not dropped to
+                    # respect a limit.
+                    delivery=Delivery.GUARANTEED,
                 )
             else:
                 # For other operations, just call original

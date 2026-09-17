@@ -12,6 +12,8 @@ from typing import Any
 import boto3
 from botocore.exceptions import ClientError
 
+from .aws_client_config import notification_config
+
 _sqs_clients: dict[str, Any] = {}
 
 
@@ -36,7 +38,9 @@ def _get_sqs_client(region_name: str | None = None):
 
     # NoCredentialsError se propaga sola: no hay nada que hacer aquí con ella,
     # y capturarla solo para relanzarla oscurecía el flujo.
-    client = boto3.Session().client(service_name="sqs", region_name=region_name)
+    client = boto3.Session().client(
+        service_name="sqs", region_name=region_name, config=notification_config()
+    )
     _sqs_clients[region_name] = client
     return client
 

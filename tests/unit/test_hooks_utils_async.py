@@ -198,14 +198,34 @@ class TestWithoutExplicitLoop:
 
         assert asyncio.run(run()) is ran_on["loop"]
 
-    def test_sync_context_uses_a_thread(self):
+    def test_sync_context_uses_the_reserve_loop(self):
+        """It used to be a daemon thread per event; now it is one shared loop."""
         executed = threading.Event()
 
         async def coro():
             executed.set()
 
-        assert dispatch_async(coro(), "test") is None
+        future = dispatch_async(coro(), "test")
+
+        assert isinstance(future, Future)
         assert executed.wait(timeout=2)
+
+    def test_a_sync_burst_does_not_spawn_a_thread_per_event(self):
+        """Regression (#62): 200 events used to mean 200 daemon threads."""
+        done = [threading.Event() for _ in range(50)]
+
+        async def coro(i: int):
+            await asyncio.sleep(0.01)
+            done[i].set()
+
+        before = threading.active_count()
+        peak = before
+        for i in range(50):
+            dispatch_async(coro(i), "test")
+            peak = max(peak, threading.active_count())
+
+        assert wait_until(lambda: all(event.is_set() for event in done), timeout=5)
+        assert peak - before <= 4
 
 
 # ---------------------------------------------------------------------------

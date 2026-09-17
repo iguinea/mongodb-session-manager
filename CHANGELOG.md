@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.18.0] - 2026-09-17
+
+### Added
+- **El trabajo en segundo plano de los hooks tiene ciclo de vida** (#62), en `hooks/background_work.py`. Las notificaciones de todos los hooks del proceso comparten un pool acotado con cuatro reglas: un **loop de reserva compartido** en vez de un thread por evento, un **límite de trabajo en vuelo** (64 por defecto), **orden por clave** donde se pide, y un **cierre explícito** que dice qué pasó
+- **`shutdown_hooks(timeout=5.0)`**: drena las notificaciones en vuelo, cancela lo que no llega a tiempo, para el loop de reserva y devuelve los contadores. Llamarlo donde el proceso cierra (lifespan de FastAPI, handler de SIGTERM) es la diferencia entre entregar **20 de 20** notificaciones y perder las 20 en silencio, medido
+- **`hooks_background_stats()`**: `dispatched / completed / failed / cancelled / dropped / in_flight / queued`, con `as_dict()` para logs y métricas. `dropped` creciendo avisa de que el límite se está tocando
+- `order_key=` y `delivery=` en `dispatch_async()`, y `Delivery` exportado, para que un hook propio elija su política
+
+### Changed
+- **Sin loop al que despachar, la notificación va a un loop de reserva compartido**, no a un thread daemon con su propio event loop. Medido con `uv run python -m benchmarks.hook_burst`: una ráfaga de 200 eventos pasa de crear **403 hilos a 21**, y lo que paga el llamante por despachar baja de 131,1 a 5,0 µs (p50). Eran 403 y no 200 porque cada evento arrancaba su thread *y* el `asyncio.to_thread` interno del hook abría otro. En contrapartida, drenar esa ráfaga tarda 4,8× más (114 → 543 ms): 20 llamadas a la vez en lugar de 200, que nunca fueron 200 de verdad porque el cliente boto3 tiene un pool HTTP de 10 conexiones
+- **`dispatch_async()` devuelve un `Future` también en contexto síncrono**, donde antes devolvía `None`. Ahora hay algo de lo que recoger el resultado en todos los caminos
+- **Las notificaciones de metadata (WebSocket y SQS) se serializan por `session_id`**. Dos updates de una misma sesión no corren en paralelo ni se adelantan: el consumidor aplica lo último que llega, así que entregar un estado viejo después de uno nuevo dejaba su vista mal de forma permanente. Sesiones distintas siguen en paralelo
+- **Las notificaciones de feedback (SNS) no se descartan nunca** (`Delivery.GUARANTEED`): se aceptan por encima del límite, con un WARNING. Transportan una queja de cliente que nada vuelve a producir. No se bloquea al llamante para conseguirlo, porque `add_feedback()` se llama desde rutas `async def` y bloquear ahí congelaría el servidor
+- **Los clientes boto3 de los tres hooks se construyen con timeouts acotados**: 3 s de connect, 5 s de read y 3 intentos (`standard`), frente a los defaults de botocore (60 s, 60 s, modo legacy con 5 intentos). Una notificación contra un endpoint que no responde retenía un hilo varios minutos, y el hilo es el recurso que el límite protege. Peor caso ≈ 24 s, por debajo de los 30 s de gracia que da ECS
+
+### Notes
+- **Política de overflow, por hook**: metadata descarta **la que espera** (el último estado gana) con WARNING y contador; feedback no descarta nunca. La asimetría la fijó el consumidor que los registra en producción: perder un refresco de UI lo corrige la siguiente escritura, perder un feedback pierde la queja
+- **El `atexit` no es una garantía**. Se registra uno que cierra el trabajo y deja los contadores en el log, pero Python cierra sus thread pools *antes* de ejecutar cualquier `atexit`, y los hooks hacen su llamada AWS en uno de ellos: medido, 1 de 20 entregadas. Un proceso sin lifespan —un entrypoint de `BedrockAgentCoreApp`— necesita `shutdown_hooks()` en un handler de SIGTERM para drenar de verdad. El `RuntimeError: cannot schedule new futures after interpreter shutdown` que eso produce se degrada a un WARNING legible en vez de un traceback
+- **MongoDB/DocumentDB: no aplicable**, por decisión explícita. Nada de esto persiste trabajo; la única alternativa que habría tocado la base de datos —un outbox— se descarta por desproporcionada para 0-3 notificaciones por turno
+- Evidencia, alternativas descartadas y criterios de aceptación en [`artifacts/issue-62-hook-lifecycle.md`](artifacts/issue-62-hook-lifecycle.md)
+
 ## [2026-09-17] PR #97 - Fix: dispatch_async() deja de decidir por el thread llamante (#95) (@iguinea)
 
 - Fix: dispatch_async() deja de decidir por el thread llamante (#95)

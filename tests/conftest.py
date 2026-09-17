@@ -121,9 +121,16 @@ def captured_dispatch(monkeypatch):
 
     calls = []
 
-    def recorder(coro, error_context, loop=None):
+    def recorder(coro, error_context, loop=None, *, order_key=None, delivery=None):
         coro.close()  # never awaited: the recorder replaces the dispatch
-        calls.append(SimpleNamespace(error_context=error_context, loop=loop))
+        calls.append(
+            SimpleNamespace(
+                error_context=error_context,
+                loop=loop,
+                order_key=order_key,
+                delivery=delivery,
+            )
+        )
         return None
 
     for module in (feedback_sns_hook, metadata_sqs_hook, metadata_websocket_hook):
