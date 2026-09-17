@@ -13,9 +13,8 @@ from pymongo import MongoClient
 from strands import Agent, tool
 from strands.session.repository_session_manager import RepositorySessionManager
 from strands.types.content import Message
-from strands.types.tools import JSONSchema
 
-from .field_names import validate_agent_id, validate_field_paths
+from .field_names import resolve_path, validate_agent_id, validate_field_paths
 from .message_identity import MessageRef, ref_of
 from .mongodb_session_repository import MongoDBSessionRepository
 from .sync_origin import MessageAddedTagging, syncing_added_message
@@ -719,14 +718,23 @@ class MongoDBSessionManager(RepositorySessionManager):
         return value, None
 
     def _handle_metadata_get(self, keys: list[str] | None = None) -> str:
-        """Handle get action for the metadata tool."""
+        """Handle get action for the metadata tool.
+
+        A requested key is a path, the same as it is when writing: the agent
+        that stored `user.name` asks for `user.name`. It is resolved on the
+        document the read already returned, so it costs no round-trip (#47).
+        """
         all_metadata = self.get_metadata()
         if not all_metadata or "metadata" not in all_metadata:
             return "No metadata found for this session"
 
         metadata_dict = all_metadata["metadata"]
         if keys:
-            filtered = {k: metadata_dict.get(k) for k in keys if k in metadata_dict}
+            filtered = {}
+            for key in keys:
+                found, value = resolve_path(metadata_dict, key)
+                if found:
+                    filtered[key] = value
             if filtered:
                 return f"Metadata retrieved: {json.dumps(filtered, default=str)}"
             return f"No metadata found for keys: {keys}"
@@ -736,11 +744,26 @@ class MongoDBSessionManager(RepositorySessionManager):
         return "No metadata stored in session"
 
     def _handle_metadata_set(self, metadata: dict[str, Any]) -> str:
-        """Handle set/update action for the metadata tool."""
+        """Handle set/update action for the metadata tool.
+
+        The reply names the keys whose value was a document, because MongoDB's
+        `$set` replaces the stored one whole. Passing a subdocument is the
+        natural thing for a model to do, and left unsaid it drops the siblings
+        of what it wrote while being told it succeeded (#47).
+        """
         if not metadata:
             return "Error: metadata dictionary required for set/update action"
         self.update_metadata(metadata)
-        return f"Successfully updated metadata fields: {list(metadata.keys())}"
+        result = f"Successfully updated metadata fields: {list(metadata.keys())}"
+
+        replaced = [key for key, value in metadata.items() if isinstance(value, dict)]
+        if replaced:
+            result += (
+                f". Careful: {replaced} received a whole document, which replaces "
+                f"what was stored under it. Use dot notation in the key "
+                f'("{replaced[0]}.<field>") to update one field and keep the rest'
+            )
+        return result
 
     def _handle_metadata_delete(self, keys: list[str]) -> str:
         """Handle delete action for the metadata tool."""
@@ -752,26 +775,19 @@ class MongoDBSessionManager(RepositorySessionManager):
     def get_metadata_tool(self) -> Callable:
         """Get a tool for managing session metadata.
 
+        The docstring below is the tool's contract: Strands builds the
+        description and the input schema from it, and that is all the model
+        ever reads. It used to be overridden by a one-line `description=` and a
+        hand-written `inputSchema=` that was missing the `{"json": ...}`
+        wrapper every provider unwraps -- which made an agent holding this tool
+        fail on its first call, whether or not it used it (#47).
+
         Returns:
             A Strands tool that can be used by agents to manage session metadata.
         """
         session_manager = self  # Capture reference for closure
 
-        @tool(
-            name="manage_metadata",
-            description="Manage session metadata with get, set/update, or delete operations.",
-            inputSchema=JSONSchema(
-                {
-                    "type": "object",
-                    "properties": {
-                        "action": {"type": "string"},
-                        "metadata": {"type": "object"},
-                        "keys": {"type": "array"},
-                    },
-                    "required": ["action"],
-                }
-            ),
-        )
+        @tool(name="manage_metadata")
         def manage_metadata(
             action: str,
             metadata: Any | None = None,
@@ -780,20 +796,23 @@ class MongoDBSessionManager(RepositorySessionManager):
             """
             Manage session metadata with get, set/update, or delete operations.
 
+            A key is a path in dot notation: a dot addresses a field inside a
+            stored document, in the three actions. Prefer it, because setting a
+            key to a whole document replaces what was stored under it.
+
             Args:
                 action: The action to perform - "get", "set", "update", or "delete"
-                metadata: For set/update actions, a dictionary of key-value pairs to set
+                metadata: For set/update actions, a dictionary of key-value pairs
+                      to set. A dotted key updates one nested field and keeps its
+                      siblings ({"user.name": "Ana"}); a key whose value is a
+                      document replaces the whole document stored under it
+                      ({"user": {"name": "Ana"}} drops every other field of user).
                 keys: For get action, optional list of specific keys to retrieve.
-                      For delete action, list of keys to remove.
+                      For delete action, list of keys to remove. Dotted keys
+                      address nested fields here too ("user.name", "tags.0").
 
             Returns:
                 A string describing the result of the operation
-
-            Examples:
-                - Get all metadata: manage_metadata("get")
-                - Get specific keys: manage_metadata("get", keys=["priority", "status"])
-                - Set/update metadata: manage_metadata("set", {"priority": "high", "category": "support"})
-                - Delete keys: manage_metadata("delete", keys=["temp_field", "old_data"])
             """
             try:
                 action = action.lower()

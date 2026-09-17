@@ -90,6 +90,35 @@ class TestManagerIntegration:
         result = manager.get_metadata()
         assert result["metadata"]["status"] == "active"
 
+    def test_the_tool_reads_back_the_path_it_wrote(self, manager, unique_session_id):
+        """Against the real engine: a dotted key means the same thing twice.
+
+        `update` writes `metadata.user.name` on the server; `get` resolves the
+        same path on what came back. Before #47 the second half looked for a
+        literal top-level key and found nothing.
+        """
+        tool = manager.get_metadata_tool()
+        tool(action="set", metadata={"user.name": "Ana", "user.zip": "28001"})
+
+        assert "Ana" in tool(action="get", keys=["user.name"])
+
+        # And the sibling survives, which is the reason to write it that way.
+        tool(action="set", metadata={"user.name": "Eva"})
+        stored = manager.get_metadata()["metadata"]["user"]
+        assert stored == {"name": "Eva", "zip": "28001"}
+
+    def test_the_tool_warns_when_a_document_replaces_another(
+        self, manager, unique_session_id
+    ):
+        """The other half of the contract, on the engine that does the replacing."""
+        tool = manager.get_metadata_tool()
+        tool(action="set", metadata={"user.name": "Ana", "user.zip": "28001"})
+
+        result = tool(action="set", metadata={"user": {"name": "Eva"}})
+
+        assert "dot notation" in result.lower()
+        assert manager.get_metadata()["metadata"]["user"] == {"name": "Eva"}
+
     def test_feedback_roundtrip(self, manager, unique_session_id):
         manager.add_feedback({"rating": "up", "comment": "great"})
         feedbacks = manager.get_feedbacks()

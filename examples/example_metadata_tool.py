@@ -69,6 +69,10 @@ async def main():
         - Set/update metadata: manage_metadata("set", {"key": "value"})
         - Delete metadata keys: manage_metadata("delete", keys=["key1", "key2"])
 
+        A key is a path: manage_metadata("set", {"user.name": "Ana"}) updates one
+        nested field and keeps the rest of user, while passing a whole document
+        ({"user": {...}}) replaces what was stored under it.
+
         Use metadata to track conversation context, user preferences, and session state.""",
     )
 

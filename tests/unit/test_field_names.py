@@ -6,10 +6,13 @@ then proves that both repository implementations apply it before any I/O.
 
 from __future__ import annotations
 
+from typing import Any, ClassVar
+
 import pytest
 
 from mongodb_session_manager.field_names import (
     nested_document,
+    resolve_path,
     validate_agent_id,
     validate_field_paths,
 )
@@ -144,3 +147,64 @@ class TestFieldPath:
     def test_a_non_string_key_is_checked_as_its_text(self):
         """Keys were joined with an f-string, so `{1: "x"}` wrote `metadata.1`."""
         validate_field_paths([1, "user.name"], "metadata key")
+
+
+class TestResolvePath:
+    """Reading a path out of a document, the mirror of writing one (#47).
+
+    `update_metadata({"user.name": "Ana"})` writes a nested field, so asking for
+    `user.name` has to find it. Resolving it here, on the document the read
+    already returned, costs no extra round-trip.
+    """
+
+    DOCUMENT: ClassVar[dict[str, Any]] = {
+        "user": {"name": "Ana", "address": {"city": "Madrid"}},
+        "priority": "high",
+        "tags": ["urgent", "vip"],
+        "cleared": None,
+        "open": False,
+    }
+
+    @pytest.mark.parametrize(
+        ("path", "value"),
+        [
+            ("priority", "high"),
+            ("user.name", "Ana"),
+            ("user.address.city", "Madrid"),
+            ("user.address", {"city": "Madrid"}),
+            ("tags.0", "urgent"),
+            ("tags.1", "vip"),
+        ],
+    )
+    def test_finds_what_the_path_names(self, path, value):
+        assert resolve_path(self.DOCUMENT, path) == (True, value)
+
+    @pytest.mark.parametrize("path", ["cleared", "open"])
+    def test_a_falsy_value_is_found(self, path):
+        """`None` and `False` are stored values, not absences."""
+        found, _ = resolve_path(self.DOCUMENT, path)
+        assert found is True
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "missing",
+            "user.surname",
+            "user.address.zip",
+            "tags.2",
+            "tags.last",
+            "priority.high",
+            "cleared.anything",
+        ],
+    )
+    def test_says_nothing_is_there(self, path):
+        """A path that stops short, runs past an array or walks into a value."""
+        assert resolve_path(self.DOCUMENT, path) == (False, None)
+
+    def test_does_not_read_a_literal_dotted_key(self):
+        """A dot is a path separator, the same as it is for every write."""
+        assert resolve_path({"user.name": "Ana"}, "user.name") == (False, None)
+
+    def test_a_negative_index_is_not_an_index(self):
+        """MongoDB has no `tags.-1`: it is a field name, and there is none."""
+        assert resolve_path({"tags": ["a", "b"]}, "tags.-1") == (False, None)
