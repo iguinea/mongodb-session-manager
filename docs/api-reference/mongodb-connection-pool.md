@@ -91,7 +91,7 @@ The pool uses optimized defaults for high-concurrency environments:
 {
     "maxPoolSize": 100,  # Maximum connections in the pool
     "minPoolSize": 10,  # Minimum connections to maintain
-    "maxIdleTimeMS": 30000,  # Close idle connections after 30s
+    "maxIdleTimeMS": 300000,  # Close idle connections after 5 min
     "waitQueueTimeoutMS": 5000,  # Timeout waiting for connection (5s)
     "serverSelectionTimeoutMS": 5000,  # Server selection timeout (5s)
     "connectTimeoutMS": 10000,  # Initial connection timeout (10s)
@@ -108,7 +108,7 @@ You can override any default by passing it as a keyword argument:
 **Connection Pool Settings**:
 - `maxPoolSize` (int): Maximum connections in the pool (default: 100)
 - `minPoolSize` (int): Minimum connections to maintain (default: 10)
-- `maxIdleTimeMS` (int): Time before closing idle connections in ms (default: 30000)
+- `maxIdleTimeMS` (int): Time before closing idle connections in ms (default: 300000)
 
 **Timeout Settings**:
 - `waitQueueTimeoutMS` (int): Max wait time for a connection (default: 5000)
@@ -279,16 +279,44 @@ Provides visibility into the pool's current state, useful for monitoring and deb
 ```python
 {
     "status": "connected",
-    "connection_string": "mongodb://localhost:27017/",
-    "server_version": "7.0.5",
+    "server_version": "8.2.7",
     "pool_config": {"maxPoolSize": 100, "minPoolSize": 10},
+    # Utilisation, counted from the driver's CMAP events
+    "total_connections": 10,
+    "active_connections": 2,
+    "available_connections": 8,
+    "checkout_failures": 0,
+    "checkout_wait_ms_max": 3.4,
 }
 ```
+
+| Key | Meaning |
+|---|---|
+| `total_connections` | Connections the pool holds right now, open or idle |
+| `active_connections` | Of those, the ones checked out at this instant |
+| `available_connections` | The rest, ready to hand out |
+| `checkout_failures` | Checkouts refused since the pool was created |
+| `checkout_wait_ms_max` | The worst wait for a connection since the pool was created |
+
+`pool_config` reports the values actually in force, whether they came from a
+keyword argument or from the connection string.
+
+`server_version` is the only field that needs the server. It is asked for once
+and cached -- it cannot change under a live client, and asking costs a
+`buildInfo` against the primary -- and it comes back `None`, bounded at one
+second, when the server does not answer. The counters survive that: they are
+counted in this process, and a degraded server is when they matter most.
+
+`status` reports whether the pool is initialized, not whether the server is
+reachable. For that, call `health_check()`.
 
 **When Error**:
 ```python
 {"status": "error", "error": "error message"}
 ```
+
+Reserved for a failure to read the pool's own state; the server not answering is
+not one.
 
 #### Example
 
@@ -301,15 +329,75 @@ if stats["status"] == "not_initialized":
 elif stats["status"] == "connected":
     print(f"Connected to MongoDB {stats['server_version']}")
     print(f"Max pool size: {stats['pool_config']['maxPoolSize']}")
+    print(f"In use: {stats['active_connections']}/{stats['total_connections']}")
 elif stats["status"] == "error":
     print(f"Error: {stats['error']}")
-
-
-# Health check endpoint
-def health_check():
-    stats = MongoDBConnectionPool.get_pool_stats()
-    return {"mongodb": stats["status"] == "connected", "details": stats}
 ```
+
+---
+
+### `health_check`
+
+```python
+@classmethod
+def health_check(cls, timeout_ms: int = 1000) -> Dict[str, Any]
+```
+
+Ask the server whether it is there, within a time you choose.
+
+#### Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `timeout_ms` | `int` | `1000` | How long the ping may take, server selection included, before it counts as a failure |
+
+#### Returns
+
+`Dict[str, Any]`: `{"status": "connected", "latency_ms": 0.31}`,
+`{"status": "error", "error": "...", "latency_ms": 1000.2}` or
+`{"status": "not_initialized"}`.
+
+It never raises. An unreachable server is the answer, not an exception.
+
+#### Why the timeout matters
+
+Without one, the call inherits `serverSelectionTimeoutMS` and
+`socketTimeoutMS`. Measured:
+
+| Situation | Without a timeout | With `timeout_ms=500` |
+|---|---:|---:|
+| Server unreachable (port closed) | 5,05 s | 0,50 s |
+| Server mute, connection already established | **20,04 s** | 0,50 s |
+
+The second is the realistic one — a failover, a NAT dropping the flow — and
+20 seconds is a held thread, or a frozen event loop if it runs on one.
+
+#### Example
+
+```python
+import asyncio
+
+from fastapi import FastAPI
+from mongodb_session_manager import MongoDBConnectionPool
+
+app = FastAPI()
+
+
+@app.get("/health")
+async def health():
+    # pymongo is synchronous: called directly from an `async def` it blocks the
+    # event loop and every other request with it. Same for get_pool_stats(),
+    # whose first call looks up the server version.
+    result = await asyncio.to_thread(MongoDBConnectionPool.health_check, 1000)
+    stats = await asyncio.to_thread(MongoDBConnectionPool.get_pool_stats)
+    return {"mongodb": result, "pool": stats}
+```
+
+It pings instead of asking for the server version. Not because a ping is faster
+— measured, the two are indistinguishable, since the cost is the round-trip —
+but because `server_info()` is `buildInfo` pinned to `ReadPreference.PRIMARY`,
+so it calls a cluster unhealthy during a failover while the application is still
+reading from a secondary.
 
 ---
 

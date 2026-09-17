@@ -7,7 +7,7 @@ from typing import Any
 
 from pymongo import MongoClient
 
-from .field_names import validate_field_paths
+from .field_names import nested_document
 from .mongodb_connection_pool import MongoDBConnectionPool
 from .mongodb_session_manager import MongoDBSessionManager
 
@@ -43,11 +43,14 @@ class MongoDBSessionManagerFactory:
             **client_kwargs: Additional arguments for MongoClient configuration
 
         Raises:
-            ValueError: If a metadata field is not a valid dot-notation path.
-                Checked here, before connecting, so a bad config fails the
-                application's startup instead of every request (#79).
+            ValueError: If a metadata field is not a valid dot-notation path, or
+                if two of them cannot coexist in one document (`user` and
+                `user.name`). Checked here, before connecting, so a bad config
+                fails the application's startup instead of every request (#79).
         """
-        validate_field_paths(metadata_fields or (), "metadata field")
+        # Built and thrown away: what matters is that an unusable configuration
+        # raises here, at startup, and not on the first session of every request.
+        nested_document(metadata_fields or ())
         self.database_name = database_name
         self.collection_name = collection_name
         self.metadata_fields = metadata_fields

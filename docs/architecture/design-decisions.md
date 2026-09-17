@@ -293,7 +293,7 @@ def __new__(cls):
 {
     "maxPoolSize": 100,  # Maximum connections
     "minPoolSize": 10,  # Keep 10 warm
-    "maxIdleTimeMS": 30000,  # Close idle after 30s
+    "maxIdleTimeMS": 300000,  # Close idle after 5 min
     "retryWrites": True,  # Automatic retry
     "retryReads": True,
 }

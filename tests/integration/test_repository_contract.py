@@ -34,6 +34,26 @@ class TestMongoDBContract(SessionRepositoryContract):
         yield repo
         repo.close()
 
+    @pytest.fixture
+    def seeded_store(self, mongodb_connection, cleanup_session, session_id):
+        """Repositories that seed metadata fields, closed with the test."""
+        built = []
+
+        def build(metadata_fields: list[str]) -> MongoDBSessionRepository:
+            repo = MongoDBSessionRepository(
+                connection_string=mongodb_connection,
+                database_name="test_contract_db",
+                collection_name="sessions",
+                metadata_fields=metadata_fields,
+            )
+            built.append(repo)
+            cleanup_session(repo.collection, session_id)
+            return repo
+
+        yield build
+        for repo in built:
+            repo.close()
+
     def _raw_session(self, store, session_id: str) -> dict[str, Any]:
         return store.collection.find_one({"_id": session_id})
 

@@ -177,7 +177,7 @@ async def lifespan(app: FastAPI):
         # Optimized connection pool settings
         maxPoolSize=100,  # Maximum connections
         minPoolSize=10,  # Minimum connections
-        maxIdleTimeMS=30000,  # Close idle connections after 30s
+        maxIdleTimeMS=300000,  # Close idle connections after 5 min
     )
 
     # Store in app state (optional - can also use get_global_factory())
@@ -386,7 +386,7 @@ async def lifespan(app: FastAPI):
             # Pool configuration
             maxPoolSize=100,
             minPoolSize=10,
-            maxIdleTimeMS=30000,
+            maxIdleTimeMS=300000,
             # Timeouts
             connectTimeoutMS=5000,
             serverSelectionTimeoutMS=5000,
@@ -934,7 +934,7 @@ async def lifespan(app: FastAPI):
         collection_name="sessions",
         maxPoolSize=100,
         minPoolSize=10,
-        maxIdleTimeMS=30000,
+        maxIdleTimeMS=300000,
     )
 
     app.state.session_factory = factory

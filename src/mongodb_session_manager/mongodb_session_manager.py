@@ -222,7 +222,7 @@ class MongoDBSessionManager(RepositorySessionManager):
         if feedback_hook:
             self._apply_feedback_hook(feedback_hook)
 
-        logger.info(f"Initialized Itzulbira session manager for session: {session_id}")
+        logger.debug(f"Initialized session manager for session: {session_id}")
 
     def _apply_metadata_hook(self, hook: Callable) -> None:
         """Apply the metadata hook as a decorator to metadata methods.

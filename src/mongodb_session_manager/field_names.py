@@ -22,6 +22,7 @@ round-trip, with an error that says why.
 from __future__ import annotations
 
 from collections.abc import Iterable
+from typing import Any
 
 
 def _segment_problem(segment: str) -> str | None:
@@ -58,6 +59,56 @@ def validate_field_paths(paths: Iterable[str], what: str) -> None:
                 raise ValueError(
                     f"{what} {path!r} is invalid: segment {segment!r} {problem}"
                 )
+
+
+def nested_document(paths: Iterable[str], value: Any = "") -> dict[str, Any]:
+    """Build the document a set of dot-notation paths describes.
+
+    A dot is a path separator everywhere else in this library, so a document
+    seeded with the literal key `user.name` is not the field that
+    `metadata.user.name` indexes and that `update_metadata()` writes: the seed
+    never matched its own index, and nothing touched that key again (#59).
+
+    Args:
+        paths: The paths to create, relative to the document being built.
+        value: What to store at the end of each path.
+
+    Returns:
+        The document, nested as deep as each path goes.
+
+    Raises:
+        ValueError: When a path is not valid, under the same rule as
+            validate_field_paths(); or when two paths cannot coexist because
+            one would have to be both a value and a subdocument (`user` and
+            `user.name`). MongoDB rejects that same pair in a single `$set`,
+            and building it here would silently drop one of the two.
+    """
+    # Walked twice below, and the signature promises to take any iterable: a
+    # generator was exhausted by the validation and built nothing, so the seed
+    # disappeared without an error.
+    paths = list(paths)
+    validate_field_paths(paths, "metadata field")
+
+    document: dict[str, Any] = {}
+    for path in paths:
+        segments = str(path).split(".")
+        here = document
+        for segment in segments[:-1]:
+            branch = here.setdefault(segment, {})
+            if not isinstance(branch, dict):
+                raise ValueError(
+                    f"metadata field {path!r} conflicts with {segment!r}, which is "
+                    f"already a value: a field cannot hold a value and a subdocument"
+                )
+            here = branch
+        leaf = segments[-1]
+        if isinstance(here.get(leaf), dict):
+            raise ValueError(
+                f"metadata field {path!r} conflicts with a longer path already "
+                f"nested under {leaf!r}: a field cannot hold a value and a subdocument"
+            )
+        here[leaf] = value
+    return document
 
 
 def validate_agent_id(agent_id: str) -> None:

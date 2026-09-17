@@ -197,12 +197,20 @@ Returns connection pool statistics if the factory owns the connection (initializ
 #### Response Structure
 
 **When Factory Owns Connection**:
+
+Whatever `MongoDBConnectionPool.get_pool_stats()` returns — the pool
+configuration in force plus its utilisation:
+
 ```python
 {
     "status": "connected",
-    "connection_string": "mongodb://localhost:27017/",
-    "server_version": "7.0.5",
+    "server_version": "8.2.7",
     "pool_config": {"maxPoolSize": 100, "minPoolSize": 10},
+    "total_connections": 10,
+    "active_connections": 2,
+    "available_connections": 8,
+    "checkout_failures": 0,
+    "checkout_wait_ms_max": 3.4,
 }
 ```
 

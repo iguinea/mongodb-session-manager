@@ -85,7 +85,7 @@ async def lifespan(app: FastAPI):
         # Connection pool settings optimized for high concurrency
         maxPoolSize=100,
         minPoolSize=10,
-        maxIdleTimeMS=30000,
+        maxIdleTimeMS=300000,
     )
 
     # Store factory in app state for access in endpoints

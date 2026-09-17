@@ -265,7 +265,7 @@ class MongoDBConnectionPool:
 {
     "maxPoolSize": 100,  # Maximum connections in pool
     "minPoolSize": 10,  # Minimum connections to maintain
-    "maxIdleTimeMS": 30000,  # Close idle connections after 30s
+    "maxIdleTimeMS": 300000,  # Close idle connections after 5 min
     "waitQueueTimeoutMS": 5000,  # Timeout waiting for connection
     "serverSelectionTimeoutMS": 5000,  # Server selection timeout
     "connectTimeoutMS": 10000,  # Initial connection timeout

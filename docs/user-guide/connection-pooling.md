@@ -152,7 +152,7 @@ client = MongoDBConnectionPool.initialize(
     connection_string="mongodb://localhost:27017/",
     maxPoolSize=100,  # Maximum connections
     minPoolSize=10,  # Minimum connections to maintain
-    maxIdleTimeMS=30000,  # Close idle connections after 30s
+    maxIdleTimeMS=300000,  # Close idle connections after 5 min
     waitQueueTimeoutMS=5000,  # Wait 5s for available connection
     serverSelectionTimeoutMS=5000,
     connectTimeoutMS=10000,
@@ -201,7 +201,7 @@ The pool initializes with optimized defaults for high concurrency:
 {
     "maxPoolSize": 100,  # Max connections in pool
     "minPoolSize": 10,  # Min connections to maintain
-    "maxIdleTimeMS": 30000,  # 30s idle timeout
+    "maxIdleTimeMS": 300000,  # 5 min idle timeout
     "waitQueueTimeoutMS": 5000,  # 5s wait timeout
     "serverSelectionTimeoutMS": 5000,  # 5s server selection timeout
     "connectTimeoutMS": 10000,  # 10s initial connection timeout
@@ -370,6 +370,104 @@ MongoDBConnectionPool.initialize(
 )
 ```
 
+## Sizing the Pool
+
+### The connection string is configuration too
+
+Any of these options can be set in the connection string instead of as a keyword
+argument, and the library leaves it alone when you do. Only what you did **not**
+name gets a default.
+
+This matters most for DocumentDB, which requires `retryWrites=false`: before
+version 0.19.0 the library's own `retryWrites=True` default overruled the URI
+— pymongo gives a constructor keyword precedence — and DocumentDB answers
+`OperationFailure 301: Retryable writes are not supported` to every update. The
+session was created and then failed on its first message.
+
+One exception, and it works in your favour: if you cap `maxPoolSize` below the
+default `minPoolSize`, the floor follows your ceiling instead of pymongo
+refusing the combination.
+
+### How many connections a process really opens
+
+`maxPoolSize` is **per server**, not per client. A client against a three-node
+replica set keeps three pools. On top of each pool there are two more sockets
+that `maxPoolSize` does not bound: the SDAM monitor for that server and its
+round-trip-time connection.
+
+```
+sockets at rest = nodes × (minPoolSize + 2)
+sockets at peak = nodes × (maxPoolSize + 2)
+```
+
+With the defaults (`maxPoolSize=100`, `minPoolSize=10`), measured:
+
+| Topology | At rest | At peak |
+|---|---:|---:|
+| Single node (`directConnection=true`) | 12 | 102 |
+| Replica set of 3 nodes | 36 | **306** |
+
+Now compare that with what the server accepts. Ask it, rather than guessing:
+
+```python
+client.admin.command("serverStatus")["connections"]
+# {"current": 151, "available": 849, ...}  -> a ceiling of 1.000
+```
+
+An Amazon DocumentDB `db.t4g.medium` tops out at **1.000**. A single process
+with the defaults can claim a tenth of that, and ten processes — four ECS tasks
+with two Uvicorn workers each is already eight — exhaust it. The number to size
+is not "how many connections do I want" but:
+
+```
+processes × nodes × (maxPoolSize + 2) ≤ the cluster's ceiling
+```
+
+Note that the pool is rarely the bottleneck *inside* one async worker: with a
+single event loop and a synchronous driver, calls to the driver serialise and
+the queue shows up as event-loop lag, not as pool wait. A generous `maxPoolSize`
+does no harm while nobody uses it. The harm appears when several processes use
+it at once.
+
+### `minPoolSize` and `maxIdleTimeMS` are one decision
+
+They pull in opposite directions: the idle timer closes connections, the minimum
+reopens them. Left to fight, an application with **no traffic at all** opened and
+closed its ten connections every 30 seconds for ever — 33.596 a day, per process
+and per node, each one a TLS handshake and an authentication nobody asked for.
+The default idle timeout is 5 minutes for that reason.
+
+Pick the pairing that matches the deployment:
+
+| Deployment | `minPoolSize` | `maxIdleTimeMS` | Why |
+|---|---|---|---|
+| Long-lived server (FastAPI, ECS) | 10, or your steady concurrency | `300000`, or `None` for no expiry at all | Warm connections, little churn |
+| Lambda, short-lived process | `0` | anything | Nothing to keep warm; the first request pays the opening |
+| DocumentDB | generous | `None` | Opening a connection costs hundreds of ms there, against 2,77 ms on MongoDB |
+
+"No expiry at all" is spelled `maxIdleTimeMS=None`, not `0`: pymongo rejects the
+zero both as a keyword and in the URI (`ValueError: maxidletimems must be greater
+than 0 and less than one billion`). A connection string has no spelling for it —
+omitting the option gets you this library's 5-minute default, not "never expire" —
+so pass it as a keyword:
+
+```python
+MongoDBConnectionPool.initialize(
+    connection_string="mongodb://localhost:27017/",
+    minPoolSize=20,
+    maxIdleTimeMS=None,  # keep those 20 open for the life of the process
+)
+```
+
+### DocumentDB specifics
+
+- Pass `retryWrites=False` (in the URI or as a keyword; both work from 0.19.0).
+- Without `directConnection=true` the driver discovers every node of the cluster
+  and multiplies the pool by them. Count them.
+- `count_documents()` with a case-insensitive regex does **not** use an index
+  there, unlike MongoDB. Slow searches are not a missing index.
+- Creating an index costs 78-248 ms, against 6-8 ms on MongoDB.
+
 ## Pool Statistics and Monitoring
 
 ### Getting Pool Stats
@@ -387,18 +485,42 @@ print(stats)
 # Output:
 # {
 #     "status": "connected",
-#     "connection_string": "mongodb://localhost:27017/",
-#     "server_version": "7.0.4",
+#     "server_version": "8.2.7",
 #     "pool_config": {
 #         "maxPoolSize": 100,
 #         "minPoolSize": 10
-#     }
+#     },
+#     "total_connections": 10,
+#     "active_connections": 2,
+#     "available_connections": 8,
+#     "checkout_failures": 0,
+#     "checkout_wait_ms_max": 3.4
 # }
 ```
+
+`total_connections`, `active_connections` and `available_connections` come from
+the driver's CMAP events, which is the only way to know: pymongo exposes no
+public API for the state of a pool.
+
+Read `checkout_wait_ms_max` before you touch `maxPoolSize`. It is the worst wait
+seen since the pool was created, and a wait only appears when there was no warm
+connection to hand out — which is usually `minPoolSize` being too low, not
+`maxPoolSize` being too small. A saturated pool does not move the median either:
+measured with `maxPoolSize=4` under 64 threads, the median checkout stayed at
+3,4 µs while the 99th percentile was 124 ms.
+
+`server_version` is the only field that needs the server. It is asked for once,
+cached, and after that `get_pool_stats()` does no I/O at all. When the server
+does not answer it comes back as `None`, bounded at one second, and the counters
+— which are all counted inside this process — come back intact: a degraded
+server is when you most want to read them. `status` says whether the pool is
+initialized, not whether the server is reachable; that is `health_check()`.
 
 ### Health Check Example
 
 ```python
+import asyncio
+
 from fastapi import FastAPI
 from mongodb_session_manager import MongoDBConnectionPool
 
@@ -408,16 +530,35 @@ app = FastAPI()
 @app.get("/health")
 async def health_check():
     """Check MongoDB connection pool health."""
-    try:
-        stats = MongoDBConnectionPool.get_pool_stats()
+    # pymongo is synchronous: called directly from an `async def` it blocks the
+    # event loop, and with it every other request the process is serving. That
+    # goes for get_pool_stats() too, whose first call looks up the server
+    # version.
+    result = await asyncio.to_thread(MongoDBConnectionPool.health_check, 1000)
 
-        if stats["status"] == "connected":
-            return {"status": "healthy", "mongodb": stats}
-        else:
-            return {"status": "unhealthy", "mongodb": stats}
-    except Exception as e:
-        return {"status": "unhealthy", "error": str(e)}
+    if result["status"] == "connected":
+        return {
+            "status": "healthy",
+            "mongodb": result,
+            "pool": await asyncio.to_thread(MongoDBConnectionPool.get_pool_stats),
+        }
+    return {"status": "unhealthy", "mongodb": result}
 ```
+
+`health_check()` pings under an explicit timeout and never raises: an
+unreachable server is the answer, not an exception.
+
+The timeout is the point of the method. Without one the call inherits
+`serverSelectionTimeoutMS` and `socketTimeoutMS`: 5 s against an unreachable
+server, and **20 s measured** against a server that went mute with its
+connection already established — a failover, a NAT dropping the flow. That is
+20 s of a held thread, or of a frozen event loop if it runs on one.
+
+It pings rather than asking for the server version, and not because a ping is
+faster: the two are indistinguishable, the cost is the round-trip. It is because
+`server_info()` is `buildInfo` pinned to the primary, so it reports a cluster
+unhealthy during a failover even while the application keeps reading happily
+from a secondary.
 
 ### Monitoring Dashboard
 

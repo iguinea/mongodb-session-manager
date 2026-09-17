@@ -377,7 +377,7 @@ factory = initialize_global_factory(
     connection_string="mongodb://localhost:27017/",
     maxPoolSize=200,  # Max connections
     minPoolSize=20,  # Keep 20 connections ready
-    maxIdleTimeMS=30000,  # Close idle connections after 30s
+    maxIdleTimeMS=300000,  # Close idle connections after 5 min
 )
 ```
 

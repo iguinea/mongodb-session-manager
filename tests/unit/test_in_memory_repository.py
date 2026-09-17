@@ -22,6 +22,13 @@ class TestInMemoryContract(SessionRepositoryContract):
     def store(self) -> InMemorySessionRepository:
         return InMemorySessionRepository()
 
+    @pytest.fixture
+    def seeded_store(self):
+        def build(metadata_fields: list[str]) -> InMemorySessionRepository:
+            return InMemorySessionRepository(metadata_fields=metadata_fields)
+
+        return build
+
     def _raw_session(self, store, session_id: str) -> dict[str, Any]:
         return store.session(session_id)
 
