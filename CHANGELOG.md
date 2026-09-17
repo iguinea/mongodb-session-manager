@@ -1,5 +1,9 @@
 # Changelog
 
+## [2026-09-17] PR #94 - Fix: la restauración drena el historial en un lote, no en cincuenta (#92) (@iguinea)
+
+- Fix: la restauración drena el historial en un lote, no en cincuenta (…
+
 ## [0.17.2] - 2026-09-17
 
 ### Fixed
