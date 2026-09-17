@@ -20,6 +20,7 @@ This guide demonstrates how to integrate MongoDB Session Manager with FastAPI fo
 - [Why FastAPI Integration?](#why-fastapi-integration)
 - [Basic FastAPI Setup](#basic-fastapi-setup)
 - [Connection Pooling with Factory Pattern](#connection-pooling-with-factory-pattern)
+- [Avoiding Event-Loop Blocking](#avoiding-event-loop-blocking)
 - [Lifespan Management](#lifespan-management)
 - [Streaming Endpoints](#streaming-endpoints)
 - [Health Checks and Metrics](#health-checks-and-metrics)
@@ -83,9 +84,7 @@ class ChatResponse(BaseModel):
 
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat(
-    chat_request: ChatRequest, session_id: str = Header(...)
-) -> ChatResponse:
+def chat(chat_request: ChatRequest, session_id: str = Header(...)) -> ChatResponse:
     """
     Process a chat message.
     WARNING: This creates a new connection per request!
@@ -142,6 +141,7 @@ This is the RECOMMENDED approach for production.
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 from contextlib import asynccontextmanager
 from strands import Agent
 
@@ -210,34 +210,36 @@ async def chat(
         factory = request.app.state.session_factory
         # OR use global: factory = get_global_factory()
 
-        # Create session manager (reuses existing connection)
-        session_manager = factory.create_session_manager(session_id)
+        def run_agent():
+            # Construction restores the session, so it belongs on the worker too.
+            session_manager = factory.create_session_manager(session_id)
+            try:
+                agent = Agent(
+                    model="claude-3-sonnet-20240229",
+                    session_manager=session_manager,
+                    system_prompt="You are a helpful assistant.",
+                    **chat_request.agent_config,
+                )
+                response = agent(chat_request.prompt)
+                # Metrics Strands already holds in memory: no extra round-trip.
+                summary = agent.event_loop_metrics.get_summary()
+                cycles = summary.get("total_cycles", 0)
+                latency_ms = summary.get("accumulated_metrics", {}).get("latencyMs", 0)
+                return ChatResponse(
+                    response=str(response),
+                    session_id=session_id,
+                    metrics={
+                        "total_tokens": summary.get("accumulated_usage", {}).get(
+                            "totalTokens", 0
+                        ),
+                        "average_latency_ms": latency_ms / cycles if cycles else 0,
+                        "total_messages": len(agent.messages),
+                    },
+                )
+            finally:
+                session_manager.close()
 
-        # Create agent
-        agent = Agent(
-            model="claude-3-sonnet-20240229",
-            session_manager=session_manager,
-            system_prompt="You are a helpful assistant.",
-            **chat_request.agent_config,
-        )
-
-        # Process message
-        response = agent(chat_request.prompt)
-
-        # Get metrics (if available)
-        try:
-            metrics_summary = session_manager.get_metrics_summary(agent.agent_id)
-            metrics = {
-                "total_tokens": metrics_summary.get("total_tokens", 0),
-                "average_latency_ms": metrics_summary.get("average_latency_ms", 0),
-                "total_messages": metrics_summary.get("total_messages", 0),
-            }
-        except:
-            metrics = {}
-
-        return ChatResponse(
-            response=str(response), session_id=session_id, metrics=metrics
-        )
+        return await run_in_threadpool(run_agent)
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -261,6 +263,65 @@ if __name__ == "__main__":
 - Near-zero connection overhead (<1ms)
 - Handles 500+ concurrent requests efficiently
 - Proper resource cleanup on shutdown
+
+---
+
+## Avoiding Event-Loop Blocking
+
+PyMongo and the current Strands session-manager callbacks are synchronous. Do
+not call an agent directly from an `async def` endpoint: a slow restoration or
+write then stalls health checks and every other request on that event loop.
+
+For non-streaming endpoints, use Starlette's shared worker pool as above. Put
+the **whole** synchronous path in the helper, including manager creation and
+`Agent(...)`, because agent construction restores the session. Always close the
+per-request manager in `finally`; it borrows the factory's client, so this does
+not close the shared pool.
+
+### Check these four things before adopting the pattern
+
+This is a recommended integration for a non-streaming endpoint, not a blanket
+rule. Moving a turn off the event loop changes four things that are invisible
+from the endpoint itself. Every one of these was hit by a real consumer of this
+library.
+
+**1. Hook dispatch changes.** The WebSocket, SQS and SNS hooks dispatch through
+`dispatch_async()`, which branches on whether a loop is running *in the calling
+thread*: from the loop it creates a task, from a worker thread it falls back to
+starting a **daemon thread per event** running `asyncio.run`. That means an
+unbounded thread per metadata or feedback event, an event loop per event, and —
+because the threads are daemons — notifications lost silently if the process
+exits. The dispatch happens inside `update_metadata()`, so you cannot wrap the
+PyMongo write and leave the hook on the loop: they travel together. Tracked in
+[#95](https://github.com/iguinea/mongodb-session-manager/issues/95); until it
+lands, treat a registered hook as a reason not to wrap.
+
+**2. Globals reloaded from a coroutine stop being safe.** If your process
+mutates shared configuration from a background coroutine, its correctness may
+rest on the turn never yielding the loop. Moving the turn to a thread breaks
+that guarantee: the reload can now run *during* a turn, and an agent can read
+new configuration halfway through reasoning with the old one. Either take a
+lock or do not wrap.
+
+**3. ContextVars are copied, not shared.** Values set before the hop are
+readable inside the worker, but anything `set()` inside it is invisible outside.
+Request-scoped signals that hooks or tools must write back need a thread-safe
+structure keyed by `session_id`, not a `ContextVar`.
+
+**4. Cancellation no longer cancels.** Cancelling the awaiting HTTP task does
+not stop Python code already running in a worker. The turn finishes and **its
+result is persisted**, so the next request restores a history containing an
+answer the user never saw. Bound it with timeouts at the source — model and
+PyMongo — because an outer `asyncio.wait_for` only stops waiting. The
+worker-side `finally` still performs cleanup, and during graceful shutdown
+FastAPI drains requests before the lifespan closes the global factory.
+
+The streaming API is different: moving `stream_async` to a thread also requires
+a bounded cross-thread channel with explicit backpressure and cancellation.
+The reference streaming example therefore remains direct, with multiple server
+workers and bounded restored histories as the fallback until Strands exposes
+async session callbacks. See the measured decision in
+[Performance](../architecture/performance.md#async-server-decision-61).
 
 ---
 
@@ -716,7 +777,7 @@ async def general_exception_handler(request: Request, exc: Exception):
 
 # Using exceptions in endpoints
 @app.post("/chat")
-async def chat(chat_request: ChatRequest, session_id: str = Header(...)):
+def chat(chat_request: ChatRequest, session_id: str = Header(...)):
     try:
         factory = get_global_factory()
         session_manager = factory.create_session_manager(session_id)
@@ -814,6 +875,7 @@ from typing import Dict, Any
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 from strands import Agent
 
 from mongodb_session_manager import (
@@ -902,26 +964,36 @@ async def chat(
     """Process a chat message."""
     try:
         factory = request.app.state.session_factory
-        session_manager = factory.create_session_manager(session_id)
 
-        agent = Agent(
-            model="claude-3-sonnet-20240229",
-            session_manager=session_manager,
-            system_prompt="You are a helpful assistant.",
-            **chat_request.agent_config,
-        )
+        def run_agent():
+            session_manager = factory.create_session_manager(session_id)
+            try:
+                agent = Agent(
+                    model="claude-3-sonnet-20240229",
+                    session_manager=session_manager,
+                    system_prompt="You are a helpful assistant.",
+                    **chat_request.agent_config,
+                )
+                response = agent(chat_request.prompt)
+                # Metrics Strands already holds in memory: no extra round-trip.
+                summary = agent.event_loop_metrics.get_summary()
+                cycles = summary.get("total_cycles", 0)
+                latency_ms = summary.get("accumulated_metrics", {}).get("latencyMs", 0)
+                return ChatResponse(
+                    response=str(response),
+                    session_id=session_id,
+                    metrics={
+                        "total_tokens": summary.get("accumulated_usage", {}).get(
+                            "totalTokens", 0
+                        ),
+                        "average_latency_ms": latency_ms / cycles if cycles else 0,
+                        "total_messages": len(agent.messages),
+                    },
+                )
+            finally:
+                session_manager.close()
 
-        response = agent(chat_request.prompt)
-
-        # Get metrics
-        try:
-            metrics = session_manager.get_metrics_summary(agent.agent_id)
-        except:
-            metrics = {}
-
-        return ChatResponse(
-            response=str(response), session_id=session_id, metrics=metrics
-        )
+        return await run_in_threadpool(run_agent)
 
     except Exception as e:
         logger.error(f"Error processing chat: {e}")

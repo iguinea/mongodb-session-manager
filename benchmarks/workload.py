@@ -6,20 +6,23 @@ that does not leave the machine is the model, replayed by the same
 and a tested turn have to be the same turn, or the numbers describe something
 nobody ships.
 
-Concurrency runs as `asyncio.gather` over `invoke_async`, which is the shape of
-production here — `examples/example_fastapi_streaming.py` awaits the agent
-directly on the server loop. A thread pool would hide the thing worth measuring:
-the blocking driver calls inside `sync_agent` stall that loop.
+The execution mode decides where that work happens. ``direct`` uses
+``asyncio.gather`` over ``invoke_async``, the shape of the streaming example.
+``thread`` sends the complete request path -- restoration, invocation and
+manager cleanup -- through asyncio's shared worker pool, the short-term
+non-streaming FastAPI integration evaluated by issue #61.
 
-So "concurrency N" means N invocations in flight on one loop, the way N requests
-share a FastAPI worker. It does not mean N parallel driver calls: pymongo is
-synchronous, so those serialise — and the queue they form is precisely what the
-event-loop lag measures.
+In ``direct``, "concurrency N" means N invocations in flight on one loop and not
+N parallel driver calls: pymongo is synchronous, so those serialise. In
+``thread``, the same N invocations can make driver calls in parallel through the
+shared MongoClient pool. The difference between those two queues is precisely
+what event-loop lag, pool wait and throughput make visible.
 """
 
 from __future__ import annotations
 
 import asyncio
+import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -27,7 +30,15 @@ from strands import Agent, tool
 from strands.types.session import SessionMessage
 
 from benchmarks.run_context import RunContext
-from benchmarks.scenarios import CREATE, RESTORE, SUPERVISOR_TURN, TOOL_TURN, Scenario
+from benchmarks.scenarios import (
+    CREATE,
+    DIRECT_EXECUTION,
+    RESTORE,
+    SUPERVISOR_TURN,
+    THREAD_EXECUTION,
+    TOOL_TURN,
+    Scenario,
+)
 from tests.support.scripted_model import ScriptedModel, text_stream, tool_stream
 
 # A production system prompt is several KB; a short one would make the config
@@ -147,8 +158,10 @@ class Workload:
     """Prepares and runs one scenario of the matrix.
 
     `prepare()` does everything that must not be measured: creating sessions,
-    seeding histories and, for turns, restoring the agent. The measured window
-    covers `run_repetition()` and nothing else.
+    seeding histories and warming indexes. Each `run_repetition()` then builds a
+    fresh manager and agent, so restoration is part of the request path and of
+    the measured command/throughput window. Turn latency itself starts after
+    that restoration; restore scenarios time agent construction directly.
     """
 
     def __init__(
@@ -157,16 +170,18 @@ class Workload:
         collection: Any,
         run: RunContext,
         scenario: Scenario,
+        execution_mode: str = DIRECT_EXECUTION,
     ) -> None:
         self._factory = factory
         self._collection = collection
         self._run = run
         self._scenario = scenario
+        self._execution_mode = execution_mode
         self._session_ids: list[str] = []
         self._created_sessions = 0
 
     def prepare(self) -> None:
-        """Sessions, histories and warm managers — all outside the window."""
+        """Create sessions, seed histories and warm indexes outside the window."""
         if self._scenario.operation == CREATE:
             return
         for slot_index in range(self._scenario.concurrency):
@@ -208,14 +223,20 @@ class Workload:
 
     async def _run_restores(self) -> list[float]:
         """Restoring is building the manager and the agent: the reads of a request."""
-        loop = asyncio.get_running_loop()
-        latencies = []
-        for session_id in self._session_ids:
-            started = loop.time()
+
+        def restore(session_id: str) -> float:
+            started = time.perf_counter()
             _, manager = self._build_agent(session_id)
-            latencies.append((loop.time() - started) * 1000)
+            latency = (time.perf_counter() - started) * 1000
             manager.close()
-        return latencies
+            return latency
+
+        async def one_restore(session_id: str) -> float:
+            if self._execution_mode == THREAD_EXECUTION:
+                return await asyncio.to_thread(restore, session_id)
+            return restore(session_id)
+
+        return list(await asyncio.gather(*(one_restore(s) for s in self._session_ids)))
 
     async def _run_turns(self) -> list[float]:
         session_ids = (
@@ -223,19 +244,33 @@ class Workload:
             if self._scenario.operation == CREATE
             else list(self._session_ids)
         )
-        built = [self._build_agent(session_id) for session_id in session_ids]
 
-        async def one_turn(agent: Agent) -> float:
-            loop = asyncio.get_running_loop()
-            started = loop.time()
-            await agent.invoke_async("y el mes pasado?")
-            return (loop.time() - started) * 1000
-
-        try:
-            return list(await asyncio.gather(*(one_turn(a) for a, _ in built)))
-        finally:
-            for _, manager in built:
+        async def direct_turn(session_id: str) -> float:
+            agent, manager = self._build_agent(session_id)
+            try:
+                started = time.perf_counter()
+                await agent.invoke_async("y el mes pasado?")
+                return (time.perf_counter() - started) * 1000
+            finally:
                 manager.close()
+
+        def threaded_turn(session_id: str) -> float:
+            agent, manager = self._build_agent(session_id)
+            try:
+                started = time.perf_counter()
+                # This deliberately exercises the same integration as the
+                # non-streaming FastAPI example. Agent.__call__ is synchronous.
+                agent("y el mes pasado?")
+                return (time.perf_counter() - started) * 1000
+            finally:
+                manager.close()
+
+        async def one_turn(session_id: str) -> float:
+            if self._execution_mode == THREAD_EXECUTION:
+                return await asyncio.to_thread(threaded_turn, session_id)
+            return await direct_turn(session_id)
+
+        return list(await asyncio.gather(*(one_turn(s) for s in session_ids)))
 
     def persisted_messages(self) -> int:
         """Messages stored across every session of this run, counted server-side.

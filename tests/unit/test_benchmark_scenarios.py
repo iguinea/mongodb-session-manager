@@ -43,6 +43,25 @@ class TestGuardrails:
         assert plan.scenarios
         assert plan.synthetic_messages <= 20_000
 
+    def test_execution_mode_is_explicit_and_validated(self):
+        direct = plan_run(build_matrix("smoke"), allow_large=False, **PASSES)
+        threaded = plan_run(
+            build_matrix("smoke"),
+            allow_large=False,
+            execution_mode="thread",
+            **PASSES,
+        )
+
+        assert direct.execution_mode == "direct"
+        assert threaded.execution_mode == "thread"
+        with pytest.raises(ValueError, match="unknown execution mode"):
+            plan_run(
+                build_matrix("smoke"),
+                allow_large=False,
+                execution_mode="new-loop-per-call",
+                **PASSES,
+            )
+
     def test_the_refusal_names_what_would_have_run(self):
         """A guardrail that does not say what it stopped just gets disabled."""
         with pytest.raises(LoadTooLarge) as refusal:

@@ -22,7 +22,8 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Header, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 from strands import Agent
 
 # Add parent directory to path to access src module
@@ -42,13 +43,55 @@ logger = logging.getLogger(__name__)
 # Request/Response models
 class ChatRequest(BaseModel):
     prompt: str
-    agent_config: dict[str, Any] = {}
+    agent_config: dict[str, Any] = Field(default_factory=dict)
 
 
 class ChatResponse(BaseModel):
     response: str
     session_id: str
-    metrics: dict[str, Any] = {}
+    metrics: dict[str, Any] = Field(default_factory=dict)
+
+
+def _agent_metrics(agent: Agent) -> dict[str, Any]:
+    """Return the in-memory metrics captured by Strands for this invocation."""
+    summary = agent.event_loop_metrics.get_summary()
+    usage = summary.get("accumulated_usage", {})
+    accumulated = summary.get("accumulated_metrics", {})
+    cycles = summary.get("total_cycles", 0)
+    latency_ms = accumulated.get("latencyMs", 0)
+    return {
+        "total_tokens": usage.get("totalTokens", 0),
+        "average_latency_ms": latency_ms / cycles if cycles else 0,
+        "total_messages": len(agent.messages),
+    }
+
+
+def _run_agent(
+    factory: Any, chat_request: ChatRequest, session_id: str
+) -> ChatResponse:
+    """Run the complete synchronous request path on a worker thread.
+
+    Agent construction restores the session and can therefore perform as much
+    blocking database I/O as the invocation itself. Keeping both in this helper
+    prevents either phase from stalling FastAPI's event loop.
+    """
+    session_manager = factory.create_session_manager(session_id)
+    try:
+        agent = Agent(
+            name="VirtualAgent",
+            model="eu.anthropic.claude-sonnet-4-20250514-v1:0",
+            system_prompt="You are a helpful assistant.",
+            session_manager=session_manager,
+            **chat_request.agent_config,
+        )
+        response = agent(chat_request.prompt)
+        return ChatResponse(
+            response=str(response),
+            session_id=session_id,
+            metrics=_agent_metrics(agent),
+        )
+    finally:
+        session_manager.close()
 
 
 # Lifespan context manager for FastAPI
@@ -104,44 +147,18 @@ async def chat(
 
     This endpoint demonstrates:
     1. Reusing MongoDB connections via the factory
-    2. Proper metrics tracking
+    2. Keeping synchronous Strands and PyMongo work off the event loop
+    3. Proper metrics tracking
     """
     try:
         # Get factory from app state (no new connection created)
         factory = request.app.state.session_factory
 
-        # Create session manager (reuses existing MongoDB connection)
-        session_manager = factory.create_session_manager(session_id)
-
-        # Create a mock agent for demonstration
-        # In real usage, you would configure your actual agent here
-        agent = Agent(
-            name="VirtualAgent",
-            model="eu.anthropic.claude-sonnet-4-20250514-v1:0",
-            system_prompt="You are a helpful assistant.",
-            **chat_request.agent_config,
-        )
-
-        # Configure agent with session manager
-        agent.session_manager = session_manager
-
-        # Process the message
-        # The session manager automatically tracks timing and metrics
-        # Agent uses __call__ method, which is synchronous
-        response = agent(chat_request.prompt)
-
-        # Get metrics summary
-        metrics = session_manager.get_metrics_summary(agent.agent_id)
-
-        return ChatResponse(
-            response=response,
-            session_id=session_id,
-            metrics={
-                "total_tokens": metrics.get("total_tokens", 0),
-                "average_latency_ms": metrics.get("average_latency_ms", 0),
-                "total_messages": metrics.get("total_messages", 0),
-            },
-        )
+        # Agent construction restores the session, and Agent.__call__ plus the
+        # session callbacks are synchronous. Offload that complete path to
+        # Starlette's shared worker pool so health checks and other requests can
+        # keep running while MongoDB or the model is slow.
+        return await run_in_threadpool(_run_agent, factory, chat_request, session_id)
 
     except Exception as e:
         logger.error(f"Error processing chat request: {e}")
