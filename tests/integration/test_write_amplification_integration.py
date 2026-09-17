@@ -382,6 +382,41 @@ class TestTurnOperationBudget:
         assert supervisor_metrics["cycle_metrics"]["cycle_count"] == 2
         assert "info_suministro_agent" in supervisor_metrics["tool_usage"]
 
+    def test_each_message_carries_the_sdk_attribution(
+        self, turn_factory, unique_session_id
+    ):
+        """Strands 1.56 atribuye cada ciclo a su mensaje, y viaja gratis (#69).
+
+        `Message` gana dos campos: `tracking_id`, un uuid4 estable que el SDK
+        pone en los mensajes que añade él —todos los de este turno—, y
+        `metadata`, con el `usage` y las `metrics` del ciclo que produjo el
+        mensaje `assistant`. Van dentro de `message`, así que los escribe el
+        mismo `$push` de `create_message()`: es la atribución por mensaje que
+        #66 no podía dar, sin ninguna escritura extra. El presupuesto del turno
+        lo fija `test_turn_stays_within_write_budget`.
+
+        No sustituye a `event_loop_metrics`: eso es lo acumulado de la
+        invocación, y esto el coste de un ciclo. Ni a `storage_id`, que es lo
+        que identifica un mensaje: un mensaje añadido a mano por la aplicación
+        se guarda sin `tracking_id`.
+        """
+        factory, collection, _ = turn_factory
+
+        run_turn(factory, unique_session_id, "hola")
+
+        agents = collection.find_one({"_id": unique_session_id})["agents"]
+        for agent_id, agent in agents.items():
+            without_id = [
+                m["message_id"]
+                for m in agent["messages"]
+                if not m["message"].get("tracking_id")
+            ]
+            assert not without_id, f"{agent_id}: mensajes sin tracking_id {without_id}"
+
+        last = agents["supervisor"]["messages"][-1]["message"]
+        assert last["metadata"]["usage"]["totalTokens"] > 0
+        assert "latencyMs" in last["metadata"]["metrics"]
+
     def test_metrics_land_on_the_last_message(self, turn_factory, unique_session_id):
         """Las métricas se escriben en el último mensaje, no en el anterior.
 

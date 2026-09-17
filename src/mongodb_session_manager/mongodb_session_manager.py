@@ -21,8 +21,8 @@ from .mongodb_session_repository import MongoDBSessionRepository
 from .sync_origin import MessageAddedTagging, syncing_added_message
 
 if TYPE_CHECKING:
-    from strands.experimental.bidi.agent.agent import BidiAgent
     from strands.hooks import HookRegistry
+    from strands.types.agent import LocalAgent
 
 logger = logging.getLogger(__name__)
 
@@ -264,7 +264,7 @@ class MongoDBSessionManager(RepositorySessionManager):
         self.delete_metadata = wrapped_delete
 
     def redact_latest_message(
-        self, redact_message: Message, agent: Agent, **kwargs: Any
+        self, redact_message: Message, agent: LocalAgent, **kwargs: Any
     ) -> None:
         """Redact the latest message and record guardrail event.
 
@@ -289,7 +289,7 @@ class MongoDBSessionManager(RepositorySessionManager):
 
     def _record_guardrail_event(
         self,
-        agent: Agent,
+        agent: LocalAgent,
         ref: MessageRef,
         action: str = GUARDRAIL_ACTION_BLOCKED,
         stop_reason: str | None = None,
@@ -372,13 +372,17 @@ class MongoDBSessionManager(RepositorySessionManager):
 
         return summary
 
-    def initialize(self, agent: Agent, **kwargs: Any) -> None:
+    def initialize(self, agent: LocalAgent, **kwargs: Any) -> None:
         """Initialize an agent with the session and learn its persisted config.
 
         When the agent is restored, read_agent() has already fetched its model
         and system_prompt. Seeding the config cache with them spares the first
         sync of every request from rewriting an unchanged system prompt, the
         largest write of the turn.
+
+        Since strands 1.56 this is also the entry point for a `BidiAgent`: the
+        SDK dropped `initialize_bidi_agent()` and fires `AgentInitializedEvent`
+        for both kinds of agent, so the agent_id check below covers both (#69).
 
         Raises:
             ValueError: If the agent_id cannot be stored under `agents.<agent_id>`
@@ -398,15 +402,6 @@ class MongoDBSessionManager(RepositorySessionManager):
                 persisted["system_prompt"],
             )
 
-    def initialize_bidi_agent(self, agent: BidiAgent, **kwargs: Any) -> None:
-        """Initialize a bidirectional agent, rejecting an unstorable agent_id first.
-
-        Raises:
-            ValueError: For the same reason, and at the same point, as initialize().
-        """
-        validate_agent_id(agent.agent_id)
-        super().initialize_bidi_agent(agent, **kwargs)
-
     def register_hooks(self, registry: HookRegistry, **kwargs: Any) -> None:
         """Register Strands' session hooks, telling apart the sync of each message.
 
@@ -417,7 +412,7 @@ class MongoDBSessionManager(RepositorySessionManager):
         """
         super().register_hooks(MessageAddedTagging(registry), **kwargs)
 
-    def sync_agent(self, agent: Agent, **kwargs: Any) -> None:
+    def sync_agent(self, agent: LocalAgent, **kwargs: Any) -> None:
         """Sync agent data and capture model/system_prompt.
 
         Captures comprehensive metrics from the agent's event loop including:
@@ -433,6 +428,10 @@ class MongoDBSessionManager(RepositorySessionManager):
         message, and a write the closing sync overwrites an instant later. The
         closing sync (AfterInvocationEvent) writes them once, on the last message
         of the invocation, and so does any explicit call (issue #66).
+
+        Since strands 1.56 a `BidiAgent` also arrives here, on
+        `BidiAgentStopEvent`. It has no event loop, so it syncs without metrics
+        (issue #69).
         """
         super().sync_agent(agent, **kwargs)
 
@@ -452,14 +451,28 @@ class MongoDBSessionManager(RepositorySessionManager):
             agent, metrics_ops, config_ops, message_ref, config_cache_entry
         )
 
-    def _build_metrics_update(self, agent: Agent) -> tuple:
+    def _build_metrics_update(self, agent: LocalAgent) -> tuple:
         """Build the $set operations carrying event loop metrics.
+
+        An agent without an event loop has no metrics to write, and that is not
+        an error: a `BidiAgent` has none, and since strands 1.56 it reaches
+        `sync_agent()` through `BidiAgentStopEvent` like any other agent
+        (`session/session_manager.py:65`). Until 1.55 it went to
+        `sync_bidi_agent()`, a separate method that no longer exists (#69).
+
+        An `Agent` is not given that benefit of the doubt: it must have an event
+        loop, so asking one that no longer exposes it raises, loudly, instead of
+        quietly persisting no metrics for every session -- which is the symptom
+        of #66 with no signal left at all.
 
         Returns:
             Tuple of (set operations, reference to the message they target).
-            Both are empty when there are no metrics yet or the last message is
-            unknown.
+            Both are empty when the agent has no event loop, when there are no
+            metrics yet, or when the last message is unknown.
         """
+        if not isinstance(agent, Agent) and not hasattr(agent, "event_loop_metrics"):
+            return {}, None
+
         metrics_summary = agent.event_loop_metrics.get_summary()
         accumulated_metrics = metrics_summary.get("accumulated_metrics", {})
 
@@ -491,7 +504,7 @@ class MongoDBSessionManager(RepositorySessionManager):
 
     def _metrics_set_operations(
         self,
-        agent: Agent,
+        agent: LocalAgent,
         usage_data: dict,
         metrics_data: dict,
         cycle_data: dict,
@@ -515,7 +528,7 @@ class MongoDBSessionManager(RepositorySessionManager):
 
     def _apply_sync_update(
         self,
-        agent: Agent,
+        agent: LocalAgent,
         message_operations: dict,
         agent_operations: dict,
         message_ref: MessageRef | None,
@@ -591,7 +604,7 @@ class MongoDBSessionManager(RepositorySessionManager):
             }
         return tool_usage
 
-    def _get_last_message_ref(self, agent: Agent) -> MessageRef | None:
+    def _get_last_message_ref(self, agent: LocalAgent) -> MessageRef | None:
         """Reference the last message of an agent.
 
         Prefers the SessionMessage the parent class already tracks in memory,
@@ -616,7 +629,7 @@ class MongoDBSessionManager(RepositorySessionManager):
 
     def _update_last_message_metrics(
         self,
-        agent: Agent,
+        agent: LocalAgent,
         usage_data: dict,
         metrics_data: dict,
         cycle_data: dict,
@@ -628,7 +641,7 @@ class MongoDBSessionManager(RepositorySessionManager):
         )
         self._apply_sync_update(agent, set_operations, {}, message_ref, None)
 
-    def _build_agent_config_update(self, agent: Agent) -> tuple:
+    def _build_agent_config_update(self, agent: LocalAgent) -> tuple:
         """Build the $set operations for the agent configuration.
 
         Returns empty operations when the configuration matches what was last
@@ -661,12 +674,12 @@ class MongoDBSessionManager(RepositorySessionManager):
         )
         return set_operations, cache_entry
 
-    def _capture_agent_config(self, agent: Agent) -> None:
+    def _capture_agent_config(self, agent: LocalAgent) -> None:
         """Capture and store agent configuration (model and system_prompt)."""
         set_operations, cache_entry = self._build_agent_config_update(agent)
         self._apply_sync_update(agent, {}, set_operations, None, cache_entry)
 
-    def _extract_model_id(self, agent: Agent) -> str | None:
+    def _extract_model_id(self, agent: LocalAgent) -> str | None:
         """Extract model identifier string from agent."""
         if not (hasattr(agent, "model") and agent.model):
             return None

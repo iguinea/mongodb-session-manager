@@ -759,6 +759,19 @@ config (model and system prompt, ~14 KB each in this scenario) is known from
 and only writes when they differ (#65). On a brand-new session the first sync
 still writes it once.
 
+Re-measured with the same listener after the bump to strands 1.56 (#69): the
+counts do not move, 8 `update` and 6 reads (4 `find` and 2 `aggregate`) in both
+1.30 and 1.56. The upgrade does cost **one extra write per existing session**,
+once: strands 1.34 added `model_state` to the agent's internal snapshot, so the
+first sync after the bump finds content that differs from what was stored and
+writes it. From the next turn on the document already carries it and the
+deduplication skips the sync again.
+
+Strands 1.56 also puts the usage and latency of **each cycle** on the message
+that cycle produced, in `message.metadata`. It rides inside the `$push` of
+`create_message()`, so the per-message attribution costs no write at all: see
+[`metadata`](data-model.md#metadata-optional).
+
 #### Metrics are written when the invocation closes
 
 Strands fires `MessageAddedEvent` *before* the event loop accumulates the usage
@@ -775,6 +788,13 @@ The sync run for each message is told apart by wrapping the hook registry
 for both events, and the callbacks of `MessageAddedEvent` run with a
 `ContextVar` tag set. An explicit `sync_agent()` call always writes, so an
 application can still add a value to the metrics after the invocation and sync.
+
+Since strands 1.45 hooks carry a priority, and the groups run in ascending order
+in reverse-order events too. A hook registered for `AfterInvocationEvent` with
+`order=HookOrder.SDK_LAST` therefore runs *after* the closing sync: a message it
+appends is stored without `event_loop_metrics`, which stay on the message the
+cycle produced. At the default order the hook runs first and its message does
+get them. Both are pinned in `tests/unit/test_invocation_metrics.py` (#69).
 
 `update_agent` writes each `SessionAgent` field on its own path
 (`agents.<id>.agent_data.<field>`). Setting `agent_data` as a whole replaced the

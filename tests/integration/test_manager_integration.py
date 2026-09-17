@@ -105,9 +105,6 @@ class TestManagerIntegration:
         mock_agent.model = MagicMock()
         mock_agent.model.config = {"model_id": "claude-3-sonnet"}
         mock_agent.state.get.return_value = {}
-        mock_agent.state._get_version.return_value = 0
-        mock_agent._interrupt_state._get_version.return_value = 0
-        mock_agent._interrupt_state.to_dict.return_value = {}
         mock_agent.conversation_manager.get_state.return_value = {}
 
         summary = {
@@ -141,9 +138,6 @@ class TestManagerIntegration:
             mock_agent.model = None
             mock_agent.system_prompt = None
             mock_agent.state.get.return_value = {}
-            mock_agent.state._get_version.return_value = i
-            mock_agent._interrupt_state._get_version.return_value = 0
-            mock_agent._interrupt_state.to_dict.return_value = {}
             mock_agent.conversation_manager.get_state.return_value = {}
             summary = {
                 "total_cycles": 0,
@@ -174,9 +168,6 @@ class TestManagerIntegration:
         mock_agent.model = None
         mock_agent.system_prompt = "You are helpful"
         mock_agent.state.get.return_value = {}
-        mock_agent.state._get_version.return_value = 0
-        mock_agent._interrupt_state._get_version.return_value = 0
-        mock_agent._interrupt_state.to_dict.return_value = {}
         mock_agent.conversation_manager.get_state.return_value = {}
         summary = {
             "total_cycles": 0,
@@ -213,16 +204,13 @@ class TestManagerIntegration:
 
     def test_list_agents_includes_prompt_metadata(self, manager, unique_session_id):
         # Create two agents, one with prompt metadata
-        for i, agent_id in enumerate(["pm-agent-a", "pm-agent-b"]):
+        for agent_id in ("pm-agent-a", "pm-agent-b"):
             mock_agent = MagicMock()
             mock_agent.agent_id = agent_id
             mock_agent.messages = []
             mock_agent.model = None
             mock_agent.system_prompt = None
             mock_agent.state.get.return_value = {}
-            mock_agent.state._get_version.return_value = i
-            mock_agent._interrupt_state._get_version.return_value = 0
-            mock_agent._interrupt_state.to_dict.return_value = {}
             mock_agent.conversation_manager.get_state.return_value = {}
             summary = {
                 "total_cycles": 0,
