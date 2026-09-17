@@ -35,150 +35,71 @@ The MongoDB Session Manager is optimized for high-performance operation in state
 
 ## Benchmarks
 
-### Test Environment
+### How these numbers are produced
 
-**Hardware**:
-- CPU: 4 cores @ 2.4 GHz
-- RAM: 8 GB
-- Network: 1 Gbps local network
+Everything below comes from the benchmark harness, `uv run python -m benchmarks`
+(see [benchmarks/README.md](../../benchmarks/README.md)). It runs real Strands
+agents against a real server with a scripted model, and refuses to report a
+scenario that cannot prove it did the work. The figures that used to live here
+were produced by `examples/example_performance.py`, whose operation loop was a
+`pass`; they have been removed rather than corrected.
 
-**Software**:
-- Python: 3.11
-- MongoDB: 7.0 (local instance)
-- PyMongo: 4.13.2
-- Strands SDK: 1.0.1
+**Environment of the run below**: MongoDB 8.2.7 standalone in Docker Desktop on
+macOS arm64, PyMongo 4.18.1, Python 3.12.13, package 0.16.0, primary reads, no
+compressor. 5 warmups and 30 timed repetitions per scenario, messages of 512
+characters. A `ping` probe before and after the matrix stayed at 0.32 ms p50.
 
-**Test Configuration**:
-```python
-MONGODB_URL = "mongodb://mongodb:mongodb@localhost:27017/"
-DATABASE_NAME = "performance_test"
-COLLECTION_NAME = "sessions"
-NUM_SESSIONS = 100
-NUM_OPERATIONS_PER_SESSION = 10
-```
+Every run records its own environment, so two result files can be compared —
+and `--compare` refuses to subtract them when the engine, version, topology,
+read preference or compressors differ.
 
-**Code Reference**: `/workspace/examples/example_performance.py`
+### Sequential operations, one at a time
 
-### Sequential Operations
+| Scenario | p50 | p95 | p99 | Commands per operation | Reply bytes |
+|---|---:|---:|---:|---:|---:|
+| `create` (new session) | 1.57 ms | 2.28 ms | 3.32 ms | 7.0 | 329 B |
+| `restore`, 10 messages | 1.46 ms | 4.05 ms | 4.26 ms | 3.0 | 8.4 KB |
+| `restore`, 100 | 3.32 ms | 5.55 ms | 5.94 ms | 3.0 | 76 KB |
+| `restore`, 1.000 | 7.38 ms | 8.84 ms | 14.22 ms | 4.0 | 753 KB |
+| `restore`, 5.000 | 31.18 ms | 41.65 ms | 42.89 ms | 4.0 | 3.77 MB |
+| `turn.simple`, 10 | 1.91 ms | 2.76 ms | 2.82 ms | 6.7 | 32.6 KB |
+| `turn.simple`, 5.000 | 11.03 ms | 12.13 ms | 12.31 ms | 7.0 | 32.6 KB |
+| `turn.tool`, 10 | 6.70 ms | 8.86 ms | 9.42 ms | 8.9 | 33.1 KB |
+| `turn.tool`, 5.000 | 19.18 ms | 20.08 ms | 20.08 ms | 9.0 | 33.1 KB |
+| `turn.supervisor`, 10 | 7.41 ms | 9.59 ms | 10.08 ms | 15.4 | 65.9 KB |
+| `turn.supervisor`, 5.000 | 27.90 ms | 30.38 ms | 30.84 ms | 15.5 | 65.9 KB |
 
-#### Without Connection Pooling
+Two things are worth reading twice.
 
-**Setup**:
-```python
-# Create new connection for each session
-for session_id in session_ids:
-    manager = create_mongodb_session_manager(
-        session_id=session_id,
-        connection_string=MONGODB_URL,
-        database_name=DATABASE_NAME,
-    )
-    # Perform operations
-    manager.close()  # Close connection
-```
+**A turn costs the same number of commands whatever the history is.** A
+supervisor turn issues ~15 commands on a 10-message session and on a
+5.000-message one, and moves the same ~66 KB. What grows is the restoration that
+precedes it, and with it the turn's wall-clock time.
 
-**Results** (20 sessions):
-```
-Total time: 1.23 seconds
-Average per session: 0.062 seconds (62ms)
-Operations per second: 162.60
-```
+**A full restoration still transfers the whole history.** The bounded reads of
+[#58](https://github.com/iguinea/mongodb-session-manager/issues/58) keep a
+*page* small — 7 KB whatever the history — but rebuilding an `Agent` asks for
+every message, so 5.000 of them are 3.77 MB and 31 ms before the turn starts.
+Sessions that long are where a conversation manager earns its keep.
 
-**Analysis**:
-- Connection creation: ~50ms per session
-- Operation time: ~12ms per session
-- Overhead: 80% from connection management
+### Event-loop lag: the cost paid by everyone else
 
-#### With Connection Pooling
+pymongo is synchronous, `Agent.__call__` wraps `invoke_async`, and the reference
+FastAPI backend awaits `stream_async` directly on the server loop. Every driver
+call inside `sync_agent` therefore blocks that loop, and with it every other
+request the worker is serving. The harness measures it as heartbeat drift:
 
-**Setup**:
-```python
-# Create factory with connection pool
-factory = MongoDBSessionManagerFactory(
-    connection_string=MONGODB_URL, database_name=DATABASE_NAME, maxPoolSize=50
-)
+| Scenario | Event-loop lag p99 | Idle-loop baseline p99 |
+|---|---:|---:|
+| `turn.supervisor`, 10 messages | 5.3 ms | 2.8 ms |
+| `turn.supervisor`, 1.000 | 13.1 ms | 2.1 ms |
+| `turn.supervisor`, 5.000 | 20.4 ms | 2.1 ms |
+| `turn.simple`, 5.000 | 18.8 ms | 2.1 ms |
 
-for session_id in session_ids:
-    manager = factory.create_session_manager(session_id)
-    # Perform operations (reuses connection)
-```
+The baseline is the machine's own scheduling jitter, printed beside the lag and
+never subtracted from it. The reading is not "the turn took 28 ms" but "for
+about 20 ms of it, nothing else on that worker could run".
 
-**Results** (100 sessions):
-```
-Total time: 1.45 seconds
-Average per session: 0.015 seconds (15ms)
-Operations per second: 689.66
-```
-
-**Analysis**:
-- Connection overhead: ~0ms (reused from pool)
-- Operation time: ~15ms per session
-- Speedup: **4.1x faster** than without pooling
-
-**Improvement**:
-```
-Without pooling: 62ms per session
-With pooling:    15ms per session
-Improvement:     75% reduction in latency
-Throughput:      4.2x increase
-```
-
-### Concurrent Operations
-
-#### Without Pooling (10 workers)
-
-**Setup**:
-```python
-with ThreadPoolExecutor(max_workers=10) as executor:
-    for session_id in session_ids:
-        # Each creates new connection
-        manager = create_mongodb_session_manager(...)
-        # ... operations ...
-        manager.close()
-```
-
-**Results** (20 sessions):
-```
-Total time: 0.89 seconds
-Requests per second: 22.47
-```
-
-**Analysis**:
-- Connection contention under concurrent load
-- MongoDB connection limit pressure
-- Thread waiting for connection creation
-
-#### With Pooling (10 workers)
-
-**Setup**:
-```python
-factory = MongoDBSessionManagerFactory(
-    connection_string=MONGODB_URL,
-    maxPoolSize=50,  # Shared pool
-)
-
-with ThreadPoolExecutor(max_workers=10) as executor:
-    for session_id in session_ids:
-        manager = factory.create_session_manager(session_id)
-        # ... operations (reuse connections) ...
-```
-
-**Results** (100 sessions):
-```
-Total time: 1.82 seconds
-Requests per second: 54.95
-```
-
-**Analysis**:
-- Connection reuse eliminates creation overhead
-- Pool handles concurrent access efficiently
-- MongoDB connections well-utilized
-
-**Improvement**:
-```
-Without pooling: 22.47 req/s (20 sessions)
-With pooling:    54.95 req/s (100 sessions)
-Effective speedup: ~12x (accounting for 5x more sessions)
-```
 
 ### Real-World Performance
 
@@ -332,50 +253,45 @@ Request N → Manager N → Pool → MongoDB  (concurrent)
 
 ### Concurrency Benchmarks
 
-**Test**: 100 concurrent requests with ThreadPoolExecutor
+Measured with the harness, `--operation turn.supervisor --history 100`, against
+the same local MongoDB 8.2.7. Concurrency here means N invocations in flight on
+one event loop — the way N requests share a FastAPI worker — not N parallel
+driver calls: pymongo is synchronous, so those serialise.
 
+| Concurrent invocations | p50 | p95 | p99 | Event-loop lag p99 |
+|---:|---:|---:|---:|---:|
+| 1 | 15.0 ms | 18.9 ms | 30.0 ms | 13.1 ms |
+| 4 | 20.6 ms | 33.5 ms | 45.0 ms | 25.9 ms |
+| 16 | 62.5 ms | 82.0 ms | 93.6 ms | 64.5 ms |
+
+Per-turn latency grows roughly with the queue: sixteen turns on one loop take
+about four times as long each as one turn alone, because each waits behind the
+others' blocking driver calls. The commands per turn do not change (15.2 in all
+three), so this is queuing, not extra work.
+
+**Connection-pool checkout wait was 0 ms in all three**, and that is structural:
+a single loop with a synchronous driver never has two checkouts in flight. A
+profile that deliberately shrank the pool to four connections and drove it with
+sixteen concurrent invocations still waited 0 ms. Pool contention appears when
+several workers or threads share a client, not within one worker.
+
+The practical consequence is that a worker is bounded by the sum of its blocking
+calls. Scale with more workers rather than with more concurrency per worker, and
+keep the per-turn round-trips low — which is what issue
+[#56](https://github.com/iguinea/mongodb-session-manager/issues/56) is about.
+
+**Recommended pool configuration** (unchanged; sized for many workers sharing a
+cluster, not for contention within one):
 ```python
-from concurrent.futures import ThreadPoolExecutor
-
-
-def process_request(session_id):
-    manager = factory.create_session_manager(session_id)
-    # Simulate work
-    manager.get_metadata()
-    return True
-
-
-with ThreadPoolExecutor(max_workers=20) as executor:
-    futures = [executor.submit(process_request, f"session-{i}") for i in range(100)]
-    results = [f.result() for f in futures]
-```
-
-**Results**:
-
-| Workers | Total Time | Throughput | Avg Latency |
-|---------|-----------|------------|-------------|
-| 1 | 1.50s | 66.7 req/s | 15ms |
-| 5 | 0.35s | 285.7 req/s | 17ms |
-| 10 | 0.20s | 500.0 req/s | 20ms |
-| 20 | 0.15s | 666.7 req/s | 30ms |
-| 50 | 0.12s | 833.3 req/s | 60ms |
-
-**Analysis**:
-- Linear scaling up to 20 workers
-- Diminishing returns beyond 20 workers (MongoDB connection limit)
-- Latency increase at 50 workers (connection queuing)
-
-**Optimal Configuration**:
-```python
-# For high concurrency
 factory = MongoDBSessionManagerFactory(
     connection_string=mongodb_uri,
-    maxPoolSize=100,  # High pool size
-    minPoolSize=20,  # Keep warm connections
-    maxIdleTimeMS=45000,  # Keep connections alive longer
-    waitQueueTimeoutMS=10000,  # Timeout for queued requests
+    maxPoolSize=100,
+    minPoolSize=20,
+    maxIdleTimeMS=45000,
+    waitQueueTimeoutMS=10000,
 )
 ```
+
 
 ## Memory Usage
 

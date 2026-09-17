@@ -85,7 +85,6 @@ uv run python examples/example_name.py
 
 | Script | Description | Documentation |
 |--------|-------------|---------------|
-| [example_performance.py](example_performance.py) | Performance benchmarks comparing pooling vs no pooling | [📚 Guide](../docs/architecture/performance.md) |
 
 **Features demonstrated:**
 - Connection pooling performance benefits
@@ -99,7 +98,7 @@ uv run python examples/example_name.py
 ### By Feature
 
 - **Session Management**: `example_calculator_tool.py`, `example_agent_config.py`
-- **Connection Pooling**: `example_fastapi.py`, `example_performance.py`
+- **Connection Pooling**: `example_fastapi.py`
 - **Factory Pattern**: `example_fastapi.py`, `example_fastapi_streaming.py`
 - **Metadata**: `example_metadata_*.py` (5 examples)
 - **Feedback**: `example_feedback_hook.py`
@@ -111,7 +110,7 @@ uv run python examples/example_name.py
 - **Learning**: Start with `example_calculator_tool.py`
 - **Production FastAPI**: Use `example_fastapi_streaming.py`
 - **Metadata Management**: See `example_metadata_production.py`
-- **Performance Optimization**: Check `example_performance.py`
+- **Performance Optimization**: Run the benchmark harness, `uv run python -m benchmarks` (see [benchmarks/README.md](../benchmarks/README.md))
 - **Feedback Collection**: Explore `example_feedback_hook.py`
 - **Agent Configuration**: Try `example_agent_config.py` ⭐ NEW
 
@@ -187,7 +186,7 @@ uv run python examples/example_metadata_tool.py
 uv run python examples/example_feedback_hook.py
 
 # Benchmark performance
-uv run python examples/example_performance.py
+uv run python -m benchmarks
 ```
 
 ## 🐛 Troubleshooting

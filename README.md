@@ -1,6 +1,6 @@
 # MongoDB Session Manager
 
-[![Version](https://img.shields.io/badge/version-0.15.0-blue.svg)](https://github.com/iguinea/mongodb-session-manager)
+[![Version](https://img.shields.io/badge/version-0.17.0-blue.svg)](https://github.com/iguinea/mongodb-session-manager)
 [![Python](https://img.shields.io/badge/python-3.12+-green.svg)](https://python.org)
 
 A MongoDB session manager for [Strands Agents](https://github.com/strands-agents/strands-agents-python) that provides persistent storage for agent conversations and state, with connection pooling optimized for stateless environments.
@@ -455,7 +455,7 @@ uv run python examples/example_feedback_hook.py
 uv run python examples/example_agent_config.py
 uv run python examples/example_metadata_update.py
 uv run python examples/example_metadata_websocket.py
-uv run python examples/example_performance.py
+uv run python -m benchmarks
 ```
 
 See `examples/README.md` for detailed descriptions of each example.
