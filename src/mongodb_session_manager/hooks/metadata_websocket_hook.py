@@ -12,7 +12,8 @@ Key Features:
     - Non-blocking async operation ensures metadata operations aren't delayed
     - Graceful error handling - metadata operations succeed even if WebSocket send fails
     - Automatic handling of disconnected clients (GoneException)
-    - Support for both async and sync execution contexts
+    - Notifications run on the event loop the hook is bound to, whatever
+      thread calls it (pass `loop=`, or build the hook inside a running loop)
     - Thread-safe operation for high-concurrency environments
 
 Architecture:
@@ -113,7 +114,7 @@ Performance Considerations:
     - Direct push to clients - no polling overhead
     - Only specified metadata fields are propagated (reduces message size)
     - Async operation prevents blocking the main thread
-    - Daemon threads in sync contexts prevent process hanging
+    - A bound loop takes the notification without spawning a thread per event
     - Ultra-low latency compared to SQS/SNS polling patterns
 
 Security Considerations:
@@ -135,7 +136,7 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
-from .utils_async import dispatch_async
+from .utils_async import capture_loop, dispatch_async
 
 logger = logging.getLogger(__name__)
 
@@ -304,6 +305,7 @@ def create_metadata_hook(
     api_gateway_endpoint: str,
     metadata_fields: list[str] | None = None,
     region: str = "eu-west-1",
+    loop: asyncio.AbstractEventLoop | None = None,
 ):
     """
     Create a single metadata hook function for mongodb-session-manager
@@ -314,6 +316,12 @@ def create_metadata_hook(
         metadata_fields: Optional list of metadata field names to propagate.
                         If None, all fields except connection_id are sent.
         region: AWS region for the API Gateway (default: us-east-1)
+        loop: Event loop the notifications run on. Defaults to the loop running
+              when the hook is created, so a hook built in an async lifespan
+              keeps sending on the server loop even when the metadata write is
+              called from a worker thread. If there is none, the dispatch
+              decides per call: a task on the loop of the calling thread, or a
+              daemon thread of its own.
 
     Returns:
         Hook function that handles metadata operations, or None if hook creation fails
@@ -337,6 +345,7 @@ def create_metadata_hook(
         websocket_hook = MetadataWebSocketHook(
             api_gateway_endpoint, metadata_fields, region
         )
+        dispatch_loop = loop if loop is not None else capture_loop()
 
         def metadata_hook_wrapper(
             original_func, action: str, session_id: str, **kwargs
@@ -349,6 +358,7 @@ def create_metadata_hook(
                         session_id, kwargs["metadata"], action
                     ),
                     "sending metadata update to WebSocket",
+                    loop=dispatch_loop,
                 )
             elif action == "delete" and "keys" in kwargs:
                 result = original_func(kwargs["keys"])
@@ -358,6 +368,7 @@ def create_metadata_hook(
                         session_id, deleted_metadata, action
                     ),
                     "sending metadata delete to WebSocket",
+                    loop=dispatch_loop,
                 )
             else:
                 result = original_func()

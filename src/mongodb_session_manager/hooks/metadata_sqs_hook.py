@@ -12,7 +12,8 @@ Key Features:
     - Non-blocking async operation ensures metadata operations aren't delayed
     - Graceful error handling - metadata operations succeed even if SQS fails
     - Message attributes for efficient queue filtering and routing
-    - Support for both async and sync execution contexts
+    - Notifications run on the event loop the hook is bound to, whatever
+      thread calls it (pass `loop=`, or build the hook inside a running loop)
     - Thread-safe operation for high-concurrency environments
 
 Architecture:
@@ -93,7 +94,7 @@ Error Handling:
 Performance Considerations:
     - Only specified metadata fields are propagated (reduces message size)
     - Async operation prevents blocking the main thread
-    - Daemon threads in sync contexts prevent process hanging
+    - A bound loop takes the notification without spawning a thread per event
     - Consider SQS queue throughput limits for high-volume applications
     - Message deduplication may be needed at the consumer level
 
@@ -110,7 +111,7 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
-from .utils_async import dispatch_async
+from .utils_async import capture_loop, dispatch_async
 
 logger = logging.getLogger(__name__)
 
@@ -209,19 +210,30 @@ class MetadataSQSHook:
             )
 
 
-def create_metadata_hook(queue_url: str, metadata_fields: list[str] | None = None):
+def create_metadata_hook(
+    queue_url: str,
+    metadata_fields: list[str] | None = None,
+    loop: asyncio.AbstractEventLoop | None = None,
+):
     """
     Create a single metadata hook function for mongodb-session-manager
 
     Args:
         queue_url: Full SQS queue URL
         metadata_fields: List of metadata field names to propagate (if None, all fields are sent)
+        loop: Event loop the notifications run on. Defaults to the loop running
+              when the hook is created, so a hook built in an async lifespan
+              keeps sending on the server loop even when the metadata write is
+              called from a worker thread. If there is none, the dispatch
+              decides per call: a task on the loop of the calling thread, or a
+              daemon thread of its own.
 
     Returns:
         Hook function that handles metadata operations
     """
     try:
         sqs_hook = MetadataSQSHook(queue_url, metadata_fields or [])
+        dispatch_loop = loop if loop is not None else capture_loop()
 
         def metadata_hook_wrapper(
             original_func, action: str, session_id: str, **kwargs
@@ -232,6 +244,7 @@ def create_metadata_hook(queue_url: str, metadata_fields: list[str] | None = Non
                 dispatch_async(
                     sqs_hook.on_metadata_change(session_id, kwargs["metadata"], action),
                     "sending metadata update to SQS",
+                    loop=dispatch_loop,
                 )
             elif action == "delete" and "keys" in kwargs:
                 result = original_func(kwargs["keys"])
@@ -239,6 +252,7 @@ def create_metadata_hook(queue_url: str, metadata_fields: list[str] | None = Non
                 dispatch_async(
                     sqs_hook.on_metadata_change(session_id, deleted_metadata, action),
                     "sending metadata delete to SQS",
+                    loop=dispatch_loop,
                 )
             else:
                 result = original_func()

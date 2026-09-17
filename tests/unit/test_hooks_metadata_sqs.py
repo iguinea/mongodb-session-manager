@@ -9,7 +9,6 @@ from mongodb_session_manager.hooks.metadata_sqs_hook import (
     MetadataSQSHook,
     create_metadata_hook,
 )
-from mongodb_session_manager.hooks.utils_async import dispatch_async as _dispatch_async
 
 
 @pytest.fixture
@@ -122,7 +121,7 @@ class TestCreateMetadataHook:
             hook = create_metadata_hook("https://sqs.example.com/q", ["status"])
         assert callable(hook)
 
-    def test_handles_update_action(self):
+    def test_handles_update_action(self, captured_dispatch):
         with patch("mongodb_session_manager.hooks.metadata_sqs_hook.send_message"):
             hook = create_metadata_hook("https://sqs.example.com/q")
 
@@ -130,7 +129,7 @@ class TestCreateMetadataHook:
         hook(original, "update", "s1", metadata={"key": "val"})
         original.assert_called_once_with({"key": "val"})
 
-    def test_handles_delete_action(self):
+    def test_handles_delete_action(self, captured_dispatch):
         with patch("mongodb_session_manager.hooks.metadata_sqs_hook.send_message"):
             hook = create_metadata_hook("https://sqs.example.com/q")
 
@@ -152,37 +151,3 @@ class TestCreateMetadataHook:
         ):
             hook = create_metadata_hook("https://sqs.example.com/q")
         assert hook is None
-
-
-# ---------------------------------------------------------------------------
-# _dispatch_async
-# ---------------------------------------------------------------------------
-
-
-class TestDispatchAsync:
-    def test_sync_context_uses_thread(self):
-        """In sync context (no running loop), should use a thread."""
-        executed = []
-
-        async def coro():
-            executed.append(True)
-
-        _dispatch_async(coro(), "test")
-        import time
-
-        time.sleep(0.1)
-        assert len(executed) == 1
-
-    def test_async_context_uses_task(self):
-        """In async context, should create a task."""
-        executed = []
-
-        async def coro():
-            executed.append(True)
-
-        async def run():
-            _dispatch_async(coro(), "test")
-            await asyncio.sleep(0.05)
-
-        asyncio.run(run())
-        assert len(executed) == 1

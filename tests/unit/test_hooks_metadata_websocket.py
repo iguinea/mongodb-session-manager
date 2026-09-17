@@ -11,7 +11,6 @@ from mongodb_session_manager.hooks.metadata_websocket_hook import (
     _build_delete_metadata,
     create_metadata_hook,
 )
-from mongodb_session_manager.hooks.utils_async import dispatch_async as _dispatch_async
 
 
 @pytest.fixture
@@ -230,35 +229,3 @@ class TestCreateMetadataHookWebSocket:
         with patch("mongodb_session_manager.hooks.metadata_websocket_hook.boto3", None):
             hook = create_metadata_hook("https://api.example.com")
         assert hook is None
-
-
-# ---------------------------------------------------------------------------
-# _dispatch_async
-# ---------------------------------------------------------------------------
-
-
-class TestDispatchAsync:
-    def test_sync_context(self):
-        executed = []
-
-        async def coro():
-            executed.append(True)
-
-        _dispatch_async(coro(), "test")
-        import time
-
-        time.sleep(0.1)
-        assert len(executed) == 1
-
-    def test_async_context(self):
-        executed = []
-
-        async def coro():
-            executed.append(True)
-
-        async def run():
-            _dispatch_async(coro(), "test")
-            await asyncio.sleep(0.05)
-
-        asyncio.run(run())
-        assert len(executed) == 1

@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.17.3] - 2026-09-17
+
+### Fixed
+- **`dispatch_async()` ya no decide por el thread que lo llama** (#95). Ramificaba según si había un loop corriendo *en el thread llamante*: desde el loop creaba una task; desde un thread sin loop arrancaba un **thread daemon con su propio event loop por cada evento** de metadata o feedback. El llamante no elegía, heredaba el thread en el que estuviese — y el patrón que recomienda #61 (envolver el camino síncrono en `run_in_threadpool`) activa precisamente esa rama. Ahora el hook lleva su loop y la corrutina se le entrega con `asyncio.run_coroutine_threadsafe()`: ni threads sin límite ni un event loop por evento
+- **El fallo de una notificación deja rastro**. Ni la task ni el thread devolvían nada de lo que recoger el error, así que el modo de fallo era una ausencia: el feedback en MongoDB sin su notificación y nada en los logs. El despacho registra ahora el resultado del trabajo terminado (`Error <contexto>: <excepción>` con traza, `Cancelled while <contexto>` si se cancela) y devuelve un handle —`Future` o `Task`— para quien quiera el resultado. Es la base de reintentos y métricas, que siguen siendo de #62
+
+### Added
+- **`loop=` en las tres factories de hooks**: `create_feedback_sns_hook()`, `create_metadata_sqs_hook()` y `create_metadata_websocket_hook()`. Sin pasarlo, **capturan el loop que esté corriendo al construirse**, así que crear el hook dentro del lifespan async de FastAPI basta para que la notificación siga viajando por el loop del servidor aunque la escritura ocurra en un worker thread. Sin loop que capturar, el comportamiento es el de siempre: task en el loop del thread llamante, o thread daemon si no hay ninguno
+- `capture_loop()` en `hooks/utils_async.py`, para que un hook propio pueda hacer lo mismo
+
+### Notes
+- **El escenario malo no necesitaba el patrón de #61**: `get_metadata_tool()` devuelve un tool **síncrono** (`manage_metadata`), y Strands ejecuta los tools síncronos con `asyncio.to_thread` (`strands/tools/decorator.py:633`). Así que cada `update_metadata` que hace el **agente** —no la aplicación— ya salía sin loop corriendo, y con un hook registrado eso era un thread daemon y un event loop por evento. Confirmado por el equipo del CRM sobre su servidor en producción, cuyas rutas son todas `async def`
+- **Compatible hacia atrás**: la firma vieja `dispatch_async(coro, error_context)` sigue funcionando igual, y un hook construido en tiempo de import se comporta exactamente como antes. Quien quiera el arreglo mueve la construcción del hook al lifespan o pasa `loop=asyncio.get_running_loop()`
+- El hook nunca fue quien bloqueaba el loop: su llamada boto3 ya va por `asyncio.to_thread`. Lo que bloquea es la escritura PyMongo, y el problema era solo *dónde se despachaba la corrutina*
+- Lo que esta versión **no** resuelve: límites, backpressure, política de overflow y cierre limpio del trabajo en segundo plano. El trabajo despachado a un thread daemon sigue muriendo con el proceso; el que va al loop del servidor se drena con él. Sigue en #62
+- Propuesta original del equipo de `genai-mrg-sap-mcp`, al analizar el impacto de #61 sobre su servidor
+
+### Fixed (#61, fusionado en el PR #96 sin sección propia)
+- **El camino síncrono ya no bloquea el event loop en FastAPI**. El ejemplo no streaming ejecuta el camino síncrono completo en el worker pool compartido —crear el manager, construir el agente (que es donde se restaura la sesión), invocarlo, leer las métricas en memoria y cerrar el manager—, porque envolver solo `agent(prompt)` dejaría las lecturas de restauración bloqueando el loop. Medido con `--execution-mode direct|thread`: a concurrencia 16 el lag p99 del loop baja de 101,2 a 4,6 ms en MongoDB local y de 5.509,6 a 5,7 ms en DocumentDB, donde el throughput se multiplica por 6,1, con los mismos 15,5 comandos por operación en ambos modos
+- El repositorio sigue siendo síncrono: Strands registra `initialize`, `append_message` y `sync_agent` como callbacks síncronos. El streaming se mantiene directo hasta que exista un puente con backpressure y cancelación explícitas
+
 ## [2026-09-17] PR #96 - Fix: evitar que el camino síncrono bloquee el event loop en FastAPI (#61) (@iguinea)
 
 - Fix: evitar que el camino síncrono bloquee el event loop en FastAPI (…

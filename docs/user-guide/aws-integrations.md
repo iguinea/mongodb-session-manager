@@ -561,6 +561,28 @@ else:
     metadata_hook = create_metadata_sqs_hook(...)
 ```
 
+### 8. Build the Hooks Inside Your Async Server
+
+The three hooks send their notification on the event loop they are bound to.
+They bind the loop running when they are created, so building them in a
+FastAPI lifespan is enough — the notification then rides the server loop even
+when the metadata or feedback write runs in a worker thread:
+
+```python
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Inside a running loop: the hooks capture it.
+    app.state.feedback_hook = create_feedback_sns_hook(...)
+    app.state.metadata_hook = create_metadata_sqs_hook(...)
+    yield
+```
+
+Created at import time there is no loop to capture, and each call falls back to
+the calling thread: a task if a loop runs there, a daemon thread with an event
+loop of its own if not — one per event. Pass `loop=asyncio.get_running_loop()`
+if you cannot move the construction. In a plain sync script the fallback is the
+intended behaviour and nothing needs to change.
+
 ## Next Steps
 
 - **[Feedback System](feedback-system.md)**: Learn about feedback management

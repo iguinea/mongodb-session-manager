@@ -105,6 +105,34 @@ def mock_agent():
 
 
 @pytest.fixture
+def captured_dispatch(monkeypatch):
+    """Record what the hooks dispatch instead of running it.
+
+    Without this, exercising a hook wrapper reaches the real boto3 client from
+    a background thread, which outlives the test that patched it away.
+    """
+    from types import SimpleNamespace
+
+    from mongodb_session_manager.hooks import (
+        feedback_sns_hook,
+        metadata_sqs_hook,
+        metadata_websocket_hook,
+    )
+
+    calls = []
+
+    def recorder(coro, error_context, loop=None):
+        coro.close()  # never awaited: the recorder replaces the dispatch
+        calls.append(SimpleNamespace(error_context=error_context, loop=loop))
+        return None
+
+    for module in (feedback_sns_hook, metadata_sqs_hook, metadata_websocket_hook):
+        monkeypatch.setattr(module, "dispatch_async", recorder)
+
+    return calls
+
+
+@pytest.fixture
 def sample_session():
     """Sample Session object for tests."""
     return Session(session_id="test-session-1", session_type="default")

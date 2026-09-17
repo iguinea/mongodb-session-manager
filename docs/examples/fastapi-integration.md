@@ -285,16 +285,30 @@ rule. Moving a turn off the event loop changes four things that are invisible
 from the endpoint itself. Every one of these was hit by a real consumer of this
 library.
 
-**1. Hook dispatch changes.** The WebSocket, SQS and SNS hooks dispatch through
-`dispatch_async()`, which branches on whether a loop is running *in the calling
-thread*: from the loop it creates a task, from a worker thread it falls back to
-starting a **daemon thread per event** running `asyncio.run`. That means an
-unbounded thread per metadata or feedback event, an event loop per event, and —
-because the threads are daemons — notifications lost silently if the process
-exits. The dispatch happens inside `update_metadata()`, so you cannot wrap the
-PyMongo write and leave the hook on the loop: they travel together. Tracked in
-[#95](https://github.com/iguinea/mongodb-session-manager/issues/95); until it
-lands, treat a registered hook as a reason not to wrap.
+**1. Build your hooks inside the lifespan.** The WebSocket, SQS and SNS hooks
+dispatch their notification through `dispatch_async()`, and since v0.17.3 that
+dispatch follows the loop the hook was given instead of the thread it is called
+from. A hook created inside the async lifespan captures the server loop and
+keeps notifying on it, even though `update_metadata()` now runs in a worker
+thread:
+
+```python
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Inside a running loop: the hook captures it.
+    app.state.metadata_hook = create_metadata_websocket_hook(
+        api_gateway_endpoint=WEBSOCKET_ENDPOINT,
+        metadata_fields=["status", "progress"],
+    )
+    yield
+```
+
+A hook built at import time has no loop to capture and falls back to the old
+behaviour: a **daemon thread and an event loop per event**, notifications lost
+silently if the process exits. Pass `loop=asyncio.get_running_loop()` from the
+lifespan if you cannot move its construction. Delivery guarantees on shutdown
+are still open in
+[#62](https://github.com/iguinea/mongodb-session-manager/issues/62).
 
 **2. Globals reloaded from a coroutine stop being safe.** If your process
 mutates shared configuration from a background coroutine, its correctness may

@@ -11,7 +11,8 @@ Key Features:
     - Non-blocking async operation to avoid impacting main feedback storage
     - Graceful error handling - feedback is always stored even if notification fails
     - Rich message attributes for SNS filtering and routing
-    - Support for both async and sync execution contexts
+    - Notifications run on the event loop the hook is bound to, whatever
+      thread calls it (pass `loop=`, or build the hook inside a running loop)
     - Thread-safe operation for high-concurrency environments
 
 Architecture:
@@ -106,14 +107,16 @@ Error Handling:
     - All other errors: Logged but not raised to ensure feedback storage succeeds
 
 Thread Safety:
-    The hook automatically detects the execution context:
-    - In async context: Creates a task in the current event loop
-    - In sync context: Spawns a daemon thread to run the async notification
+    The notification is dispatched to the event loop the hook is bound to —
+    the one running when it was created, or the one passed as `loop=` — so it
+    does not depend on the thread that adds the feedback. With no loop bound,
+    it falls back to a task on the calling thread's loop, or to a daemon
+    thread if there is none.
 
 Performance Considerations:
     - SNS notifications are sent asynchronously to avoid blocking
     - Failed notifications don't affect feedback storage
-    - Daemon threads are used in sync contexts to prevent hanging on exit
+    - A bound loop takes the notification without spawning a thread per event
 """
 
 import asyncio
@@ -121,7 +124,7 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
-from .utils_async import dispatch_async
+from .utils_async import capture_loop, dispatch_async
 
 logger = logging.getLogger(__name__)
 
@@ -333,6 +336,7 @@ def create_feedback_hook(
     body_prefix_good: str | None = None,
     body_prefix_bad: str | None = None,
     body_prefix_neutral: str | None = None,
+    loop: asyncio.AbstractEventLoop | None = None,
 ):
     """
     Create a feedback hook function for mongodb-session-manager with optional message templates
@@ -353,6 +357,12 @@ def create_feedback_hook(
                         Supports variables: {session_id}, {rating}, {timestamp}
         body_prefix_neutral: Optional prefix template for message body when rating=None.
                             Supports variables: {session_id}, {rating}, {timestamp}
+        loop: Event loop the notifications run on. Defaults to the loop running
+              when the hook is created, so a hook built in an async lifespan
+              keeps sending on the server loop even when the feedback is added
+              from a worker thread. If there is none, the dispatch decides per
+              call: a task on the loop of the calling thread, or a daemon
+              thread of its own.
 
     Returns:
         Hook function that handles feedback operations
@@ -379,6 +389,7 @@ def create_feedback_hook(
             body_prefix_bad,
             body_prefix_neutral,
         )
+        dispatch_loop = loop if loop is not None else capture_loop()
 
         def feedback_hook_wrapper(
             original_func, action: str, session_id: str, **kwargs
@@ -404,6 +415,7 @@ def create_feedback_hook(
                         session_manager=kwargs.get("session_manager"),
                     ),
                     "sending feedback notification to SNS",
+                    loop=dispatch_loop,
                 )
             else:
                 # For other operations, just call original

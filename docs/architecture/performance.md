@@ -136,10 +136,11 @@ This is a bounded compatibility workaround, not a new persistence contract:
   a thread; the turn finishes and its result is persisted, so the next request
   restores an answer the user never saw. The helper's `finally` still closes the
   manager, and database/model timeouts must bound the underlying calls;
-- the optional hooks dispatch through `dispatch_async()`, which branches on
-  whether a loop runs in the *calling* thread: from a worker it starts a daemon
-  thread per event instead of a task on the server loop. Any integration that
-  registers a metadata or feedback hook must check this before wrapping;
+- the optional hooks dispatch through `dispatch_async()`, which since v0.17.3
+  follows the loop the hook was given rather than the thread it is called from.
+  Build them inside the async lifespan — or pass `loop=` — so a dispatch from a
+  worker returns to the server loop instead of starting a daemon thread per
+  event (#95);
 - a process that mutates shared configuration from a background coroutine may
   depend on the turn never yielding the loop; wrapping the turn removes that
   guarantee;

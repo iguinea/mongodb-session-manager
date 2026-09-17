@@ -1443,54 +1443,66 @@ Hook operations (SNS, SQS) are I/O-bound and slow. They shouldn't block the main
 
 **Question**: How to execute hooks asynchronously without complicating the sync API?
 
-### Solution: Thread-Safe Async Detection
+### Solution: The Hook Carries Its Event Loop (v0.17.3)
+
+Until v0.17.3 the dispatch detected the context instead of being told: it asked
+for a running loop in the *calling thread* and, finding none, started a daemon
+thread with an event loop of its own. The caller did not choose — it inherited
+whatever thread the write happened on. Once the synchronous path moved to a
+worker pool (#61), that meant one thread and one event loop **per event**.
+
+The hook now binds a loop when it is created and hands the coroutine to it:
 
 ```python
-def feedback_hook_wrapper(original_func, action, session_id, **kwargs):
-    # Call original first (synchronous)
-    result = original_func(kwargs["feedback"])
+def create_feedback_hook(..., loop: asyncio.AbstractEventLoop | None = None):
+    # A hook built inside an async lifespan captures the server loop.
+    dispatch_loop = loop if loop is not None else capture_loop()
 
-    # Send notification asynchronously
-    try:
-        # Detect if we're in an async context
-        try:
-            loop = asyncio.get_running_loop()
-            # We're in async context - create task
-            loop.create_task(sns_hook.on_feedback_add(session_id, kwargs["feedback"]))
-        except RuntimeError:
-            # No running loop - create thread with new loop
-            import threading
+    def feedback_hook_wrapper(original_func, action, session_id, **kwargs):
+        result = original_func(kwargs["feedback"])  # store first
 
-            def run_hook():
-                asyncio.run(sns_hook.on_feedback_add(session_id, kwargs["feedback"]))
+        dispatch_async(
+            sns_hook.on_feedback_add(session_id, kwargs["feedback"]),
+            "sending feedback notification to SNS",
+            loop=dispatch_loop,
+        )
 
-            thread = threading.Thread(target=run_hook, daemon=True)
-            thread.start()
-    except Exception as e:
-        logger.error(f"Error sending feedback notification: {e}")
+        return result
 
-    return result
+    return feedback_hook_wrapper
 ```
 
 **Why This Design?**
 
-1. **Async-Aware**: Uses event loop if available (FastAPI, async apps)
-2. **Sync-Compatible**: Falls back to threading for sync contexts
-3. **Non-Blocking**: Original operation completes immediately
-4. **Daemon Thread**: Won't block application shutdown
-5. **Error Isolation**: Hook errors don't affect main operation
+1. **Thread-Independent**: The same hook behaves the same from an endpoint, a
+   worker thread or a sync script
+2. **No Unbounded Threads**: A known loop takes the work through
+   `run_coroutine_threadsafe()`; nothing new is spawned per event
+3. **Observable**: The dispatch returns a handle and logs how the work ends —
+   a failed notification is an `ERROR` with context, not an absence
+4. **Non-Blocking**: The original operation completes immediately
+5. **Backwards Compatible**: Without a loop the old detection still applies, so
+   existing callers keep working
+6. **Error Isolation**: Hook errors don't affect the main operation
 
 **Execution Contexts**:
 
-| Context | Detection | Execution |
-|---------|-----------|-----------|
-| FastAPI async endpoint | `get_running_loop()` succeeds | `create_task()` in existing loop |
-| Sync script | `RuntimeError` | New thread with `asyncio.run()` |
-| Jupyter notebook | `get_running_loop()` succeeds | `create_task()` in notebook loop |
+| Context | Target | Execution |
+|---------|--------|-----------|
+| Hook built in an async lifespan | Loop captured at creation | `run_coroutine_threadsafe()` on the server loop, from any thread |
+| Explicit `loop=` | That loop | `run_coroutine_threadsafe()` |
+| No loop bound, called from a loop | Calling thread's loop | `create_task()` |
+| No loop bound, sync script | None | New daemon thread with `asyncio.run()` |
+
+Delivery guarantees, bounded queues and shutdown draining are out of scope
+here and tracked in
+[#62](https://github.com/iguinea/mongodb-session-manager/issues/62).
 
 **Code Reference**:
-- SNS hook: `/workspace/src/mongodb_session_manager/hooks/feedback_sns_hook.py` (lines 236-256)
-- SQS hook: `/workspace/src/mongodb_session_manager/hooks/metadata_sqs_hook.py` (lines 268-289)
+- Dispatch: `src/mongodb_session_manager/hooks/utils_async.py`
+- SNS hook: `src/mongodb_session_manager/hooks/feedback_sns_hook.py`
+- SQS hook: `src/mongodb_session_manager/hooks/metadata_sqs_hook.py`
+- WebSocket hook: `src/mongodb_session_manager/hooks/metadata_websocket_hook.py`
 
 ---
 
