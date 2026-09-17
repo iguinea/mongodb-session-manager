@@ -1,5 +1,10 @@
 # Changelog
 
+## [2026-09-17] PR #97 - Fix: dispatch_async() deja de decidir por el thread llamante (#95) (@iguinea)
+
+- Fix: dispatch_async() deja de decidir por el thread llamante (#95)
+- Docs: precisar el alcance del bug de hooks de 0.10.1 (#95)
+
 ## [0.17.3] - 2026-09-17
 
 ### Fixed
