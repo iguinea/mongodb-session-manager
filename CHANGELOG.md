@@ -1,5 +1,10 @@
 # Changelog
 
+## [2026-09-17] PR #91 - Add: benchmark reproducible para MongoDB y DocumentDB (#60) (@iguinea)
+
+- Add: benchmark reproducible para MongoDB y DocumentDB (#60)
+- Refactor: constantes de dominio y aserciones de coma flotante del ben…
+
 ## [0.17.0] - 2026-09-17
 
 ### Added
