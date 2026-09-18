@@ -657,6 +657,136 @@ class TestGetMetadataTool:
 
 
 # ---------------------------------------------------------------------------
+# The metadata tool and dot notation (#47)
+# ---------------------------------------------------------------------------
+
+
+class TestMetadataToolSpec:
+    """What the model is actually given when the tool reaches a provider."""
+
+    def test_the_input_schema_is_wrapped_in_json(self, manager):
+        """`ToolSpec.inputSchema` is a tagged union whose only member is `json`.
+
+        A hand-written schema was assigned to `inputSchema` verbatim, without
+        that wrapper. Every provider reads `inputSchema["json"]`: the Anthropic
+        one raised `KeyError`, and Bedrock sent the bare schema, which botocore
+        rejects before the request leaves the process -- so an agent holding
+        this tool failed on its *first* call, whether or not it used it (#47).
+        """
+        spec = manager.get_metadata_tool().tool_spec
+
+        assert "json" in spec["inputSchema"], spec["inputSchema"]
+        assert spec["inputSchema"]["json"]["required"] == ["action"]
+
+    def test_botocore_accepts_the_request_that_carries_it(self, manager):
+        """The regression, checked against the API contract itself.
+
+        No AWS call and no credentials: botocore validates the parameters
+        against the service model it ships.
+        """
+        import botocore.session
+        from botocore.validate import validate_parameters
+        from strands.models.bedrock import BedrockModel
+
+        model = BedrockModel(model_id="test-model", region_name="us-east-1")
+        request = model.format_request(
+            messages=[{"role": "user", "content": [{"text": "hola"}]}],
+            tool_specs=[manager.get_metadata_tool().tool_spec],
+        )
+
+        converse = botocore.session.get_session().get_service_model("bedrock-runtime")
+        validate_parameters(request, converse.operation_model("Converse").input_shape)
+
+    def test_the_model_is_told_how_keys_behave(self, manager):
+        """The description is the only place the model learns the rule.
+
+        It used to be a single line passed as `description=`, which overrides
+        the docstring: everything written in the docstring reached nobody.
+        """
+        spec = manager.get_metadata_tool().tool_spec
+
+        assert "dot notation" in spec["description"].lower()
+        assert "replace" in spec["description"].lower()
+
+    def test_every_parameter_carries_its_description(self, manager):
+        properties = manager.get_metadata_tool().tool_spec["inputSchema"]["json"][
+            "properties"
+        ]
+
+        assert set(properties) == {"action", "metadata", "keys"}
+        for name, schema in properties.items():
+            assert schema.get("description"), f"{name} has no description"
+
+
+class TestMetadataToolPaths:
+    """A dotted key means the same thing in the three actions (#47)."""
+
+    @pytest.fixture
+    def stored(self, manager_fake):
+        """A session whose metadata already has a nested document and an array."""
+        manager_fake.update_metadata(
+            {
+                "user": {"name": "Ana", "zip": "28001"},
+                "priority": "high",
+                "tags": ["urgent"],
+            }
+        )
+        return manager_fake.get_metadata_tool()
+
+    def test_get_resolves_a_dotted_key(self, stored):
+        """`set` writes `metadata.user.name`, so `get` has to look there.
+
+        It filtered the top-level keys, so the agent that had just written
+        `user.name` was told there was no such metadata.
+        """
+        result = stored(action="get", keys=["user.name"])
+
+        assert "Ana" in result
+        assert "user.name" in result
+
+    def test_get_still_resolves_a_top_level_key(self, stored):
+        assert "high" in stored(action="get", keys=["priority"])
+
+    def test_get_resolves_an_array_element(self, stored):
+        assert "urgent" in stored(action="get", keys=["tags.0"])
+
+    def test_get_reports_a_path_that_is_not_there(self, stored):
+        result = stored(action="get", keys=["user.surname"])
+
+        assert "No metadata found for keys" in result
+
+    def test_get_returns_the_paths_it_found(self, stored):
+        """A batch is not all or nothing: what exists comes back."""
+        result = stored(action="get", keys=["user.name", "user.surname"])
+
+        assert "Ana" in result
+        assert "surname" not in result
+
+    def test_a_dict_value_warns_that_it_replaced_the_subdocument(
+        self, stored, fake_repo
+    ):
+        """MongoDB's `$set` replaces it, and the reply is what the model reads.
+
+        Left unsaid, a model that passes the whole subdocument -- the natural
+        thing to do -- drops its siblings and is told it succeeded.
+        """
+        result = stored(action="set", metadata={"user": {"name": "Eva"}})
+
+        assert "user" in result
+        assert "dot notation" in result.lower()
+        assert fake_repo.session("test-session")["metadata"]["user"] == {"name": "Eva"}
+
+    def test_a_dotted_key_keeps_its_siblings_and_says_nothing(self, stored, fake_repo):
+        result = stored(action="set", metadata={"user.name": "Eva"})
+
+        assert "dot notation" not in result.lower()
+        assert fake_repo.session("test-session")["metadata"]["user"] == {
+            "name": "Eva",
+            "zip": "28001",
+        }
+
+
+# ---------------------------------------------------------------------------
 # _parse_json_param
 # ---------------------------------------------------------------------------
 

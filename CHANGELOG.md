@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.22.0] - 2026-09-17
+
+### Fixed
+- **El `inputSchema` del tool de metadata rompía la petición que lo llevaba** (#47). Estaba escrito a mano y se asignaba tal cual a `ToolSpec.inputSchema`, que es una unión etiquetada cuyo único miembro es `json`. Todos los proveedores leen `inputSchema["json"]`: el de Anthropic lanzaba `KeyError` y Bedrock mandaba el schema desnudo, que **botocore rechaza antes de salir del proceso** (`Unknown parameter in toolConfig.tools[0].toolSpec.inputSchema`). O sea: un agente al que le dieras este tool fallaba en su **primera** llamada, usara el tool o no — incluido `examples/example_metadata_tool.py`. Ahora lo construye Strands desde la firma y el docstring. Lo fija un test que valida la petición contra el propio modelo de servicio de botocore, sin credenciales ni llamada a AWS
+- **`get` no encontraba lo que `set` acababa de escribir** (#47). Una clave con punto es una ruta en las tres acciones, pero `get` filtraba las claves de primer nivel: el agente que guardaba `user.name` recibía «No metadata found for keys». Ahora se resuelve la ruta sobre el documento que la lectura ya trajo, sin round-trip adicional. `None` y `False` son valores almacenados, no ausencias, y se devuelven como tales
+
+### Changed
+- **El docstring del tool es ahora su contrato**, porque es lo que el modelo lee. Antes lo pisaban un `description=` de una línea y el `inputSchema` a mano, así que nada de lo escrito en él llegaba a ninguna parte. Documenta lo que la issue pedía documentar: que una clave con punto actualiza un campo anidado y conserva sus hermanos, y que una clave cuyo valor es un documento **reemplaza** el que hubiera debajo
+- **La respuesta de `set` nombra las claves que reemplazaron un documento entero**. Pasar el subdocumento completo es lo natural para un modelo, y callarlo significaba perder los campos hermanos mientras se le decía que había ido bien. Con notación de punto la respuesta no cambia
+
+### Notes
+- Sin cambios de esquema ni migración: lo que cambia es el spec del tool y el texto de dos respuestas. `update_metadata()`, `get_metadata()` y `delete_metadata()` se comportan igual
+- **DocumentDB**: no se introduce ningún operador ni patrón de consulta nuevo. La resolución de rutas ocurre en Python, sobre el documento ya leído
+- Premisa corregida de la issue: proponía documentarlo en el docstring, que era justo lo que no llegaba al modelo
+
 ## [2026-09-17] PR #103 - Feat: strands-agents 1.56 y el BidiAgent por el camino unificado (#69) (@iguinea)
 
 - Feat: strands-agents 1.56 y el BidiAgent por el camino unificado (#69)

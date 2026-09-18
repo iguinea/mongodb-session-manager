@@ -111,6 +111,41 @@ def nested_document(paths: Iterable[str], value: Any = "") -> dict[str, Any]:
     return document
 
 
+def resolve_path(document: dict[str, Any], path: str) -> tuple[bool, Any]:
+    """Read the value a dot-notation path names, the mirror of writing one.
+
+    `update_metadata({"user.name": "Ana"})` writes a nested field, so asking for
+    `user.name` has to find it there and not as a literal key. The metadata tool
+    filtered the top-level keys instead, and told an agent that had just written
+    `user.name` that no such metadata existed (#47).
+
+    Args:
+        document: The decoded document to walk, as MongoDB returned it.
+        path: The path, relative to that document.
+
+    Returns:
+        Whether the path is there, and the value stored at it. The two are
+        separate because `None` and `False` are values a document can hold,
+        and neither means the field is missing.
+    """
+    here: Any = document
+    for segment in str(path).split("."):
+        if isinstance(here, dict):
+            if segment not in here:
+                return False, None
+            here = here[segment]
+        elif isinstance(here, list):
+            # MongoDB reads a numeric segment as the index of an array element.
+            # `-1` is not one: it reads it as a field name, and an array has none.
+            if not segment.isdigit() or int(segment) >= len(here):
+                return False, None
+            here = here[int(segment)]
+        else:
+            # The path goes on past a value: `priority.high` over a string.
+            return False, None
+    return True, here
+
+
 def validate_agent_id(agent_id: str) -> None:
     """Check that an agent_id is a single field name, usable as `agents.<agent_id>`.
 

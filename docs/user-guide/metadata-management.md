@@ -287,6 +287,41 @@ result = metadata_tool(action="delete", keys=["temp_field"])
 # Returns: "Successfully deleted metadata fields: ['temp_field']"
 ```
 
+### The Tool Reads The Paths It Writes
+
+[Keys are paths](#keys-are-paths) for the tool too, in the three actions:
+
+```python
+# Writes metadata.user.name and keeps every other field of user
+metadata_tool(action="set", metadata={"user.name": "Ana"})
+
+# Reads that same field: a dotted key is resolved, not looked up literally
+metadata_tool(action="get", keys=["user.name", "tags.0"])
+# Returns: 'Metadata retrieved: {"user.name": "Ana", "tags.0": "urgent"}'
+
+# Removes only that field
+metadata_tool(action="delete", keys=["user.name"])
+```
+
+A model asked to store a user tends to pass the whole document, which is what
+MongoDB's `$set` replaces. The reply says so, because it is the only thing the
+agent gets to notice it with:
+
+```python
+metadata_tool(action="set", metadata={"user": {"name": "Eva"}})
+# Returns: "Successfully updated metadata fields: ['user']. Careful: ['user']
+#           received a whole document, which replaces what was stored under it.
+#           Use dot notation in the key ("user.<field>") to update one field
+#           and keep the rest"
+```
+
+!!! warning "Changed in v0.22.0"
+    `get` used to filter the top-level keys, so an agent that had just stored
+    `user.name` was told there was no such metadata. It now resolves the path,
+    on the document the read already returned and with no extra round-trip.
+    A stored `None` or `False` is a value, not an absence, and is returned as
+    such.
+
 ### Agent Usage Example
 
 ```python
@@ -332,32 +367,45 @@ response = agent("What do you know about this customer?")
 
 ### Tool Schema
 
-The metadata tool is defined with this JSON schema:
+Strands builds the tool spec from the function's signature and its docstring,
+so the docstring **is** the contract the model reads:
 
 ```json
 {
     "name": "manage_metadata",
-    "description": "Manage session metadata with get, set/update, or delete operations.",
+    "description": "Manage session metadata with get, set/update, or delete operations.\n\nA key is a path in dot notation: a dot addresses a field inside a\nstored document, in the three actions. Prefer it, because setting a\nkey to a whole document replaces what was stored under it.\n\nReturns:\n    A string describing the result of the operation",
     "inputSchema": {
-        "type": "object",
-        "properties": {
-            "action": {
-                "type": "string",
-                "description": "The action to perform: 'get', 'set', 'update', or 'delete'"
+        "json": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "description": "The action to perform - \"get\", \"set\", \"update\", or \"delete\""
+                },
+                "metadata": {
+                    "default": null,
+                    "description": "For set/update actions, a dictionary of key-value pairs to set. A dotted key updates one nested field and keeps its siblings ({\"user.name\": \"Ana\"}); a key whose value is a document replaces the whole document stored under it ({\"user\": {\"name\": \"Ana\"}} drops every other field of user)."
+                },
+                "keys": {
+                    "default": null,
+                    "description": "For get action, optional list of specific keys to retrieve. For delete action, list of keys to remove. Dotted keys address nested fields here too (\"user.name\", \"tags.0\")."
+                }
             },
-            "metadata": {
-                "type": "object",
-                "description": "For set/update: dictionary of key-value pairs"
-            },
-            "keys": {
-                "type": "array",
-                "description": "For get: specific keys to retrieve. For delete: keys to remove"
-            }
-        },
-        "required": ["action"]
+            "required": ["action"]
+        }
     }
 }
 ```
+
+!!! danger "Fixed in v0.22.0: the tool broke the request that carried it"
+    `inputSchema` used to be hand-written and assigned verbatim, **without the
+    `{"json": ...}` wrapper** that `ToolSpec` requires. Every model provider
+    unwraps that key: the Anthropic one raised `KeyError`, and Bedrock sent the
+    bare schema, which botocore rejects with
+    `Unknown parameter in toolConfig.tools[0].toolSpec.inputSchema` before the
+    request leaves the process. **An agent given this tool failed on its first
+    call, whether or not it ever used the tool.** If you kept the tool out of
+    your agents for that reason, it works now.
 
 ## Metadata Hooks
 

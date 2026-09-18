@@ -536,13 +536,25 @@ def manage_metadata(
 **Get Metadata**:
 - `action="get"`: Returns all metadata
 - `action="get", keys=["field1", "field2"]`: Returns only specified fields
+- `action="get", keys=["user.name", "tags.0"]`: A key is a path, so it reads the nested field a dotted key wrote
 
 **Set/Update Metadata**:
 - `action="set", metadata={"key": "value"}`: Updates specified metadata fields
 - `action="update", metadata={"key": "value"}`: Alias for set (same behavior)
+- `action="set", metadata={"user.name": "Ana"}`: Updates one nested field and keeps its siblings
+- `action="set", metadata={"user": {"name": "Ana"}}`: **Replaces** the whole document stored under `user`. The reply says so, naming the keys it replaced, because that is all the agent gets to notice it
 
 **Delete Metadata**:
 - `action="delete", keys=["field1", "field2"]`: Deletes specified fields
+
+#### Keys Are Paths, In The Three Actions
+
+A dot in a key addresses a field inside a stored document, the same way in `get`, `set` and `delete`. Before v0.22.0 only the writes took it that way: `get` filtered the top-level keys, so an agent that had just stored `user.name` was told there was no such metadata (#47).
+
+The rule, and what is rejected before anything is written, is in [names that become paths](mongodb-session-repository.md#names-that-become-paths).
+
+!!! warning "The tool spec was malformed before v0.22.0"
+    `inputSchema` was hand-written and assigned verbatim, without the `{"json": ...}` wrapper that `ToolSpec` requires. Every model provider unwraps that key: the Anthropic one raised `KeyError`, and Bedrock sent the bare schema, which botocore rejects before the request leaves the process. **An agent given this tool failed on its first call, whether or not it used the tool.** It is now built by Strands from the function's signature and docstring, which is also what puts the rule above in front of the model.
 
 #### Example
 
@@ -568,6 +580,17 @@ print(result)  # "All metadata: {...}"
 
 result = metadata_tool(action="set", metadata={"priority": "high"})
 print(result)  # "Successfully updated metadata fields: ['priority']"
+
+result = metadata_tool(action="set", metadata={"user.name": "Ana"})
+result = metadata_tool(action="get", keys=["user.name"])
+print(result)  # 'Metadata retrieved: {"user.name": "Ana"}'
+
+# A whole document replaces what was stored under the key, and the reply says so
+result = metadata_tool(action="set", metadata={"user": {"name": "Eva"}})
+print(result)
+# Successfully updated metadata fields: ['user']. Careful: ['user'] received a
+# whole document, which replaces what was stored under it. Use dot notation in
+# the key ("user.<field>") to update one field and keep the rest
 
 result = metadata_tool(action="delete", keys=["old_field"])
 print(result)  # "Successfully deleted metadata fields: ['old_field']"

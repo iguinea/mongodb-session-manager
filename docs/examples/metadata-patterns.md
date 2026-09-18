@@ -544,6 +544,10 @@ You can use the manage_metadata tool to:
 - Set/update metadata: manage_metadata("set", {"key": "value"})
 - Delete keys: manage_metadata("delete", keys=["key1"])
 
+A key is a path: manage_metadata("set", {"user.name": "Ana"}) updates one
+nested field and keeps the rest of user, and manage_metadata("get",
+keys=["user.name"]) reads it back.
+
 Use metadata to track:
 - User preferences
 - Conversation context
