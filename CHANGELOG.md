@@ -1,5 +1,9 @@
 # Changelog
 
+## [2026-09-18] PR #112 - Chore: runtime reducido a lo que importa src/ y lock sin vulnerabilidades (#111) (@iguinea)
+
+- Chore: runtime reducido a lo que importa src/ y lock sin vulnerabilid…
+
 ## [2026-09-18] PR #110 - Docs: entrada de v0.24.0 en el CHANGELOG (#53) (@iguinea)
 
 - Docs: entrada de v0.24.0 en el CHANGELOG (#53)
