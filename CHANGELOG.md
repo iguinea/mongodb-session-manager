@@ -1,5 +1,9 @@
 # Changelog
 
+## [2026-09-18] PR #118 - Release: 1.0.0 (#111) (@iguinea)
+
+- Release: 1.0.0 (#111)
+
 ## [2026-09-18] PR #117 - Chore: nombres y textos neutros en benchmarks, tests y ejemplos (#111) (@iguinea)
 
 - Chore: nombres y textos neutros en benchmarks, tests y ejemplos (#111)
