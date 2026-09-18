@@ -34,7 +34,7 @@ TOOL_RESULT: dict[str, Any] = {
     "role": "user",
     "content": [{"toolResult": {"toolUseId": "t1", "content": [{"text": "42"}]}}],
 }
-ANSWER: dict[str, Any] = {"role": "assistant", "content": [{"text": "42 kWh"}]}
+ANSWER: dict[str, Any] = {"role": "assistant", "content": [{"text": "42"}]}
 
 TURN = [PROMPT, TOOL_USE, TOOL_RESULT, ANSWER]
 

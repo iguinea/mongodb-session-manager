@@ -49,7 +49,7 @@ SYSTEM_PROMPT = "Eres un asistente de soporte. " + (
 # 512 characters per message, the size the #57 and #58 measurements used.
 MESSAGE_TEXT = "m" * 512
 SUPERVISOR_ID = "supervisor"
-SUB_AGENT_ID = "info_suministro_agent"
+SUB_AGENT_ID = "lookup_agent"
 _SEED_BATCH = 500
 # Repeated across the two aggregations below.
 _AGENTS = "$agents"
@@ -111,8 +111,8 @@ def tool_agent(manager: Any, tools: list[Any]) -> Agent:
         agent_id=SUPERVISOR_ID,
         model=ScriptedModel(
             [
-                list(tool_stream(SUB_AGENT_ID, "tu-1", '{"query": "consumo"}')),
-                list(text_stream("Tu consumo del ultimo mes es de 312 kWh.")),
+                list(tool_stream(SUB_AGENT_ID, "tu-1", '{"query": "estado"}')),
+                list(text_stream("Tu pedido está en camino.")),
             ],
             SUPERVISOR_ID,
         ),
@@ -126,11 +126,11 @@ def tool_agent(manager: Any, tools: list[Any]) -> Agent:
 def local_tool() -> Any:
     """A tool that answers on its own, without touching the database."""
 
-    @tool(name=SUB_AGENT_ID, description="Consulta datos de suministro")
-    def info_suministro_agent(query: str) -> str:
-        return f"Datos del suministro para {query}: OK"
+    @tool(name=SUB_AGENT_ID, description="Consulta datos de referencia")
+    def lookup_agent(query: str) -> str:
+        return f"Datos para {query}: OK"
 
-    return info_suministro_agent
+    return lookup_agent
 
 
 def sub_agent_tool(factory: Any, session_id: str) -> Any:
@@ -140,18 +140,16 @@ def sub_agent_tool(factory: Any, session_id: str) -> Any:
     invocation, on the same event loop, exactly as production does.
     """
 
-    @tool(name=SUB_AGENT_ID, description="Consulta datos de suministro")
-    def info_suministro_agent(query: str) -> str:
+    @tool(name=SUB_AGENT_ID, description="Consulta datos de referencia")
+    def lookup_agent(query: str) -> str:
         sub_manager = factory.create_session_manager(session_id)
-        sub = scripted_agent(
-            sub_manager, SUB_AGENT_ID, "sub", "Datos del suministro: OK"
-        )
+        sub = scripted_agent(sub_manager, SUB_AGENT_ID, "sub", "Datos: OK")
         try:
             return str(sub(query))
         finally:
             sub_manager.close()
 
-    return info_suministro_agent
+    return lookup_agent
 
 
 class Workload:
