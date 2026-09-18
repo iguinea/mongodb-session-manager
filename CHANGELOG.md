@@ -1,5 +1,9 @@
 # Changelog
 
+## [2026-09-18] PR #130 - Fix: initialize() acota su ping de arranque con initialize_timeout_ms (#122) (@iguinea)
+
+- Fix: initialize() acota su ping de arranque con initialize_timeout_ms…
+
 ## [2026-09-18] PR #129 - Fix: update_metadata/delete_metadata/add_feedback elevan ValueError si la sesión no existe (#121) (@iguinea)
 
 - Fix: update_metadata/delete_metadata/add_feedback elevan ValueError s…
