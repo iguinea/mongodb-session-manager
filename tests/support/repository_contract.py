@@ -60,6 +60,14 @@ AGENT_SCOPED_CALLS = [
     pytest.param(
         lambda s, sid, aid: s.create_message(sid, aid, _message()), id="create_message"
     ),
+    pytest.param(
+        lambda s, sid, aid: s.create_messages(sid, aid, [_message()]),
+        id="create_messages",
+    ),
+    pytest.param(
+        lambda s, sid, aid: s.create_messages(sid, aid, []),
+        id="create_messages_empty",
+    ),
     pytest.param(lambda s, sid, aid: s.read_message(sid, aid, 0), id="read_message"),
     pytest.param(
         lambda s, sid, aid: s.update_message(sid, aid, _message()), id="update_message"
@@ -195,6 +203,102 @@ class SessionRepositoryContract:
         read = store.read_message(populated, "a1", 1)
 
         assert read.message["content"][0]["text"] == "m1"
+
+    # -- create_messages ---------------------------------------------------
+
+    def test_create_messages_appends_them_in_order(self, store, populated):
+        """A batch lands as one block, in the order it was given.
+
+        The order of the array is the order of the conversation: a batch that
+        reordered it would hand the model a history it never produced.
+        """
+        batch = [_message(2), _message(3), _message(4)]
+
+        store.create_messages(populated, "a1", batch)
+
+        assert [m.message_id for m in store.list_messages(populated, "a1")] == [
+            0,
+            1,
+            2,
+            3,
+            4,
+        ]
+
+    def test_create_messages_stamps_an_identity_on_each(self, store, populated):
+        """Every message of the batch is born with its own identity (#78)."""
+        batch = [_message(2), _message(3)]
+
+        store.create_messages(populated, "a1", batch)
+
+        stored = [self._raw_message(store, populated, i)["storage_id"] for i in (2, 3)]
+        assert len(set(stored)) == 2
+        assert [storage_id_of(m) for m in batch] == stored
+
+    def test_create_messages_writes_fields_on_the_last(self, store, populated):
+        """The metrics of the invocation ride in the same write as its messages.
+
+        They belong to the last message, and the event loop only has them once
+        the invocation closes -- which is exactly when the batch is flushed, so
+        they cost no write of their own.
+        """
+        store.create_messages(
+            populated,
+            "a1",
+            [_message(2), _message(3)],
+            fields_on_last={"event_loop_metrics.accumulated_usage": {"totalTokens": 7}},
+        )
+
+        assert "event_loop_metrics" not in self._raw_message(store, populated, 2)
+        assert self._raw_message(store, populated, 3)["event_loop_metrics"] == {
+            "accumulated_usage": {"totalTokens": 7}
+        }
+
+    def test_create_messages_writes_agent_fields_in_the_same_write(
+        self, store, populated
+    ):
+        """The agent config rides along too, as it does in update_message_fields()."""
+        store.create_messages(
+            populated,
+            "a1",
+            [_message(2)],
+            agent_set_operations={"agent_data.model": "m1"},
+        )
+
+        assert store.get_agent_config(populated, "a1")["model"] == "m1"
+
+    def test_create_messages_advances_the_session_clock(self, store, populated):
+        """The root updated_at is how consumers compute a session's end (#54)."""
+        before = self._raw_session(store, populated)["updated_at"]
+
+        store.create_messages(populated, "a1", [_message(2)])
+
+        assert self._raw_session(store, populated)["updated_at"] > before
+
+    def test_create_messages_with_nothing_writes_nothing(self, store, populated):
+        """An empty flush is a no-op, not a write that only moves the clock."""
+        before = self._raw_session(store, populated)
+
+        store.create_messages(populated, "a1", [])
+
+        assert self._raw_session(store, populated) == before
+
+    def test_create_messages_without_a_session_raises(self, store):
+        """Same failure as create_message(): the caller must not lose messages quietly."""
+        with pytest.raises(ValueError):
+            store.create_messages("nope", "a1", [_message()])
+
+    def test_create_messages_rejects_a_bad_field_without_writing(
+        self, store, populated
+    ):
+        """A key that MongoDB would parse as syntax is refused before the push."""
+        before = self._raw_session(store, populated)
+
+        with pytest.raises(ValueError, match="field"):
+            store.create_messages(
+                populated, "a1", [_message(2)], fields_on_last={"$where": 1}
+            )
+
+        assert self._raw_session(store, populated) == before
 
     # -- update_message_fields --------------------------------------------
 

@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import copy
 import secrets
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
@@ -43,6 +44,7 @@ from strands.types.session import Session, SessionAgent, SessionMessage
 
 from mongodb_session_manager.agent_content import LastPersistedAgents
 from mongodb_session_manager.field_names import (
+    apply_fields,
     nested_document,
     validate_agent_id,
     validate_field_paths,
@@ -303,21 +305,50 @@ class InMemorySessionRepository(SessionRepository):
         **kwargs: Any,
     ) -> None:
         """Append a message to an agent, stamping its stable identity."""
+        self.create_messages(session_id, agent_id, [session_message], **kwargs)
+
+    def create_messages(
+        self,
+        session_id: str,
+        agent_id: str,
+        session_messages: Sequence[SessionMessage],
+        fields_on_last: Mapping[str, Any] | None = None,
+        agent_set_operations: Mapping[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """Append messages in order, in what MongoDB does with one `$push`."""
+        validate_agent_id(agent_id)
+        validate_field_paths(agent_set_operations or {}, "agent field")
+        validate_field_paths(fields_on_last or {}, "message field")
+
+        if not session_messages:
+            return
+
         agent = self._agent(session_id, agent_id)
         if agent is None:
             raise ValueError(f"Session {session_id} not found")
 
         now = datetime.now(UTC)
-        storage_id = new_storage_id()
-        message_data = copy.deepcopy(session_message.__dict__)
-        message_data[STORAGE_ID_FIELD] = storage_id
-        message_data["created_at"] = now
-        message_data["updated_at"] = now
+        documents = []
+        for session_message in session_messages:
+            storage_id = new_storage_id()
+            message_data = copy.deepcopy(session_message.__dict__)
+            message_data[STORAGE_ID_FIELD] = storage_id
+            message_data["created_at"] = now
+            message_data["updated_at"] = now
+            documents.append((message_data, session_message, storage_id))
 
-        agent["messages"].append(message_data)
+        apply_fields(documents[-1][0], fields_on_last or {}, "message field")
+
+        for message_data, session_message, storage_id in documents:
+            agent["messages"].append(message_data)
+            attach_storage_id(session_message, storage_id)
+
+        for name, value in (agent_set_operations or {}).items():
+            _set_dotted(agent, name, copy.deepcopy(value))
+
         agent["updated_at"] = now
         self._sessions[session_id]["updated_at"] = now
-        attach_storage_id(session_message, storage_id)
 
     def read_message(
         self, session_id: str, agent_id: str, message_id: int, **kwargs: Any

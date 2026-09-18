@@ -11,11 +11,61 @@ from typing import Any, ClassVar
 import pytest
 
 from mongodb_session_manager.field_names import (
+    apply_fields,
     nested_document,
     resolve_path,
     validate_agent_id,
     validate_field_paths,
 )
+
+
+class TestApplyFields:
+    """Escribir por ruta, lo que `$set` hace con notación de punto (#53).
+
+    Es lo que mete los campos en un documento que todavía no está ahí para
+    hacerle `$set`: un mensaje que se está creando con un `$push`, o la semilla
+    de metadata que nace con la sesión.
+    """
+
+    def test_writes_each_path_where_it_points(self):
+        assert apply_fields({}, {"a": 1, "b.c": 2}) == {"a": 1, "b": {"c": 2}}
+
+    def test_keeps_what_the_document_already_had(self):
+        document = {"message": {"role": "user"}, "message_id": 3}
+
+        apply_fields(document, {"event_loop_metrics.accumulated_usage": {"t": 7}})
+
+        assert document == {
+            "message": {"role": "user"},
+            "message_id": 3,
+            "event_loop_metrics": {"accumulated_usage": {"t": 7}},
+        }
+
+    def test_a_path_into_an_existing_subdocument_keeps_its_siblings(self):
+        document = {"message": {"role": "user", "content": []}}
+
+        apply_fields(document, {"message.tracking_id": "t-1"})
+
+        assert document["message"] == {
+            "role": "user",
+            "content": [],
+            "tracking_id": "t-1",
+        }
+
+    def test_the_last_value_of_a_path_wins(self):
+        assert apply_fields({"a": 1}, {"a": 2}) == {"a": 2}
+
+    def test_it_validates_before_it_writes(self):
+        document = {"a": 1}
+
+        with pytest.raises(ValueError, match="message field"):
+            apply_fields(document, {"b": 2, "$where": 3}, "message field")
+
+        assert document == {"a": 1}
+
+    def test_a_path_that_collides_with_a_value_is_refused(self):
+        with pytest.raises(ValueError, match="conflicts"):
+            apply_fields({"a": 1}, {"a.b": 2})
 
 
 class TestAgentId:

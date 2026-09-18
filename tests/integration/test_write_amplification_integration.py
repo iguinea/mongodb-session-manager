@@ -207,23 +207,30 @@ class TestTurnOperationBudget:
 
         Contra v0.9.1 el mismo escenario producía 42 operaciones: 21 updates,
         13 finds y 8 createIndexes. Con #54 bajó a 21 (15 updates, 6 finds y 0
-        createIndexes), con #65 a 19, con #67 a 16 y con #66 a 14.
+        createIndexes), con #65 a 19, con #67 a 16, con #66 a 14 y con #53 a 10.
 
-        El presupuesto de 8 se desglosa así, medido con este mismo listener
+        El presupuesto de 4 se desglosa así, medido con este mismo listener
         (6 mensajes en total: 4 del supervisor, 2 del sub-agente):
-          6  create_message ($push, uno por mensaje)
-          2  métricas, una por agente, en el cierre de su invocación
+          2  la pregunta que abre cada invocación, escrita al llegar
+          2  el cierre de cada invocación: sus demás mensajes y sus métricas
 
-        Las métricas eran 4: el supervisor las escribía también en el sync del
-        toolResult y en el de su mensaje final, y esa segunda llevaba las del
-        ciclo anterior, porque Strands dispara MessageAddedEvent antes de
-        acumularlas (#66). La configuración no viaja: cada manager la conoce desde read_agent()
-        (#65). Antes eran 2 escrituras más, de ~14 KB cada una. El estado del
-        agente tampoco (#67): ninguno de los dos cambia en el turno, y eran 3
-        update_agent, el primer sync de cada manager y el del supervisor tras
-        la tool, porque Strands sube la versión de interrupt_state sin cambiar
-        su contenido. El presupuesto de cada hito se sigue en la issue maestra
-        #56.
+        Eran 8: un `$push` por mensaje más una escritura de métricas por agente.
+        Desde #53 los mensajes que produce el event loop esperan al cierre de
+        su invocación y salen en un solo `$push`, con las métricas ya dentro
+        del último -- que es cuando el event loop las tiene acumuladas (#66).
+        Solo la pregunta del usuario no espera: es lo único del turno que nada
+        puede volver a producir.
+
+        Las métricas llegaron a ser 4: el supervisor las escribía también en el
+        sync del toolResult y en el de su mensaje final, y esa segunda llevaba
+        las del ciclo anterior, porque Strands dispara MessageAddedEvent antes
+        de acumularlas (#66). La configuración no viaja: cada manager la conoce
+        desde read_agent() (#65). Antes eran 2 escrituras más, de ~14 KB cada
+        una. El estado del agente tampoco (#67): ninguno de los dos cambia en
+        el turno, y eran 3 update_agent, el primer sync de cada manager y el
+        del supervisor tras la tool, porque Strands sube la versión de
+        interrupt_state sin cambiar su contenido. El presupuesto de cada hito
+        se sigue en la issue maestra #56.
         """
         factory, _, counter = turn_factory
 
@@ -235,7 +242,7 @@ class TestTurnOperationBudget:
         counter.enabled = False
 
         counts = counter.counts()
-        assert counts["update"] <= 8, f"{counts['update']} updates: {counts}"
+        assert counts["update"] <= 4, f"{counts['update']} updates: {counts}"
         assert counts["createIndexes"] == 0, "los índices ya estaban asegurados"
         assert counts["find"] <= 6, f"{counts['find']} finds: {counts}"
         rewritten = [
@@ -438,3 +445,142 @@ class TestTurnOperationBudget:
         )
         usage = last_message["event_loop_metrics"]["accumulated_usage"]
         assert usage["totalTokens"] > 0
+
+
+class TestWhatABatchMayNotCost:
+    """Los invariantes que #53 tenía que demostrar antes de agrupar mensajes.
+
+    Bufferizar difiere la durabilidad de un mensaje hasta el cierre de su
+    invocación. Estos casos fijan hasta dónde llega esa ventana, contra un
+    MongoDB real: lo que se escribe al momento, lo que sobrevive a un turno que
+    revienta, y lo que ve quien lee la colección por su cuenta.
+    """
+
+    def test_the_question_is_stored_before_the_model_answers(
+        self, turn_factory, unique_session_id
+    ):
+        """La pregunta del usuario está en disco mientras el modelo responde.
+
+        Es la razón de que el lote no sea el turno entero: una tool que tarda
+        medio minuto es medio minuto en el que un proceso puede morir, y la
+        pregunta es lo único que nadie puede volver a producir.
+        """
+        factory, collection, _ = turn_factory
+        stored_while_answering: list[list[str]] = []
+
+        @tool(name="lenta", description="Tarda")
+        def lenta(query: str) -> str:
+            doc = collection.find_one({"_id": unique_session_id}) or {}
+            messages = doc.get("agents", {}).get("supervisor", {}).get("messages", [])
+            stored_while_answering.append(
+                [m["message"]["content"][0].get("text", "") for m in messages]
+            )
+            return "ok"
+
+        manager = factory.create_session_manager(unique_session_id)
+        supervisor = Agent(
+            agent_id="supervisor",
+            model=ScriptedModel(
+                [
+                    list(tool_stream("lenta", "tu-1", '{"query": "x"}')),
+                    list(text_stream("listo")),
+                ],
+                "supervisor",
+            ),
+            system_prompt=SYSTEM_PROMPT,
+            tools=[lenta],
+            session_manager=manager,
+        )
+        supervisor("cuanto he gastado?")
+        manager.close()
+
+        assert stored_while_answering == [["cuanto he gastado?"]]
+
+    def test_a_turn_that_blows_up_keeps_its_messages(
+        self, turn_factory, unique_session_id
+    ):
+        """Una invocación que revienta escribe su lote igual.
+
+        `AfterInvocationEvent` sale de un `finally` en `strands/agent/agent.py`,
+        así que el cierre corre también cuando el modelo falla. Sin esa
+        garantía, agrupar mensajes sería cambiar escrituras por pérdidas.
+        """
+        factory, collection, _ = turn_factory
+        manager = factory.create_session_manager(unique_session_id)
+
+        @tool(name="rota", description="Falla")
+        def rota(query: str) -> str:
+            raise RuntimeError("la tool se cayó")
+
+        class ExplodingModel(ScriptedModel):
+            """Pide la tool y se cae en el ciclo siguiente, con el toolResult ya dentro."""
+
+            async def stream(self, *args: Any, **kwargs: Any):
+                if self._index:
+                    raise RuntimeError("modelo caído")
+                async for event in super().stream(*args, **kwargs):
+                    yield event
+
+        supervisor = Agent(
+            agent_id="supervisor",
+            model=ExplodingModel(
+                [list(tool_stream("rota", "tu-1", '{"query": "x"}'))], "supervisor"
+            ),
+            system_prompt=SYSTEM_PROMPT,
+            tools=[rota],
+            session_manager=manager,
+        )
+
+        with pytest.raises(Exception, match="modelo caído"):
+            supervisor("hola")
+        manager.close()
+
+        messages = collection.find_one({"_id": unique_session_id})["agents"][
+            "supervisor"
+        ]["messages"]
+        roles = [m["message"]["role"] for m in messages]
+        assert roles == ["user", "assistant", "user"], roles
+        assert [m["message_id"] for m in messages] == [0, 1, 2]
+
+    def test_the_history_keeps_its_order_across_turns(
+        self, turn_factory, unique_session_id
+    ):
+        """Tres turnos seguidos: el array es la conversación, en su orden.
+
+        Un lote entra con `$each` al final del array, y un mensaje inmediato
+        vuelca antes lo que haya pendiente. Si alguna de las dos cosas fallara,
+        el historial restaurado contaría otra cosa que la conversación.
+        """
+        factory, collection, _ = turn_factory
+
+        for prompt in ("una", "dos", "tres"):
+            run_turn(factory, unique_session_id, prompt)
+
+        messages = collection.find_one({"_id": unique_session_id})["agents"][
+            "supervisor"
+        ]["messages"]
+        assert [m["message_id"] for m in messages] == list(range(len(messages)))
+        prompts = [
+            m["message"]["content"][0].get("text")
+            for m in messages
+            if m["message"]["role"] == "user" and "text" in m["message"]["content"][0]
+        ]
+        assert prompts == ["una", "dos", "tres"]
+
+    def test_a_restored_manager_reads_the_batch_of_the_previous_turn(
+        self, turn_factory, unique_session_id
+    ):
+        """El turno siguiente restaura lo que el lote del anterior escribió."""
+        factory, _, _ = turn_factory
+        run_turn(factory, unique_session_id, "hola")
+
+        manager = factory.create_session_manager(unique_session_id)
+        restored = scripted_agent(manager, "supervisor", "supervisor", "ok")
+        manager.close()
+
+        assert [m["role"] for m in restored.messages] == [
+            "user",
+            "assistant",
+            "user",
+            "assistant",
+        ]
