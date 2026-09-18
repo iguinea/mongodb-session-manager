@@ -1,5 +1,9 @@
 # Changelog
 
+## [2026-09-18] PR #117 - Chore: nombres y textos neutros en benchmarks, tests y ejemplos (#111) (@iguinea)
+
+- Chore: nombres y textos neutros en benchmarks, tests y ejemplos (#111)
+
 ## [2026-09-18] PR #116 - Update: toda opción de MongoClient llega al cliente y nada se descarta en silencio (#111) (@iguinea)
 
 - Update: toda opción de MongoClient llega al cliente y nada se descart…
