@@ -1,5 +1,9 @@
 # Changelog
 
+## [2026-09-18] PR #127 - Fix: update_agent_fields ya no crea agentes fantasma sobre agentes inexistentes (#119) (@iguinea)
+
+- Fix: update_agent_fields ya no crea agentes fantasma sobre agentes in…
+
 ## [2026-09-18] PR #126 - Fix: los eventos delete de los hooks SQS y WebSocket publican las claves borradas (#120) (@iguinea)
 
 - Fix: los deletes de los hooks SQS y WebSocket publican las claves bor…
