@@ -1,5 +1,9 @@
 # Changelog
 
+## [2026-09-18] PR #129 - Fix: update_metadata/delete_metadata/add_feedback elevan ValueError si la sesión no existe (#121) (@iguinea)
+
+- Fix: update_metadata/delete_metadata/add_feedback elevan ValueError s…
+
 ## [2026-09-18] PR #128 - Docs: plan del techo de arranque del ping de initialize() (#122) (@iguinea)
 
 - Docs: accept plan for the initialize() ping startup ceiling (#122)
