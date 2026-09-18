@@ -81,5 +81,11 @@ class TestMongoDBContract(SessionRepositoryContract):
             {"$push": {"agents.a1.messages": self.legacy_message_document(message_id)}},
         )
 
+    def _seed_legacy_bare_agent(self, store, session_id: str) -> None:
+        store.collection.update_one(
+            {"_id": session_id},
+            {"$set": {"agents.ghost.agent_data.model": "m"}},
+        )
+
     def _session_guardrail_events(self, store, session_id: str) -> list[dict[str, Any]]:
         return self._raw_session(store, session_id).get("guardrail_events", [])

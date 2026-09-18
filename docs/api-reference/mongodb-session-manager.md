@@ -802,7 +802,7 @@ This method allows you to modify an agent's stored configuration. You can update
 
 #### Raises
 
-- `ValueError`: If the session doesn't exist.
+- `ValueError`: If the session or agent doesn't exist.
 - `PyMongoError`: If the database operation fails.
 
 #### Example
@@ -866,7 +866,7 @@ Must be called after `sync_agent()` (the agent must already exist in the session
 
 #### Raises
 
-- `ValueError`: If the session doesn't exist.
+- `ValueError`: If the session or agent doesn't exist.
 
 #### Example
 

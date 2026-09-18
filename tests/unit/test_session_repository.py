@@ -1474,10 +1474,10 @@ class TestUpdateAgentFields:
         set_data = mock_mongo_collection.update_one.call_args[0][1]["$set"]
         assert set_data["agents.a1.agent_data.system_prompt"] == "hola"
 
-    def test_filter_has_no_positional_clause(
+    def test_filter_requires_the_agent_without_a_positional_clause(
         self, mock_repository, mock_mongo_collection
     ):
-        """Sin métricas no hay mensaje al que apuntar: el filtro es solo la sesión.
+        """Sin métricas no hay mensaje al que apuntar, pero el agente debe existir.
 
         Colar aquí una cláusula posicional dejaría la configuración sin escribir
         en el primer sync de un agente que todavía no tiene mensajes.
@@ -1485,9 +1485,9 @@ class TestUpdateAgentFields:
         mock_repository.update_agent_fields("s1", "a1", {"agent_data.model": "m"})
 
         query = mock_mongo_collection.update_one.call_args[0][0]
-        assert query == {"_id": "s1"}
+        assert query == {"_id": "s1", "agents.a1": {"$exists": True}}
 
-    def test_returns_false_when_the_session_is_missing(
+    def test_returns_false_when_the_session_or_agent_is_missing(
         self, mock_repository, mock_mongo_collection
     ):
         mock_mongo_collection.update_one.return_value = MagicMock(

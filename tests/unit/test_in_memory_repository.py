@@ -11,7 +11,10 @@ from typing import Any
 import pytest
 
 from mongodb_session_manager.mongodb_session_repository import MongoDBSessionRepository
-from tests.support.in_memory_session_repository import InMemorySessionRepository
+from tests.support.in_memory_session_repository import (
+    InMemorySessionRepository,
+    _set_dotted,
+)
 from tests.support.repository_contract import SessionRepositoryContract
 
 
@@ -44,6 +47,13 @@ class TestInMemoryContract(SessionRepositoryContract):
     def _push_legacy_message(self, store, session_id: str, message_id: int) -> None:
         store.push_raw_message(
             session_id, "a1", self.legacy_message_document(message_id)
+        )
+
+    def _seed_legacy_bare_agent(self, store, session_id: str) -> None:
+        _set_dotted(
+            store._sessions[session_id],
+            "agents.ghost.agent_data.model",
+            "m",
         )
 
     def _session_guardrail_events(self, store, session_id: str) -> list[dict[str, Any]]:

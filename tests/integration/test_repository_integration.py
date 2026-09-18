@@ -280,6 +280,42 @@ class TestAgentLifecycle:
         doc = repo.collection.find_one({"_id": unique_session_id})
         assert len(doc["agents"]) == 3
 
+    def test_update_agent_fields_does_not_create_an_unknown_agent(
+        self, repo, unique_session_id
+    ):
+        repo.create_session(
+            Session(session_id=unique_session_id, session_type="default")
+        )
+        before = repo.collection.find_one({"_id": unique_session_id})
+
+        assert (
+            repo.update_agent_fields(
+                unique_session_id, "ghost", {"agent_data.model": "m"}
+            )
+            is False
+        )
+        assert repo.collection.find_one({"_id": unique_session_id}) == before
+
+    def test_update_agent_fields_writes_to_an_existing_agent(
+        self, repo, unique_session_id
+    ):
+        repo.create_session(
+            Session(session_id=unique_session_id, session_type="default")
+        )
+        repo.create_agent(
+            unique_session_id,
+            SessionAgent(agent_id="agent-1", state={}, conversation_manager_state={}),
+        )
+
+        assert (
+            repo.update_agent_fields(
+                unique_session_id, "agent-1", {"agent_data.model": "m"}
+            )
+            is True
+        )
+        stored = repo.collection.find_one({"_id": unique_session_id})
+        assert stored["agents"]["agent-1"]["agent_data"]["model"] == "m"
+
 
 # ---------------------------------------------------------------------------
 # Message lifecycle
