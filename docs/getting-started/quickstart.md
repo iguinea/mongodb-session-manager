@@ -61,21 +61,16 @@ agent = Agent(
     system_prompt="You are a helpful assistant that remembers our conversation.",
 )
 
-# Step 3: Have a conversation
+# Step 3: Have a conversation. Each call is saved as it runs: the messages,
+# the agent state and the metrics, with no sync call of your own
 response1 = agent("Hi! My name is Alice.")
 print(f"Agent: {response1}\n")
 
-# Step 4: Sync to save the conversation and metrics
-session_manager.sync_agent(agent)
-
-# Step 5: Ask a follow-up question
+# Step 4: Ask a follow-up question
 response2 = agent("What's my name?")
 print(f"Agent: {response2}\n")
 
-# Step 6: Sync again
-session_manager.sync_agent(agent)
-
-# Step 7: Clean up
+# Step 5: Clean up
 session_manager.close()
 
 print("✓ Conversation saved to MongoDB!")
@@ -91,8 +86,8 @@ uv run python my_first_session.py
 
 1. **Session Created**: A new MongoDB document was created with ID `quickstart-session-001`
 2. **Agent Registered**: The agent was added to the session
-3. **Messages Stored**: Both user messages and agent responses were persisted
-4. **Metrics Captured**: Token counts and latency were automatically recorded
+3. **Messages Stored**: Both user messages and agent responses were persisted, by the hooks the agent registers with the session manager
+4. **Metrics Captured**: Token counts and latency were automatically recorded on the last message of each call
 5. **State Saved**: The entire conversation state is now in MongoDB
 
 ## Resuming a Session
@@ -123,8 +118,7 @@ agent = Agent(
 response = agent("Can you remind me what we talked about earlier?")
 print(f"Agent: {response}\n")
 
-# Sync and close
-session_manager.sync_agent(agent)
+# Close
 session_manager.close()
 ```
 
@@ -161,7 +155,6 @@ agent = Agent(
 )
 
 response = agent("Hello!")
-session_manager.sync_agent(agent)
 
 # Update metadata during conversation
 session_manager.update_metadata({"topic": "technical-support", "priority": "high"})
@@ -194,7 +187,6 @@ agent = Agent(
 # Have a conversation
 response = agent("Explain what MongoDB is in one sentence.")
 print(f"Agent: {response}\n")
-session_manager.sync_agent(agent)
 
 # User provides feedback
 session_manager.add_feedback(
@@ -236,8 +228,8 @@ def handle_request(session_id: str):
 
     agent = Agent(model="claude-3-sonnet", session_manager=session_manager)
 
-    response = agent("Hello!")
-    session_manager.sync_agent(agent)
+    response = agent("Hello!")  # persisted as it runs
+    session_manager.close()  # the pooled client stays open
 
     return response
 
@@ -334,9 +326,6 @@ support = Agent(
 # Each agent has separate conversation history in the same session
 translation = translator("Translate: 'Hello world' to Spanish")
 help_response = support("How do I reset my password?")
-
-session_manager.sync_agent(translator)
-session_manager.sync_agent(support)
 ```
 
 ## Verification

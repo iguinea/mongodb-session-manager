@@ -579,7 +579,7 @@ class FeedbackSNSHook:
 
 **Module**: `mongodb_session_manager.hooks.feedback_sns_hook`
 
-**Requirements**: `custom_aws.sns` module (from python-helpers package)
+**Requirements**: `boto3` (installed with the library), AWS credentials and `sns:Publish` on the topics
 
 ### Constructor
 
@@ -602,7 +602,7 @@ def __init__(
 
 #### Raises
 
-- `ImportError`: If `custom_aws.sns` module is not available.
+- `ImportError`: If `boto3` cannot be imported.
 
 ### SNS Message Format
 
@@ -672,7 +672,7 @@ from mongodb_session_manager import (
 
 # Check availability
 if not is_feedback_sns_hook_available():
-    print("SNS hook not available. Install python-helpers package.")
+    print("SNS hook not available: boto3 could not be imported.")
     exit(1)
 
 # Create SNS hook with separate topics
@@ -773,7 +773,7 @@ class MetadataSQSHook:
 
 **Module**: `mongodb_session_manager.hooks.metadata_sqs_hook`
 
-**Requirements**: `custom_aws.sqs` module (from python-helpers package)
+**Requirements**: `boto3` (installed with the library), AWS credentials and `sqs:SendMessage` on the queue
 
 ### Constructor
 
@@ -793,7 +793,7 @@ def __init__(
 
 #### Raises
 
-- `ImportError`: If `custom_aws.sqs` module is not available.
+- `ImportError`: If `boto3` cannot be imported.
 
 ### SQS Message Format
 
@@ -867,7 +867,7 @@ from mongodb_session_manager import (
 
 # Check availability
 if not is_metadata_sqs_hook_available():
-    print("SQS hook not available. Install python-helpers package.")
+    print("SQS hook not available: boto3 could not be imported.")
     exit(1)
 
 # Create SQS hook with selective field propagation
@@ -1545,7 +1545,7 @@ manager = MongoDBSessionManager(
 def is_feedback_sns_hook_available() -> bool
 ```
 
-Check if the feedback SNS hook is available (requires `custom_aws.sns` module).
+Check if the feedback SNS hook is available. It needs only `boto3`, a runtime dependency, so it is `True` wherever the library is installed.
 
 #### Returns
 
@@ -1560,7 +1560,7 @@ if is_feedback_sns_hook_available():
     from mongodb_session_manager import create_feedback_sns_hook
     # Use SNS hook
 else:
-    print("SNS hook not available. Install python-helpers package.")
+    print("SNS hook not available: boto3 could not be imported.")
 ```
 
 ### `is_metadata_sqs_hook_available`
@@ -1569,7 +1569,7 @@ else:
 def is_metadata_sqs_hook_available() -> bool
 ```
 
-Check if the metadata SQS hook is available (requires `custom_aws.sqs` module).
+Check if the metadata SQS hook is available. It needs only `boto3`, a runtime dependency, so it is `True` wherever the library is installed.
 
 #### Returns
 
@@ -1584,7 +1584,7 @@ if is_metadata_sqs_hook_available():
     from mongodb_session_manager import create_metadata_sqs_hook
     # Use SQS hook
 else:
-    print("SQS hook not available. Install python-helpers package.")
+    print("SQS hook not available: boto3 could not be imported.")
 ```
 
 ---
@@ -1594,4 +1594,4 @@ else:
 - [MongoDBSessionManager](./mongodb-session-manager.md) - Main session manager class
 - [User Guide - Metadata Management](../user-guide/metadata-management.md)
 - [User Guide - Feedback System](../user-guide/feedback-system.md)
-- [User Guide - AWS Integration](../user-guide/aws-integration.md)
+- [User Guide - AWS Integrations](../user-guide/aws-integrations.md)

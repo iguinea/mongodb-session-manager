@@ -729,7 +729,7 @@ It travels inside the `$push` of `create_message()`, so it costs **no extra writ
 - `accumulated_usage.outputTokens`: Tokens in the response
 - `accumulated_usage.totalTokens`: Sum of input and output
 
-**When Added**: By the sync Strands runs at the end of each invocation (`AfterInvocationEvent`), or by an explicit `sync_agent()` call, if `latencyMs > 0`. Not by the sync Strands runs after each message is added: `MessageAddedEvent` fires before the event loop accumulates the metrics of the model call behind that message, so they would be the previous cycle's (issue #66, v0.15.0). Documents written before v0.15.0 also carry a snapshot on intermediate messages, one cycle behind.
+**When Added**: By the sync Strands runs at the end of each invocation (`AfterInvocationEvent`), inside the same `$push` that stores the invocation's messages (v0.24.0, issue #53), or by an explicit `sync_agent()` call, as a positional `$set` on the last message, if `latencyMs > 0`. Not by the sync Strands runs after each message is added: `MessageAddedEvent` fires before the event loop accumulates the metrics of the model call behind that message, so they would be the previous cycle's (issue #66, v0.15.0). Documents written before v0.15.0 also carry a snapshot on intermediate messages, one cycle behind.
 
 **Not added when**:
 - The invocation does not reach its closing sync: a hook registered for `AfterInvocationEvent` raises before it, or the conversation manager raises in `apply_management()`, which Strands runs before that event.
@@ -746,39 +746,67 @@ return SessionMessage(**filtered_msg_data)
 
 ### Message Operations
 
-#### Create Message
+#### Create Messages
 ```python
 def create_message(self, session_id, agent_id, session_message, **kwargs):
-    message_data = session_message.__dict__
-    message_data["created_at"] = datetime.now(UTC)
-    message_data["updated_at"] = datetime.now(UTC)
+    # A batch of one
+    self.create_messages(session_id, agent_id, [session_message], **kwargs)
+
+
+def create_messages(
+    self,
+    session_id,
+    agent_id,
+    session_messages,
+    fields_on_last=None,  # e.g. the invocation's event_loop_metrics
+    agent_set_operations=None,  # e.g. agent_data.model, when it changed
+    **kwargs,
+):
+    agent_path = self._agent_path(agent_id)
+    now = datetime.now(UTC)
+    documents = [
+        {
+            **m.__dict__,
+            "storage_id": new_storage_id(),
+            "created_at": now,
+            "updated_at": now,
+        }
+        for m in session_messages
+    ]
+    # $set cannot reach a message the same write is creating, so the fields
+    # for the last message are nested into its document before the push
+    apply_fields(documents[-1], fields_on_last or {}, _MESSAGE_FIELD)
 
     self.collection.update_one(
         {"_id": session_id},
         {
-            "$push": {f"agents.{agent_id}.messages": message_data},
+            "$push": {f"{agent_path}.messages": {"$each": documents}},
             "$set": {
-                f"agents.{agent_id}.updated_at": datetime.now(UTC),
-                "updated_at": datetime.now(UTC),
+                **self._prefixed(agent_path, agent_set_operations or {}, _AGENT_FIELD),
+                f"{agent_path}.updated_at": now,
+                "updated_at": now,
             },
         },
     )
 ```
 
-**Operation**: `$push` appends to array
-**Side Effects**: Updates agent and session timestamps
+**Operation**: `$push` with `$each` appends the batch to the array, in order
+**Side Effects**: Updates agent and session timestamps; the agent config, when given, lands in the same write
 **Atomicity**: Single atomic operation
+
+The session manager calls `create_message()` for the prompt, as it arrives, and `create_messages()` once per invocation for everything the event loop produced, with the metrics in `fields_on_last` ([issue #53](https://github.com/iguinea/mongodb-session-manager/issues/53)).
 
 #### Update Message (Redaction)
 ```python
 def update_message(self, session_id, agent_id, session_message, **kwargs):
+    # Strands hands back the SessionMessage it appended, identity included.
+    ref = ref_of(session_message)
     # The fields are listed by hand on purpose: deriving them from
     # SessionMessage.__dict__ would let a new SDK field into the schema.
     matched = self._update_message_document(
         session_id,
         agent_id,
-        # Strands hands back the SessionMessage it appended, identity included.
-        ref_of(session_message),
+        ref,
         {
             "message": session_message.message,
             "redact_message": session_message.redact_message,
@@ -787,9 +815,7 @@ def update_message(self, session_id, agent_id, session_message, **kwargs):
     )
 
     if not matched:
-        raise self._missing_message_error(
-            session_id, agent_id, session_message.message_id
-        )
+        raise self._missing_message_error(session_id, agent_id, ref)
 ```
 
 Every write on a message goes through the same private primitive — this one,
@@ -804,15 +830,16 @@ def _update_message_document(
     ref,
     message_fields,
     *,
-    extra_set=None,
+    agent_fields=None,
     push=None,
     touch_timestamps=False,
 ):
-    message_prefix = f"agents.{agent_id}.messages.$"
-    set_operations = {
-        f"{message_prefix}.{name}": value for name, value in message_fields.items()
-    }
-    # ... extra_set, push and the three updated_at when touch_timestamps ...
+    agent_path = self._agent_path(agent_id)  # agents.<agent_id>, validated
+    message_prefix = f"{agent_path}.messages.$"
+    # Keys relative to the message and to the agent, joined to their paths
+    set_operations = self._prefixed(message_prefix, message_fields, _MESSAGE_FIELD)
+    set_operations.update(self._prefixed(agent_path, agent_fields or {}, _AGENT_FIELD))
+    # ... push, and the three updated_at when touch_timestamps ...
 
     # Which field names a message is MessageRef's rule: storage_id when the
     # message has one, message_id when it predates the identity.
@@ -820,7 +847,7 @@ def _update_message_document(
 
     result = self.collection.update_one(
         # The positional $ resolves to the array element matched in the query.
-        {"_id": session_id, f"agents.{agent_id}.messages.{field}": value},
+        {"_id": session_id, f"{agent_path}.messages.{field}": value},
         update,
     )
     return result.matched_count > 0

@@ -18,11 +18,10 @@ The MongoDB Session Manager provides optional AWS service integrations for real-
 
 ### Required Package
 
-AWS integrations require the `python-helpers` package:
-
-```bash
-pip install python-helpers
-```
+None beyond the library itself: the bundled hooks only use `boto3`, which is a
+runtime dependency and is installed with it. What they need is AWS credentials
+(below) and the IAM permission of each service: `sns:Publish`,
+`sqs:SendMessage` or `execute-api:ManageConnections`.
 
 ### Check Availability
 
@@ -36,13 +35,13 @@ from mongodb_session_manager import (
 if is_feedback_sns_hook_available():
     print("SNS feedback hook available")
 else:
-    print("Install python-helpers: pip install python-helpers")
+    print("SNS hook not available: boto3 could not be imported")
 
 # Check if SQS hook is available
 if is_metadata_sqs_hook_available():
     print("SQS metadata hook available")
 else:
-    print("Install python-helpers: pip install python-helpers")
+    print("SQS hook not available: boto3 could not be imported")
 ```
 
 ### AWS Credentials
@@ -107,7 +106,7 @@ from mongodb_session_manager import (
 
 # Check availability
 if not is_feedback_sns_hook_available():
-    raise ImportError("Install python-helpers: pip install python-helpers")
+    raise ImportError("SNS hook not available: boto3 could not be imported")
 
 # Create SNS hook with three topics
 feedback_hook = create_feedback_sns_hook(
@@ -231,7 +230,7 @@ from mongodb_session_manager import (
 
 # Check availability
 if not is_metadata_sqs_hook_available():
-    raise ImportError("Install python-helpers: pip install python-helpers")
+    raise ImportError("SQS hook not available: boto3 could not be imported")
 
 # Create SQS hook with selective field propagation
 metadata_hook = create_metadata_sqs_hook(

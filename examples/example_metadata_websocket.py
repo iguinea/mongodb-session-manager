@@ -119,7 +119,7 @@ def demo_websocket_hook():
         session_id="websocket-demo-session",
         connection_string=MONGO_CONNECTION,
         database_name=DATABASE_NAME,
-        metadataHook=websocket_hook,
+        metadata_hook=websocket_hook,
     )
 
     print("✅ Session manager created with WebSocket hook")
@@ -255,7 +255,7 @@ def demo_without_connection_id():
         session_id="no-connection-demo",
         connection_string=MONGO_CONNECTION,
         database_name=DATABASE_NAME,
-        metadataHook=websocket_hook,
+        metadata_hook=websocket_hook,
     )
 
     # Try to update metadata without connection_id
@@ -315,7 +315,7 @@ def demo_production_pattern():
 
     session_manager = MongoDBSessionManager(
         session_id="prod-session",
-        metadataHook=combined_hook
+        metadata_hook=combined_hook
     )
     """
     )

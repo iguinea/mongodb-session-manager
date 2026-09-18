@@ -422,32 +422,36 @@ sequenceDiagram
     participant Client
     participant FastAPI
     participant Factory
+    participant Agent
     participant Manager
     participant Repository
-    participant Pool
     participant MongoDB
 
     Client->>FastAPI: POST /chat
     FastAPI->>Factory: create_session_manager(session_id)
-    Factory->>Pool: get_client()
-    Pool-->>Factory: MongoClient (reused)
-    Factory->>Manager: new MongoDBSessionManager(client=...)
-    Manager->>Repository: new MongoDBSessionRepository(client=...)
-    Repository-->>Manager: Repository instance
-    Manager-->>Factory: Manager instance
-    Factory-->>FastAPI: Manager instance
+    Note over Factory: Holds the pooled MongoClient since startup
+    Factory->>Manager: new MongoDBSessionManager(client=shared)
+    Manager->>Repository: new MongoDBSessionRepository(client=shared)
+    Manager->>Repository: read_session() (create_session() if missing)
+    Manager-->>FastAPI: Manager instance
 
-    FastAPI->>Manager: append_message(user_message, agent)
+    FastAPI->>Agent: Agent(session_manager=manager)
+    Agent->>Manager: initialize(agent)
+    Manager->>Repository: read_agent() + list_messages() (create_agent() if new)
+    FastAPI->>Agent: agent(prompt)
+
+    Agent->>Manager: append_message(prompt)
     Manager->>Repository: create_message(...)
-    Repository->>MongoDB: insert message
-    MongoDB-->>Repository: success
+    Repository->>MongoDB: $push the prompt
+    Note over Agent,Manager: toolUse, toolResult and the answer wait in the invocation's batch
 
-    FastAPI->>Manager: sync_agent(agent)
+    Agent->>Manager: sync_agent(agent) on AfterInvocationEvent
     Manager->>Manager: Extract event_loop_metrics
-    Manager->>Repository: Update last message with metrics
-    Repository->>MongoDB: update with $set
+    Manager->>Repository: create_messages(batch, fields_on_last=metrics)
+    Repository->>MongoDB: one $push with $each, metrics inside the last message
     MongoDB-->>Repository: success
 
+    Agent-->>FastAPI: AgentResult
     FastAPI-->>Client: Response
 ```
 
@@ -455,28 +459,28 @@ sequenceDiagram
 
 ```mermaid
 flowchart TD
-    A[User Message Received] --> B[manager.append_message]
+    A[Prompt Added to the Agent] --> B[manager.append_message]
     B --> C[repository.create_message]
-    C --> D[MongoDB: $push to messages array]
+    C --> D[MongoDB: $push the prompt]
 
-    D --> E[Agent Processes Message]
-    E --> F[Agent Populates event_loop_metrics]
-
-    F --> G[manager.sync_agent]
+    D --> E[Event Loop: Model Calls and Tools]
+    E --> F[toolUse, toolResult, answer: append_message holds them in the batch]
+    F --> G[AfterInvocationEvent: manager.sync_agent]
     G --> H{latencyMs > 0?}
 
-    H -->|No| I[Skip Metrics Update]
-    H -->|Yes| J[Fetch Last Message]
+    H -->|No| I[Batch Without Metrics]
+    H -->|Yes| J[Nest agent.event_loop_metrics into the Last Message of the Batch]
 
-    J --> K[Extract Metrics from agent.event_loop_metrics]
-    K --> L[Build $set Operation]
-    L --> M[Update Last Message with Metrics]
-    M --> N[MongoDB: $set event_loop_metrics]
+    I --> K[repository.create_messages]
+    J --> K
+    K --> L[MongoDB: one $push with $each]
 
     style D fill:#c8e6c9
-    style N fill:#c8e6c9
-    style F fill:#fff9c4
+    style L fill:#c8e6c9
+    style E fill:#fff9c4
 ```
+
+The prompt is written as it arrives because nothing can produce it again; everything the event loop produces waits for the write that closes the invocation, which `AfterInvocationEvent` guarantees even when the invocation raises ([issue #53](https://github.com/iguinea/mongodb-session-manager/issues/53)). The agent config (model, system prompt) rides in the same write when it changed. An explicit `sync_agent()` outside an invocation has no batch to carry the metrics, so it writes them on the last message with a positional `$set`.
 
 ### 3. Metadata Update with Hooks
 
@@ -582,9 +586,9 @@ class MongoDBSessionRepository(SessionRepository):
 
 **Integration Methods**:
 - `initialize(agent)`: Called by Strands SDK to load session history
-- `append_message(message, agent)`: Called after each agent interaction
-- `sync_agent(agent)`: Called to persist agent state and metrics
-- `redact_latest_message(redact_message, agent)`: For message redaction
+- `append_message(message, agent)`: Called by Strands SDK for every message added to the agent (`MessageAddedEvent`)
+- `sync_agent(agent)`: Called by Strands SDK after each message and when the invocation ends, to persist agent state and metrics
+- `redact_latest_message(redact_message, agent)`: Called by Strands SDK when the model provider redacts the input; also callable by hand
 
 **Data Type Compatibility**:
 ```python
@@ -701,9 +705,9 @@ manager = MongoDBSessionManager(
 ```
 
 **Requirements**:
-- Install `python-helpers` package for `custom_aws` module
+- Nothing extra to install: the hooks use `boto3`, a runtime dependency of the library
 - AWS credentials configured (environment variables, IAM role, etc.)
-- Appropriate IAM permissions (sns:Publish, sqs:SendMessage)
+- Appropriate IAM permissions (sns:Publish, sqs:SendMessage, execute-api:ManageConnections)
 
 ## Deployment Architecture
 

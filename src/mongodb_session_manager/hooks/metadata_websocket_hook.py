@@ -19,7 +19,7 @@ Key Features:
     - Thread-safe operation for high-concurrency environments
 
 Architecture:
-    The hook integrates with MongoDB Session Manager's metadataHook system to:
+    The hook integrates with MongoDB Session Manager's metadata_hook system to:
     1. Intercept all metadata operations (update, delete)
     2. Execute the original metadata operation first (ensuring data consistency)
     3. Extract connection_id from metadata.connection_id
@@ -48,7 +48,7 @@ Usage:
     session_manager = MongoDBSessionManager(
         session_id="user-session-123",
         connection_string="mongodb://...",
-        metadataHook=websocket_hook
+        metadata_hook=websocket_hook
     )
 
     # Metadata changes are automatically sent to connected WebSocket client
@@ -324,8 +324,8 @@ def create_metadata_hook(
               when the hook is created, so a hook built in an async lifespan
               keeps sending on the server loop even when the metadata write is
               called from a worker thread. If there is none, the dispatch
-              decides per call: a task on the loop of the calling thread, or a
-              daemon thread of its own.
+              decides per call: a task on the loop of the calling thread, or
+              the reserve loop the whole process shares.
 
     Returns:
         Hook function that handles metadata operations, or None if hook creation fails
@@ -341,7 +341,7 @@ def create_metadata_hook(
         session_manager = MongoDBSessionManager(
             session_id="session-123",
             connection_string="mongodb://...",
-            metadataHook=websocket_hook
+            metadata_hook=websocket_hook
         )
         ```
     """

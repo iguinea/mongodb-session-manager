@@ -14,7 +14,7 @@ Example demonstrating the metadata hook functionality.
 
 🔗 **Learn More:** https://github.com/iguinea/mongodb-session-manager/tree/main/docs
 
-This example shows how to use the metadataHook parameter to intercept
+This example shows how to use the metadata_hook parameter to intercept
 and enhance metadata operations with custom logic like auditing,
 validation, caching, or synchronization.
 """
@@ -236,7 +236,7 @@ async def main():
         connection_string=MONGO_CONNECTION,
         database_name=DATABASE_NAME,
         collection_name="audit_sessions",
-        metadataHook=metadata_audit_hook,
+        metadata_hook=metadata_audit_hook,
     )
 
     # All operations will be audited
@@ -258,7 +258,7 @@ async def main():
         connection_string=MONGO_CONNECTION,
         database_name=DATABASE_NAME,
         collection_name="validated_sessions",
-        metadataHook=metadata_validation_hook,
+        metadata_hook=metadata_validation_hook,
     )
 
     try:
@@ -283,7 +283,7 @@ async def main():
         connection_string=MONGO_CONNECTION,
         database_name=DATABASE_NAME,
         collection_name="cached_sessions",
-        metadataHook=cache_hook,
+        metadata_hook=cache_hook,
     )
 
     # First call - cache miss
@@ -310,7 +310,7 @@ async def main():
         connection_string=MONGO_CONNECTION,
         database_name=DATABASE_NAME,
         collection_name="combined_sessions",
-        metadataHook=combined_hook,
+        metadata_hook=combined_hook,
     )
 
     # Operations will be both audited and validated
@@ -332,7 +332,7 @@ async def main():
         connection_string=MONGO_CONNECTION,
         database_name=DATABASE_NAME,
         collection_name="agent_sessions",
-        metadataHook=metadata_audit_hook,
+        metadata_hook=metadata_audit_hook,
     )
 
     # Create agent

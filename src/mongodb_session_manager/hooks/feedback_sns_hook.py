@@ -18,7 +18,7 @@ Key Features:
     - Thread-safe operation for high-concurrency environments
 
 Architecture:
-    The hook integrates with MongoDB Session Manager's feedbackHook system and:
+    The hook integrates with MongoDB Session Manager's feedback_hook system and:
     1. Intercepts feedback add operations
     2. Stores feedback in MongoDB first (via original function)
     3. Sends SNS notification asynchronously
@@ -58,7 +58,7 @@ Usage:
     session_manager = MongoDBSessionManager(
         session_id="user-session-123",
         connection_string="mongodb://...",
-        feedbackHook=sns_hook_with_templates
+        feedback_hook=sns_hook_with_templates
     )
 
     # Feedback is routed to the appropriate topic based on rating
@@ -105,7 +105,7 @@ Requirements:
     - Three valid SNS topic ARNs (for good, bad, and neutral feedback)
 
 Error Handling:
-    - ImportError: Raised during initialization if custom_aws.sns is not available
+    - ImportError: Raised during initialization if boto3 cannot be imported
     - All other errors: raised out of the notification, which runs in the
       background — `background_work.BackgroundWork` counts them as `failed` and
       logs them once, with their context and their traceback. The notification
@@ -117,8 +117,8 @@ Thread Safety:
     The notification is dispatched to the event loop the hook is bound to —
     the one running when it was created, or the one passed as `loop=` — so it
     does not depend on the thread that adds the feedback. With no loop bound,
-    it falls back to a task on the calling thread's loop, or to a daemon
-    thread if there is none.
+    it falls back to a task on the calling thread's loop, or to the reserve
+    loop the whole process shares if there is none.
 
 Performance Considerations:
     - SNS notifications are sent asynchronously to avoid blocking
@@ -369,8 +369,8 @@ def create_feedback_hook(
               when the hook is created, so a hook built in an async lifespan
               keeps sending on the server loop even when the feedback is added
               from a worker thread. If there is none, the dispatch decides per
-              call: a task on the loop of the calling thread, or a daemon
-              thread of its own.
+              call: a task on the loop of the calling thread, or the reserve
+              loop the whole process shares.
 
     Returns:
         Hook function that handles feedback operations

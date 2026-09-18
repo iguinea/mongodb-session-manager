@@ -34,18 +34,22 @@ sequenceDiagram
 
     Note over User,MongoDB: Non-Streaming (Traditional)
     User->>Agent: Send message
+    Agent->>MongoDB: Store prompt
     Note over Agent: Generate complete response (3s)
+    Agent->>MongoDB: Store answer + metrics (one write)
     Agent->>User: Return full response
-    Agent->>MongoDB: Save conversation
 
     Note over User,MongoDB: Async Streaming
     User->>Agent: Send message
+    Agent->>MongoDB: Store prompt
     Note over Agent: Start generating
     loop Token by Token
         Agent->>User: Stream token (10ms each)
     end
-    Agent->>MongoDB: Save complete conversation
+    Agent->>MongoDB: Store answer + metrics (one write)
 ```
+
+In both cases the writes are made by the session manager, through the hooks the `Agent` registers: your code only streams.
 
 ## Basic Streaming Pattern
 
@@ -75,32 +79,16 @@ async def stream_response():
     # User message
     prompt = "Explain async programming in Python"
 
-    # Append user message
-    session_manager.append_message({"role": "user", "content": prompt}, agent)
-
-    # Stream response
-    response_chunks = []
-
     print("Response: ", end="", flush=True)
 
+    # Stream response. The session manager persists the conversation on its
+    # own: the prompt is written as it arrives, and the answer, with the
+    # invocation's metrics, in a single write when the stream ends.
     async for event in agent.stream_async(prompt):
         if "data" in event:
-            chunk = event["data"]
-            response_chunks.append(chunk)
-            print(chunk, end="", flush=True)  # Real-time output
+            print(event["data"], end="", flush=True)  # Real-time output
 
     print()  # Newline
-
-    # Combine chunks into full response
-    full_response = "".join(response_chunks)
-
-    # Append assistant message
-    session_manager.append_message(
-        {"role": "assistant", "content": full_response}, agent
-    )
-
-    # Sync agent state and metrics
-    session_manager.sync_agent(agent)
 
     # Clean up
     session_manager.close()
@@ -110,40 +98,35 @@ async def stream_response():
 asyncio.run(stream_response())
 ```
 
+!!! note "Persistence is automatic"
+    An `Agent` built with `session_manager=` hands every message it adds to the manager through the hooks it registers, streamed or not. Do not call `append_message()` yourself for such an agent: the message would be stored twice. Since v0.24.0 the messages the event loop produces in an invocation (tool calls, tool results, the answer) are batched into one write when the invocation closes, with the metrics inside the last one; the user's prompt is written as it arrives ([issue #53](https://github.com/iguinea/mongodb-session-manager/issues/53)). Calling `sync_agent()` afterwards is optional and costs one more write.
+
 ### Stream Events
 
-The `agent.stream_async()` generator yields events:
+The `agent.stream_async()` generator yields dictionaries. Which keys an event carries tells what it is (see the Strands documentation of `Agent.stream_async` for the full list):
 
 ```python
-{
-    "type": "content_block_delta",
-    "data": "token text",  # Token/chunk of text
-    "index": 0,
-}
+{"data": "token text", ...}  # A chunk of the text being generated
 
-# Other event types:
-# - content_block_start: Start of response
-# - content_block_stop: End of response
-# - message_start: Message metadata
-# - message_stop: Final metrics
+# Other keys you will meet:
+# - "current_tool_use": a tool call being streamed
+# - "reasoningText": reasoning content, on models that emit it
+# - "result": the final AgentResult, in the last event of the stream
 ```
 
 ### Processing Stream Events
 
 ```python
 async for event in agent.stream_async(prompt):
-    event = event.get("type")
-
-    if event == "content_block_delta":
+    if "data" in event:
         # Token data
-        token = event.get("data", "")
-        print(token, end="", flush=True)
+        print(event["data"], end="", flush=True)
 
-    elif event == "content_block_start":
-        # Response started
-        print("Assistant: ", end="", flush=True)
+    elif "current_tool_use" in event:
+        # The model is calling a tool
+        tool_name = event["current_tool_use"].get("name")
 
-    elif event == "message_stop":
+    elif "result" in event:
         # Response completed
         print("\n[Stream complete]")
 ```
@@ -176,32 +159,17 @@ async def chat_with_streaming(session_id: str, prompt: str):
         system_prompt="You are a helpful assistant.",
     )
 
-    # Store user message
-    session_manager.append_message({"role": "user", "content": prompt}, agent)
+    try:
+        # Stream response. The prompt is stored as it arrives; the answer,
+        # with the invocation's metrics, when the stream ends.
+        async for event in agent.stream_async(prompt):
+            if "data" in event:
+                # Send to client, websocket, SSE, etc.
+                yield event["data"]
 
-    # Stream response
-    response_chunks = []
-
-    async for event in agent.stream_async(prompt):
-        if "data" in event:
-            chunk = event["data"]
-            response_chunks.append(chunk)
-            # Send to client, websocket, SSE, etc.
-            yield chunk
-
-    # Combine full response
-    full_response = "".join(response_chunks)
-
-    # Store assistant message
-    session_manager.append_message(
-        {"role": "assistant", "content": full_response}, agent
-    )
-
-    # Sync metrics
-    session_manager.sync_agent(agent)
-
-    # Conversation is now fully persisted!
-    session_manager.close()
+        # Conversation is now fully persisted!
+    finally:
+        session_manager.close()
 
 
 # Usage
@@ -219,22 +187,8 @@ asyncio.run(main())
 async def resume_and_continue():
     """Resume previous streaming session."""
 
-    # Load existing session
-    session_manager = create_mongodb_session_manager(
-        session_id="user-123",  # Same session ID
-        connection_string="mongodb://localhost:27017/",
-        database_name="chat_db",
-    )
-
-    # Create agent - automatically loads history
-    agent = Agent(
-        agent_id="assistant",  # Same agent ID
-        model="claude-3-sonnet",
-        session_manager=session_manager,
-    )
-
-    # Agent has full conversation context!
-    # Continue streaming
+    # Same session_id, and chat_with_streaming() uses the same agent_id:
+    # creating the agent there loads the history before the first token.
     async for chunk in chat_with_streaming("user-123", "Continue our discussion"):
         print(chunk, end="", flush=True)
 ```
@@ -243,7 +197,7 @@ async def resume_and_continue():
 
 ### Automatic Metrics
 
-Metrics are captured automatically when the invocation ends, streamed or not, and stored on its last message. Calling `sync_agent()` afterwards writes them again with the current values:
+Metrics are captured automatically when the invocation ends, streamed or not, and stored on its last message, inside the same write that stores the messages of the invocation. Calling `sync_agent()` afterwards is optional: it costs one more write, which stores them again with the current values.
 
 ```python
 async def stream_with_metrics():
@@ -259,37 +213,27 @@ async def stream_with_metrics():
         agent_id="assistant", model="claude-3-sonnet", session_manager=session_manager
     )
 
-    # User message
-    prompt = "Explain quantum computing"
-    session_manager.append_message({"role": "user", "content": prompt}, agent)
-
     # Stream response
-    response_chunks = []
+    prompt = "Explain quantum computing"
     async for event in agent.stream_async(prompt):
         if "data" in event:
-            response_chunks.append(event["data"])
+            print(event["data"], end="", flush=True)
 
-    # Save response
-    full_response = "".join(response_chunks)
-    session_manager.append_message(
-        {"role": "assistant", "content": full_response}, agent
-    )
-
-    # Sync captures metrics from agent.event_loop_metrics
-    session_manager.sync_agent(agent)
-
-    # Metrics now stored in MongoDB:
-    # - latencyMs: Total response time
-    # - inputTokens: Tokens in request
-    # - outputTokens: Tokens in response
-    # - totalTokens: Total tokens used
+    # When the stream ends, the last message of the invocation is already
+    # stored with event_loop_metrics, taken from agent.event_loop_metrics:
+    # - accumulated_metrics: latencyMs, timeToFirstByteMs
+    # - accumulated_usage: inputTokens, outputTokens, totalTokens, cache tokens
+    # - cycle_metrics and tool_usage
 
     session_manager.close()
 ```
 
 ### Accessing Metrics
 
-Metrics are stored with each assistant message:
+Two kinds of metrics are stored, and not on the same messages:
+
+- **`event_loop_metrics`**, the invocation's totals, only on the **last message of each invocation**. Intermediate messages (tool calls, tool results) carry none.
+- **`message.metadata`**, written by Strands itself (1.56 and later) on **each `assistant` message**, with the `usage` and `metrics` of that model call alone. See [`message.metadata`](../architecture/data-model.md#metadata-optional).
 
 ```python
 # Query MongoDB directly
@@ -314,6 +258,12 @@ if doc and "agents" in doc:
         print(f"Latency: {metrics['accumulated_metrics']['latencyMs']}ms")
         print(f"Input tokens: {metrics['accumulated_usage']['inputTokens']}")
         print(f"Output tokens: {metrics['accumulated_usage']['outputTokens']}")
+
+    # Per-call usage of each assistant message
+    for stored in messages:
+        usage = stored["message"].get("metadata", {}).get("usage")
+        if usage:
+            print(f"Message {stored['message_id']}: {usage['totalTokens']} tokens")
 ```
 
 ## FastAPI Integration
@@ -345,26 +295,11 @@ async def chat_stream(session_id: str, message: str):
             session_manager=session_manager,
         )
 
-        # Store user message
-        session_manager.append_message({"role": "user", "content": message}, agent)
-
-        # Stream response
-        response_chunks = []
-
+        # Stream response. The agent persists the prompt, the answer and
+        # the metrics through the session manager: nothing to save by hand.
         async for event in agent.stream_async(message):
             if "data" in event:
-                chunk = event["data"]
-                response_chunks.append(chunk)
-                yield chunk  # Stream to client
-
-        # Save complete response
-        full_response = "".join(response_chunks)
-        session_manager.append_message(
-            {"role": "assistant", "content": full_response}, agent
-        )
-
-        # Sync metrics
-        session_manager.sync_agent(agent)
+                yield event["data"]  # Stream to client
 
     return StreamingResponse(generate(), media_type="text/plain")
 ```
@@ -393,27 +328,12 @@ async def chat_sse(session_id: str, message: str):
             session_manager=session_manager,
         )
 
-        # Store user message
-        session_manager.append_message({"role": "user", "content": message}, agent)
-
-        # Stream response
-        response_chunks = []
-
+        # Stream response (persisted by the agent's session manager)
         async for event in agent.stream_async(message):
             if "data" in event:
-                chunk = event["data"]
-                response_chunks.append(chunk)
-
                 # SSE format
-                sse_data = json.dumps({"type": "token", "data": chunk})
+                sse_data = json.dumps({"type": "token", "data": event["data"]})
                 yield f"data: {sse_data}\n\n"
-
-        # Complete response
-        full_response = "".join(response_chunks)
-        session_manager.append_message(
-            {"role": "assistant", "content": full_response}, agent
-        )
-        session_manager.sync_agent(agent)
 
         # Send completion event
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
@@ -475,17 +395,11 @@ async def chat(request: Request, data: dict, session_id: str):
         # Get prompt
         prompt = data.get("prompt")
 
-        # Stream response
-        response_chunks = []
-
+        # Stream response. The session manager stores the answer, with its
+        # metrics, in the write that closes the invocation.
         async for event in agent.stream_async(prompt):
             if "data" in event:
-                chunk = event["data"]
-                response_chunks.append(chunk)
-                yield chunk
-
-        # Note: Saving response happens after stream completes
-        # For production, consider background task
+                yield event["data"]
 
     return StreamingResponse(generate(), media_type="text/plain")
 ```
@@ -514,43 +428,24 @@ async def stream_with_error_handling(session_id: str, prompt: str):
             session_manager=session_manager,
         )
 
-        # Store user message
-        session_manager.append_message({"role": "user", "content": prompt}, agent)
-
         # Stream response
-        response_chunks = []
-
-        try:
-            async for event in agent.stream_async(prompt):
-                if "data" in event:
-                    chunk = event["data"]
-                    response_chunks.append(chunk)
-                    yield chunk
-
-        except Exception as stream_error:
-            # Handle streaming errors
-            error_msg = f"\n[Error during streaming: {stream_error}]"
-            response_chunks.append(error_msg)
-            yield error_msg
-
-        # Save response (even if incomplete)
-        full_response = "".join(response_chunks)
-        session_manager.append_message(
-            {"role": "assistant", "content": full_response}, agent
-        )
-
-        # Sync metrics
-        try:
-            session_manager.sync_agent(agent)
-        except Exception as sync_error:
-            logger.error(f"Error syncing agent: {sync_error}")
+        async for event in agent.stream_async(prompt):
+            if "data" in event:
+                yield event["data"]
 
     except Exception as e:
+        # Nothing to save by hand here. The prompt was stored when it
+        # arrived, and what the agent had added before the failure is written
+        # when the invocation closes, which it does even when it raises. An
+        # answer cut off mid-stream was never added to the agent, so it is
+        # not part of the conversation: storing it yourself would put in the
+        # history a message the agent never had.
         logger.error(f"Error in stream_with_error_handling: {e}")
         yield f"\n[Error: {e}]"
 
     finally:
         if session_manager:
+            # Also writes a batch whose invocation never closed
             session_manager.close()
 ```
 
@@ -563,72 +458,68 @@ import asyncio
 async def stream_with_timeout(session_id: str, prompt: str, timeout: int = 30):
     """Stream with timeout."""
 
-    async def stream_response():
-        # ... streaming logic
-        async for chunk in chat_with_streaming(session_id, prompt):
-            yield chunk
-
     try:
-        async for chunk in asyncio.wait_for(stream_response(), timeout=timeout):
-            yield chunk
-    except asyncio.TimeoutError:
+        async with asyncio.timeout(timeout):  # Python 3.11+
+            async for chunk in chat_with_streaming(session_id, prompt):
+                yield chunk
+    except TimeoutError:
         yield "\n[Response timeout - streaming stopped]"
 ```
 
 ## Best Practices
 
-### 1. Always Save Complete Response
+### 1. Let the Session Manager Persist the Conversation
 
 ```python
-# Good - save full response after streaming
-response_chunks = []
+# Good - just stream: the agent hands each message to the session manager
 async for event in agent.stream_async(prompt):
     if "data" in event:
-        chunk = event["data"]
-        response_chunks.append(chunk)
-        yield chunk
+        yield event["data"]
 
-full_response = "".join(response_chunks)
-session_manager.append_message({"role": "assistant", "content": full_response}, agent)
+# Bad - append by hand what the agent already persists
+full_response = "".join(chunks)
+session_manager.append_message(
+    {"role": "assistant", "content": [{"text": full_response}]}, agent
+)  # Wrong! Stored twice
 
-# Bad - don't save individual chunks
+# Worse - one message per chunk
 async for event in agent.stream_async(prompt):
     if "data" in event:
         session_manager.append_message(
-            {"role": "assistant", "content": event["data"]}, agent
+            {"role": "assistant", "content": [{"text": event["data"]}]}, agent
         )  # Wrong!
 ```
 
-### 2. Sync Metrics After Streaming
+### 2. No Need to Sync After Streaming
 
 ```python
-# Good - sync after stream completes
+# Good - the write that closes the invocation already stored the metrics
 async for event in agent.stream_async(prompt):
     # ... stream tokens
     pass
 
-session_manager.sync_agent(agent)  # Capture metrics
+# Optional - one more write, which stores the metrics again
+session_manager.sync_agent(agent)
 
 # Bad - sync during streaming
 async for event in agent.stream_async(prompt):
-    session_manager.sync_agent(agent)  # Too frequent!
+    session_manager.sync_agent(agent)  # Extra writes, and it flushes the batch early
 ```
 
 ### 3. Handle Errors Gracefully
 
 ```python
-# Good - handle errors, still save partial response
+# Good - handle errors; what the agent added is persisted anyway
 try:
     async for event in agent.stream_async(prompt):
         # ... stream
         pass
 except Exception as e:
     logger.error(f"Stream error: {e}")
-    response_chunks.append(f"\n[Error: {e}]")
+    yield f"\n[Error: {e}]"
 
-# Always save what we have
-full_response = "".join(response_chunks)
-session_manager.append_message({"role": "assistant", "content": full_response}, agent)
+# Bad - store the half-streamed answer by hand: the agent never added it,
+# so the stored history would no longer match the conversation
 ```
 
 ### 4. Use Factory Pattern
@@ -709,14 +600,14 @@ class SessionContext:
 
 ## Next Steps
 
-- **[FastAPI Integration](../examples/fastapi-examples.md)**: Complete FastAPI examples
+- **[FastAPI Integration](../examples/fastapi-integration.md)**: Complete FastAPI examples
 - **[Session Management](session-management.md)**: Understand session lifecycle
 - **[Factory Pattern](factory-pattern.md)**: Optimize for production
-- **[Performance Tuning](../deployment/performance.md)**: Optimize streaming performance
+- **[Performance](../architecture/performance.md)**: Writes per turn and how to measure them
 
 ## Additional Resources
 
-- [Strands SDK Documentation](https://github.com/anthropics/strands)
+- [Strands Agents Documentation](https://strandsagents.com)
 - [FastAPI Streaming](https://fastapi.tiangolo.com/advanced/custom-response/#streamingresponse)
 - [Server-Sent Events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events)
 - [Async Python Guide](https://docs.python.org/3/library/asyncio.html)

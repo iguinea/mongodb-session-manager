@@ -116,12 +116,12 @@ if _metadata_websocket_available:
 
 # Helper functions to check hook availability
 def is_feedback_sns_hook_available() -> bool:
-    """Check if the feedback SNS hook is available (custom_aws.sns installed)."""
+    """Check if the feedback SNS hook is available (boto3 installed)."""
     return _feedback_sns_available
 
 
 def is_metadata_sqs_hook_available() -> bool:
-    """Check if the metadata SQS hook is available (custom_aws.sqs installed)."""
+    """Check if the metadata SQS hook is available (boto3 installed)."""
     return _metadata_sqs_available
 
 

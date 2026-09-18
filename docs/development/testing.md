@@ -294,6 +294,9 @@ import pytest
 from mongodb_session_manager import MongoDBSessionManager
 from strands import Agent
 
+# A Strands model that replays fixed responses, so a real Agent runs offline
+from tests.support.scripted_model import ScriptedModel, text_stream
+
 
 @pytest.mark.integration
 def test_session_persistence(mongodb_uri, clean_database):
@@ -315,7 +318,8 @@ def test_session_persistence(mongodb_uri, clean_database):
         connection_string=mongodb_uri,
         database_name="test_database",
     )
-    metadata = manager2.get_metadata()
+    # get_metadata() returns the document's metadata projection
+    metadata = manager2.get_metadata()["metadata"]
     assert metadata["user"] == "test_user"
     assert metadata["count"] == 1
     manager2.close()
@@ -333,22 +337,23 @@ def test_full_agent_workflow(mongodb_uri, clean_database):
         database_name="test_database",
     )
 
-    # Create agent (would need API key for real test)
-    # This is a mock test - in real scenario you'd use actual agent
-
-    # Simulate agent interaction
-    manager.append_message(
-        {"role": "user", "content": "Hello"}, Mock(agent_id="test-agent")
+    # A real Agent wired to the manager: it persists its own messages, so
+    # the test never calls append_message() itself
+    agent = Agent(
+        agent_id="test-agent",
+        model=ScriptedModel([list(text_stream("Hi there!"))]),
+        session_manager=manager,
     )
-    manager.append_message(
-        {"role": "assistant", "content": "Hi there!"}, Mock(agent_id="test-agent")
-    )
+    agent("Hello")
 
-    # Verify messages were stored
-    messages = manager.list_messages(agent_id="test-agent")
-    assert len(messages) == 2
-    assert messages[0]["role"] == "user"
-    assert messages[1]["role"] == "assistant"
+    # Verify messages were stored. list_messages() lives on the repository:
+    # (session_id, agent_id, limit=None, offset=0)
+    messages = manager.session_repository.list_messages(session_id, "test-agent")
+    assert [m.message["role"] for m in messages] == ["user", "assistant"]
+
+    # The last message of the invocation carries its metrics
+    stored = clean_database["collection_name"].find_one({"_id": session_id})
+    assert "event_loop_metrics" in stored["agents"]["test-agent"]["messages"][-1]
 
     manager.close()
 
@@ -734,7 +739,12 @@ def test_factory_with_mocked_pool(mock_pool_class):
 
 ### Testing Metadata Hooks
 
+These run without MongoDB on the in-memory repository described [below](#testing-without-mongodb-the-in-memory-repository).
+
 ```python
+from tests.support.in_memory_session_repository import InMemorySessionRepository
+
+
 def test_metadata_hook():
     """Test that metadata hook is called."""
     hook_called = []
@@ -750,8 +760,7 @@ def test_metadata_hook():
 
     manager = MongoDBSessionManager(
         session_id="test",
-        client=Mock(),
-        database_name="test_db",
+        session_repository=InMemorySessionRepository(),
         metadata_hook=test_hook,
     )
 
@@ -768,12 +777,14 @@ def test_metadata_hook_validation():
             metadata = kwargs["metadata"]
             if "invalid" in metadata:
                 raise ValueError("Invalid field not allowed")
-        return original_func(kwargs.get("metadata"), kwargs.get("keys"))
+            return original_func(metadata)
+        if action == "delete":
+            return original_func(kwargs["keys"])
+        return original_func()
 
     manager = MongoDBSessionManager(
         session_id="test",
-        client=Mock(),
-        database_name="test_db",
+        session_repository=InMemorySessionRepository(),
         metadata_hook=validation_hook,
     )
 
@@ -795,8 +806,7 @@ def test_feedback_hook():
 
     manager = MongoDBSessionManager(
         session_id="test",
-        client=Mock(),
-        database_name="test_db",
+        session_repository=InMemorySessionRepository(),
         feedback_hook=feedback_hook,
     )
 
@@ -809,78 +819,60 @@ def test_feedback_hook():
 
 ## Testing AWS Integrations
 
+The bundled hooks call AWS through `boto3` only, wrapped in `publish_message()` (SNS) and `send_message()` (SQS). Patch those names in the hook's module, where they are looked up, and await the hook's coroutine directly: that tests the notification without AWS and without waiting on the background dispatch.
+
 ### Testing SNS Feedback Hook
 
 ```python
-@pytest.mark.skipif(
-    not is_feedback_sns_hook_available(), reason="SNS hook not available"
-)
-def test_sns_feedback_hook(mocker):
-    """Test SNS feedback hook."""
-    from mongodb_session_manager import create_feedback_sns_hook
+import asyncio
+from unittest.mock import patch
 
-    # Mock SNS client
-    mock_sns = mocker.Mock()
-    mocker.patch("custom_aws.sns.SNSClient", return_value=mock_sns)
+from mongodb_session_manager import FeedbackSNSHook
 
-    # Create hook
-    hook = create_feedback_sns_hook(
-        topic_arn_good="arn:aws:sns:test:good", topic_arn_bad="arn:aws:sns:test:bad"
-    )
 
-    # Test with feedback
-    manager = MongoDBSessionManager(
-        session_id="test", client=Mock(), database_name="test_db", feedback_hook=hook
-    )
+def test_sns_feedback_hook_routes_negative_feedback():
+    """Negative feedback is published to the "bad" topic."""
+    with patch(
+        "mongodb_session_manager.hooks.feedback_sns_hook.publish_message"
+    ) as publish:
+        hook = FeedbackSNSHook(
+            topic_arn_good="arn:aws:sns:test:good",
+            topic_arn_bad="arn:aws:sns:test:bad",
+            topic_arn_neutral="none",  # "none" disables a topic
+        )
+        asyncio.run(
+            hook.on_feedback_add("test", {"rating": "down", "comment": "Bad response"})
+        )
 
-    feedback = {"rating": "down", "comment": "Bad response"}
-    manager.add_feedback(feedback)
-
-    # Verify SNS was called (async, so may need to wait)
-    import time
-
-    time.sleep(0.1)  # Allow async operation to complete
-
-    # Check that publish was attempted
-    assert mock_sns.publish_message.called or mock_sns.publish_message.call_count >= 0
+    publish.assert_called_once()
+    assert publish.call_args.kwargs["topic_arn"] == "arn:aws:sns:test:bad"
 ```
 
 ### Testing SQS Metadata Hook
 
 ```python
-@pytest.mark.skipif(
-    not is_metadata_sqs_hook_available(), reason="SQS hook not available"
-)
-def test_sqs_metadata_hook(mocker):
-    """Test SQS metadata hook."""
-    from mongodb_session_manager import create_metadata_sqs_hook
+import asyncio
+import json
+from unittest.mock import patch
 
-    # Mock SQS client
-    mock_sqs = mocker.Mock()
-    mocker.patch("custom_aws.sqs.SQSClient", return_value=mock_sqs)
+from mongodb_session_manager import MetadataSQSHook
 
-    # Create hook
-    hook = create_metadata_sqs_hook(
-        queue_url="https://sqs.test.amazonaws.com/queue",
-        metadata_fields=["status", "priority"],
-    )
 
-    # Test with metadata update
-    manager = MongoDBSessionManager(
-        session_id="test", client=Mock(), database_name="test_db", metadata_hook=hook
-    )
+def test_sqs_metadata_hook_sends_only_configured_fields():
+    """Only the configured metadata fields reach the queue."""
+    with patch("mongodb_session_manager.hooks.metadata_sqs_hook.send_message") as send:
+        hook = MetadataSQSHook(
+            queue_url="https://sqs.test.amazonaws.com/queue",
+            metadata_fields=["status", "priority"],
+        )
+        metadata = {"status": "active", "priority": "high", "internal": "not synced"}
+        asyncio.run(hook.on_metadata_change("test", metadata, "update"))
 
-    metadata = {"status": "active", "priority": "high", "internal": "not synced"}
-    manager.update_metadata(metadata)
-
-    # Verify SQS was called
-    import time
-
-    time.sleep(0.1)
-
-    # Check that send was attempted
-    assert mock_sqs.send_message.called or mock_sqs.send_message.call_count >= 0
+    body = json.loads(send.call_args.kwargs["message_body"])
+    assert body["metadata"] == {"status": "active", "priority": "high"}
 ```
+
+To test the wiring end to end instead (hook factory, session manager, background dispatch), see `tests/unit/test_hooks_feedback_sns.py` and `tests/unit/test_hooks_metadata_sqs.py`.
 
 ## CI/CD Testing
 
