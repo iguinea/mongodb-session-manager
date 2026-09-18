@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from pymongo import MongoClient
+from pymongo.common import VALIDATORS
 from strands import Agent, tool
 from strands.hooks import AfterInvocationEvent, BeforeInvocationEvent, HookOrder
 from strands.session.repository_session_manager import RepositorySessionManager
@@ -30,26 +31,15 @@ GUARDRAIL_ACTION_BLOCKED = "BLOCKED"
 GUARDRAIL_STOP_REASONS = frozenset(["guardrail_intervened", "content_filtered"])
 
 
-_MONGO_CLIENT_OPTIONS = frozenset(
-    {
-        "maxPoolSize",
-        "minPoolSize",
-        "maxIdleTimeMS",
-        "waitQueueTimeoutMS",
-        "serverSelectionTimeoutMS",
-        "connectTimeoutMS",
-        "socketTimeoutMS",
-        "compressors",
-        "retryWrites",
-        "retryReads",
-        "w",
-        "journal",
-        "fsync",
-        "authSource",
-        "authMechanism",
-        "tlsAllowInvalidCertificates",
-    }
-)
+def _is_client_option(name: str) -> bool:
+    """Whether MongoClient accepts `name` as a keyword option.
+
+    Asked of pymongo itself, which matches option names without regard to case,
+    instead of a list of our own that fell behind: until 1.0.0 only sixteen
+    names reached the client (#111).
+    """
+    return name.lower() in VALIDATORS
+
 
 _REMOVED_HOOK_NAMES = {"metadataHook": "metadata_hook", "feedbackHook": "feedback_hook"}
 
@@ -166,7 +156,11 @@ class MongoDBSessionManager(RepositorySessionManager):
                 pop_read_agent_config(), which initialize() calls. That
                 contract is not published as a Protocol: it lives as executable
                 cases in tests/support/repository_contract.py
-            **kwargs: Additional arguments passed to parent class and MongoClient
+            **kwargs: MongoClient options (any that pymongo accepts, in any
+                case), used when this manager creates its own client. With a
+                borrowed client or an injected repository they cannot be
+                applied, and are logged as a warning. Anything else is logged
+                as a warning too: the Strands base class ignores it
         """
         # The camelCase names were removed in 1.0.0 (#111). They must fail here:
         # the Strands parent ignores unknown kwargs, so the hook would silently
@@ -176,18 +170,24 @@ class MongoDBSessionManager(RepositorySessionManager):
                 raise TypeError(
                     f"{removed} was removed in 1.0.0, use {replacement} instead"
                 )
-        # Extract MongoDB client kwargs
-        mongo_kwargs = {}
-        parent_kwargs = {}
-
-        for key, value in kwargs.items():
-            if key in _MONGO_CLIENT_OPTIONS:
-                mongo_kwargs[key] = value
-            else:
-                parent_kwargs[key] = value
+        # Nothing passed here may vanish without a trace (#111): what is not a
+        # MongoClient option goes on to the Strands parent, which ignores it.
+        mongo_kwargs = {k: v for k, v in kwargs.items() if _is_client_option(k)}
+        parent_kwargs = {k: v for k, v in kwargs.items() if k not in mongo_kwargs}
+        if parent_kwargs:
+            logger.warning(
+                f"Unknown keyword arguments {sorted(parent_kwargs)}: they are not "
+                f"MongoClient options, and the session manager ignores them"
+            )
 
         # Create MongoDB repository with optional client, unless one was injected
         if session_repository is not None:
+            if mongo_kwargs:
+                logger.warning(
+                    f"MongoClient options {sorted(mongo_kwargs)} ignored: the "
+                    f"session repository was injected, so there is no client "
+                    f"to apply them to"
+                )
             self.session_repository = session_repository
         else:
             self.session_repository = MongoDBSessionRepository(

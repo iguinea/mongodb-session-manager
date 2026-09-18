@@ -101,6 +101,35 @@ class TestSessionRepositoryInit:
             )
         assert repo._owns_client is False
 
+    def test_client_options_with_a_borrowed_client_are_logged(
+        self, mock_mongo_client, caplog
+    ):
+        """A client someone else built cannot take options any more (#111).
+
+        They were dropped without a word, which is how a `maxPoolSize` passed
+        to the factory's `create_session_manager()` did nothing.
+        """
+        with (
+            patch.object(MongoDBSessionRepository, "_ensure_indexes"),
+            caplog.at_level(logging.WARNING),
+        ):
+            MongoDBSessionRepository(client=mock_mongo_client, maxPoolSize=5)
+
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warnings) == 1
+        assert "maxPoolSize" in warnings[0].getMessage()
+
+    def test_a_borrowed_client_without_options_logs_nothing(
+        self, mock_mongo_client, caplog
+    ):
+        with (
+            patch.object(MongoDBSessionRepository, "_ensure_indexes"),
+            caplog.at_level(logging.WARNING),
+        ):
+            MongoDBSessionRepository(client=mock_mongo_client)
+
+        assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
 
 # ---------------------------------------------------------------------------
 # _ensure_indexes

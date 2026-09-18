@@ -147,7 +147,7 @@ Initialize MongoDB Session Repository.
 
 - **metadata_fields** (`Optional[List[str]]`, default: `None`): List of metadata field names to index for optimized queries. Each one is a [path](#names-that-become-paths).
 
-- **kwargs** (`Any`): Additional arguments for `MongoClient` (only used if `client` is not provided).
+- **kwargs** (`Any`): Additional arguments for `MongoClient`. They are only used when the repository creates its own client; with `client` provided they are ignored and logged as a `WARNING` that names them.
 
 #### Raises
 

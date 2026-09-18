@@ -258,7 +258,8 @@ class MongoDBSessionRepository(SessionRepository):
             collection_name: Name of the collection for sessions
             client: Optional pre-configured MongoClient to use
             application_name: Application name for session categorization (immutable after creation)
-            **kwargs: Additional arguments for MongoClient (ignored if client is provided)
+            **kwargs: Additional arguments for MongoClient. A provided client
+                cannot take them any more: they are ignored, with a warning
 
         Raises:
             ValueError: If a metadata field is not a valid dot-notation path, or
@@ -277,6 +278,13 @@ class MongoDBSessionRepository(SessionRepository):
             self.client: MongoClient = client
             self._owns_client = False  # Don't close a client we didn't create
             logger.debug("Using provided MongoDB client")
+            if kwargs:
+                # Said out loud since #111: a maxPoolSize passed to the
+                # factory's create_session_manager() used to do nothing, quietly.
+                logger.warning(
+                    f"MongoClient options {sorted(kwargs)} ignored: the client "
+                    f"was provided, so configure them where it is created"
+                )
         else:
             # Create new client (legacy behavior)
             if connection_string is None:
