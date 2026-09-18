@@ -57,15 +57,12 @@ MongoDB Session Manager provides seamless integration with AWS services for:
 
 ## Prerequisites
 
-### Install AWS Dependencies
+### AWS Dependencies
 
-```bash
-# Install the python-helpers package for AWS integration
-pip install python-helpers
-
-# Or with UV
-uv add python-helpers
-```
+Nothing extra to install: the bundled hooks only use `boto3`, which is a
+runtime dependency of the library. What they need is AWS credentials (below)
+and the IAM permission of each service: `sns:Publish`, `sqs:SendMessage` or
+`execute-api:ManageConnections`.
 
 ### Check Availability
 
@@ -84,14 +81,14 @@ if is_feedback_sns_hook_available():
     print("✓ SNS feedback hook available")
     from mongodb_session_manager import create_feedback_sns_hook
 else:
-    print("✗ SNS hook not available - install python-helpers package")
+    print("✗ SNS hook not available - boto3 could not be imported")
 
 # Check SQS hook availability
 if is_metadata_sqs_hook_available():
     print("✓ SQS metadata hook available")
     from mongodb_session_manager import create_metadata_sqs_hook
 else:
-    print("✗ SQS hook not available - install python-helpers package")
+    print("✗ SQS hook not available - boto3 could not be imported")
 ```
 
 ### AWS Credentials
@@ -152,7 +149,7 @@ from mongodb_session_manager import (
 
 # Check availability
 if not is_feedback_sns_hook_available():
-    print("SNS hook not available - install python-helpers package")
+    print("SNS hook not available - boto3 could not be imported")
     exit(1)
 
 # Create SNS hook with three separate topics
@@ -318,7 +315,7 @@ from mongodb_session_manager import (
 
 # Check availability
 if not is_metadata_sqs_hook_available():
-    print("SQS hook not available - install python-helpers package")
+    print("SQS hook not available - boto3 could not be imported")
     exit(1)
 
 # Create SQS hook with selective field propagation
@@ -710,7 +707,7 @@ def create_session_manager_safe(session_id: str):
             logger.warning("Continuing without SNS notifications")
             feedback_hook = None
     else:
-        logger.info("ℹ AWS SNS integration not available (missing python-helpers)")
+        logger.info("ℹ AWS SNS integration not available (boto3 not importable)")
 
     # Create session manager (works with or without hook)
     return MongoDBSessionManager(
@@ -754,16 +751,18 @@ except Exception as e:
     # Fall back to no hook
 
 # Scenario 2: Network issues
-# The hook automatically handles network errors
-# Feedback is stored in MongoDB regardless
+# Feedback is stored in MongoDB first, regardless; the notification runs
+# afterwards, in the background
 
 # Scenario 3: Permission denied
-# Hook logs error but doesn't fail the operation
+# The notification fails without failing the operation: it is logged once at
+# ERROR, with the session id and the traceback, and counted in
+# hooks_background_stats().failed
 
-# Scenario 4: Missing dependencies
+# Scenario 4: boto3 not importable (it is a runtime dependency, so this means
+# a broken environment)
 if not is_feedback_sns_hook_available():
-    logger.warning("python-helpers not installed")
-    logger.info("To enable SNS: pip install python-helpers")
+    logger.warning("SNS hook not available: boto3 could not be imported")
     # Proceed without SNS integration
 ```
 

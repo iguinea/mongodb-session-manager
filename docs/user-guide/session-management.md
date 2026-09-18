@@ -120,11 +120,9 @@ agent = Agent(
     model="claude-3-sonnet", agent_id="assistant", session_manager=session_manager
 )
 
-# Use the agent - everything is persisted automatically
+# Use the agent - everything is persisted automatically: messages, state
+# and metrics, with no sync_agent() call of your own
 response = agent("Hello, how are you?")
-
-# Sync to save state and metrics
-session_manager.sync_agent(agent)
 ```
 
 ### 3. Termination
@@ -161,11 +159,11 @@ sequenceDiagram
         App->>Agent: Send message
         Agent->>SessionManager: append_message(user_message)
         SessionManager->>MongoDB: Store message
-        Agent-->>App: Return response
         Agent->>SessionManager: append_message(assistant_message)
-        SessionManager->>MongoDB: Store message
-        App->>SessionManager: sync_agent(agent)
-        SessionManager->>MongoDB: Update agent state & metrics
+        Note over SessionManager: Held until the invocation closes
+        Agent->>SessionManager: sync_agent(agent) on AfterInvocationEvent
+        SessionManager->>MongoDB: Store the batch with its metrics (one $push)
+        Agent-->>App: Return response
     end
 
     App->>SessionManager: close()
@@ -251,13 +249,11 @@ agent = Agent(
     system_prompt="You are a helpful assistant.",
 )
 
-# First message
+# First message (persisted as it runs)
 response1 = agent("Hello! My name is Alice.")
-session_manager.sync_agent(agent)
 
 # Second message
 response2 = agent("What's the weather like today?")
-session_manager.sync_agent(agent)
 
 # Add metadata
 session_manager.update_metadata(
@@ -272,14 +268,12 @@ session_manager.close()
 
 ### Automatic Metrics Capture
 
-The session manager captures metrics automatically at the end of each invocation and stores them on its last message. An explicit `sync_agent()` writes them again with the current values:
+The session manager captures metrics automatically at the end of each invocation and stores them on its last message. An explicit `sync_agent()` is optional: it costs one more write, which stores them again with the current values:
 
 ```python
-# Use the agent
+# Use the agent: when the invocation ends, the metrics are taken from
+# agent.event_loop_metrics and stored with no call of your own
 response = agent("Hello")
-
-# Sync captures metrics from agent.event_loop_metrics
-session_manager.sync_agent(agent)
 
 # Metrics stored in MongoDB:
 # - latencyMs: Response latency
@@ -539,22 +533,14 @@ session_id = f"user-{email}"  # Don't use PII in IDs
 
 ### Appending Messages
 
-Messages are automatically appended when using the agent, but you can also do it manually:
+Messages are appended automatically when using the agent: Strands calls `append_message()` for every message the agent adds. The prompt is written as it arrives; tool calls, tool results and the answer are written together, with the invocation's metrics, when the invocation closes.
 
 ```python
-# Automatic (recommended)
+# That is all it takes: no append_message() or sync_agent() to call
 response = agent("Hello")
-session_manager.sync_agent(agent)
-
-# Manual message appending
-from strands.types.content import Message
-
-user_message = Message(role="user", content="Hello")
-session_manager.append_message(user_message, agent)
-
-assistant_message = Message(role="assistant", content="Hi there!")
-session_manager.append_message(assistant_message, agent)
 ```
+
+Do not call `append_message()` yourself for an agent built with `session_manager=`: the message would be stored twice. An explicit `sync_agent()` is optional and costs one more write.
 
 ### Message Structure
 
@@ -562,9 +548,14 @@ Each message contains:
 
 ```python
 {
-    "message_id": 1,  # Auto-incrementing ID
-    "role": "user",  # "user" or "assistant"
-    "content": "Hello",  # Message content
+    "message_id": 1,  # Strands' index: the previous message's plus one
+    "storage_id": "9f1c...",  # Stable identity the writes use to find it
+    "message": {  # The Strands message
+        "role": "assistant",  # "user" or "assistant"
+        "content": [{"text": "Hi there!"}],
+        "metadata": {"usage": {...}, "metrics": {...}},  # assistant, strands 1.56+
+    },
+    "redact_message": None,  # The replacement, once redacted
     "created_at": "2024-01-15...",  # Timestamp
     "updated_at": "2024-01-15...",  # Timestamp
     "event_loop_metrics": {  # Only on the last message of each invocation
@@ -576,13 +567,14 @@ Each message contains:
 
 ### Redacting Messages
 
-Sometimes you need to redact or modify messages. When Bedrock Guardrails blocks content, `redact_latest_message` is called automatically. You can also call it manually:
+Sometimes you need to redact or modify messages. When Bedrock Guardrails blocks content, `redact_latest_message` is called automatically. You can also call it manually; it only ever reaches the **latest** message of the agent (after `agent(...)` returns, the answer):
 
 ```python
-from strands.types.content import Message
-
 # Create redacted message
-redacted_message = Message(role="user", content="[REDACTED FOR PRIVACY]")
+redacted_message = {
+    "role": "assistant",
+    "content": [{"text": "[REDACTED FOR PRIVACY]"}],
+}
 
 # Redact the latest message (records guardrail event with action="BLOCKED")
 session_manager.redact_latest_message(redacted_message, agent)

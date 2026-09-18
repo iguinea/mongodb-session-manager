@@ -478,10 +478,14 @@ async def chat_stream(chat_request: ChatRequest, session_id: str = Header(...)):
     Stream chat responses in real-time while persisting to MongoDB.
 
     Flow:
-    1. User sends message
+    1. User sends message: the session manager stores it as it arrives
     2. Response streams to client
-    3. Full response is saved to MongoDB
-    4. Metrics are captured
+    3. When the stream ends, the session manager stores the answer (and any
+       tool calls) with the invocation's metrics, in a single write
+
+    Steps 1 and 3 happen through the hooks the Agent registers: there is no
+    append_message() or sync_agent() to call here, and calling them would
+    store the messages twice or add a write.
     """
     try:
         # Get factory and create session manager
@@ -496,34 +500,20 @@ async def chat_stream(chat_request: ChatRequest, session_id: str = Header(...)):
             system_prompt="You are a helpful assistant.",
         )
 
-        # Track response chunks for later storage
-        response_chunks = []
-
         async def generate():
             """Stream generator that yields chunks."""
             try:
-                # Stream from agent
                 async for event in agent.stream_async(chat_request.prompt):
                     if "data" in event:
-                        chunk = event["data"]
-                        response_chunks.append(chunk)
-                        yield chunk
-
-                # After streaming completes, save to MongoDB
-                full_response = "".join(response_chunks)
-
-                # The agent already appended user message
-                # Now append the complete assistant response
-                session_manager.append_message(
-                    {"role": "assistant", "content": full_response}, agent
-                )
-
-                # Sync agent state and metrics
-                session_manager.sync_agent(agent)
+                        yield event["data"]
 
             except Exception as e:
                 logger.error(f"Streaming error: {e}")
                 yield f"\n\nError: {str(e)}"
+            finally:
+                # Borrowed client: close() does not disconnect, it only writes
+                # a batch whose invocation never closed
+                session_manager.close()
 
         # Return streaming response
         return StreamingResponse(generate(), media_type="text/plain")
@@ -571,8 +561,8 @@ Production-ready health checks and monitoring endpoints.
 Health check and metrics endpoints.
 """
 
-from fastapi import FastAPI, Request
-from mongodb_session_manager import get_global_factory, MongoDBConnectionPool
+from fastapi import FastAPI, HTTPException, Request
+from mongodb_session_manager import MongoDBConnectionPool, MongoDBSessionRepository
 
 app = FastAPI()
 
@@ -649,28 +639,35 @@ async def get_metrics(request: Request):
 async def get_session_metrics(session_id: str, request: Request):
     """
     Get metrics for a specific session.
+
+    Reads through the repository rather than a session manager: building a
+    manager creates the session when it does not exist, so it could never
+    answer 404. The repository shares the factory's pooled client.
     """
     try:
         factory = request.app.state.session_factory
-        session_manager = factory.create_session_manager(session_id)
+        repository = MongoDBSessionRepository(
+            client=MongoDBConnectionPool.get_client(),
+            database_name=factory.database_name,
+            collection_name=factory.collection_name,
+        )
 
-        # Get session data
-        session_data = session_manager.get_session()
-
-        if not session_data:
+        # Reads only the session header, not the history
+        if repository.read_session(session_id) is None:
             raise HTTPException(status_code=404, detail="Session not found")
 
-        # Compile metrics
+        # Compile metrics: configs and counts are computed in MongoDB,
+        # without transferring the messages
         metrics = {"session_id": session_id, "agents": {}, "total_messages": 0}
 
-        for agent_id, agent_data in session_data.agents.items():
-            agent_metrics = {
-                "name": agent_data.name,
-                "message_count": len(agent_data.messages),
-                "state": agent_data.state,
+        for config in repository.list_agent_configs(session_id):
+            agent_id = config["agent_id"]
+            message_count = repository.count_messages(session_id, agent_id)
+            metrics["agents"][agent_id] = {
+                "model": config["model"],
+                "message_count": message_count,
             }
-            metrics["agents"][agent_id] = agent_metrics
-            metrics["total_messages"] += len(agent_data.messages)
+            metrics["total_messages"] += message_count
 
         return metrics
 
@@ -714,6 +711,12 @@ from fastapi import FastAPI, Request, HTTPException, status
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 import logging
+
+from mongodb_session_manager import (
+    MongoDBConnectionPool,
+    MongoDBSessionRepository,
+    get_global_factory,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -794,15 +797,25 @@ async def general_exception_handler(request: Request, exc: Exception):
 def chat(chat_request: ChatRequest, session_id: str = Header(...)):
     try:
         factory = get_global_factory()
-        session_manager = factory.create_session_manager(session_id)
 
-        # Check if session exists
-        if not session_manager.check_session_exists():
+        # Check if session exists. Ask the repository, before building the
+        # session manager: the manager's constructor creates the session when
+        # it does not exist, so once it is built the answer is always yes.
+        repository = MongoDBSessionRepository(
+            client=MongoDBConnectionPool.get_client(),  # the factory's pool
+            database_name=factory.database_name,
+            collection_name=factory.collection_name,
+        )
+        if repository.read_session(session_id) is None:
             raise SessionNotFoundError(f"Session {session_id} not found")
 
-        # Process chat
-        agent = Agent(...)
-        response = agent(chat_request.prompt)
+        session_manager = factory.create_session_manager(session_id)
+        try:
+            # Process chat
+            agent = Agent(..., session_manager=session_manager)
+            response = agent(chat_request.prompt)
+        finally:
+            session_manager.close()
 
         return ChatResponse(response=str(response), session_id=session_id)
 

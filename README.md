@@ -3,7 +3,7 @@
 [![Version](https://img.shields.io/badge/version-0.24.0-blue.svg)](https://github.com/iguinea/mongodb-session-manager)
 [![Python](https://img.shields.io/badge/python-3.12+-green.svg)](https://python.org)
 
-A MongoDB session manager for [Strands Agents](https://github.com/strands-agents/strands-agents-python) that provides persistent storage for agent conversations and state, with connection pooling optimized for stateless environments.
+A MongoDB session manager for [Strands Agents](https://strandsagents.com) that provides persistent storage for agent conversations and state, with connection pooling optimized for stateless environments.
 
 ## Features
 
@@ -65,11 +65,9 @@ agent = Agent(
     system_prompt="You are a helpful assistant.",
 )
 
-# Use the agent - conversation is automatically persisted
+# Use the agent - messages, state and metrics are persisted automatically,
+# through the hooks the agent registers: there is nothing to sync by hand
 response = agent("Hello, can you help me?")
-
-# Sync agent to persist state and metrics
-session_manager.sync_agent(agent)
 
 # Read application name (immutable, set at creation)
 app_name = session_manager.get_application_name()
@@ -85,6 +83,7 @@ For FastAPI and other stateless frameworks, use the factory pattern for optimal 
 ```python
 from fastapi import FastAPI, Request
 from contextlib import asynccontextmanager
+from strands import Agent
 from mongodb_session_manager import (
     initialize_global_factory,
     get_global_factory,
@@ -121,8 +120,7 @@ async def chat(request: Request, session_id: str, message: str):
         session_manager=manager,
     )
 
-    response = agent(message)
-    manager.sync_agent(agent)
+    response = agent(message)  # persisted as it runs, metrics included
 
     return {"response": str(response)}
 ```
@@ -155,7 +153,7 @@ Main class extending `RepositorySessionManager` from Strands SDK.
 
 | Method | Description |
 |--------|-------------|
-| `sync_agent(agent)` | Persist agent state, config, and event loop metrics |
+| `sync_agent(agent)` | Persist agent state, config, and event loop metrics. Strands calls it through the agent's hooks; an explicit call is optional and costs one more write |
 | `update_metadata(metadata)` | Update session metadata (preserves existing fields) |
 | `get_metadata()` | Retrieve session metadata |
 | `delete_metadata(keys)` | Delete specific metadata fields |
@@ -394,25 +392,14 @@ For comprehensive documentation, see the [`docs/`](docs/) directory:
 
 ## Testing
 
-The project has 274 tests organized in unit and integration suites:
+Tests are organized in unit and integration suites:
 
 ```
 tests/
-  conftest.py                          # Shared fixtures
-  unit/                                # 243 tests (no MongoDB required)
-    test_session_repository.py
-    test_session_manager.py
-    test_connection_pool.py
-    test_session_factory.py
-    test_hooks_feedback_sns.py
-    test_hooks_metadata_sqs.py
-    test_hooks_metadata_websocket.py
-    test_hooks_utils_sns.py
-    test_hooks_utils_sqs.py
-  integration/                         # 31 tests (require MongoDB)
-    test_repository_integration.py
-    test_manager_integration.py
-    test_factory_integration.py
+  conftest.py      # Shared fixtures
+  unit/            # No MongoDB required: repository, manager, pool, factory, hooks, benchmark
+  integration/     # Require MongoDB (or DocumentDB)
+  support/         # In-memory repository, its contract, a scripted Strands model
 ```
 
 ```bash

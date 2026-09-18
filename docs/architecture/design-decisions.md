@@ -1183,7 +1183,7 @@ def sync_agent(self, agent, **kwargs):
 
 **Pros**:
 - Natural integration with Strands SDK
-- Users already call sync_agent
+- Strands already calls sync_agent when each invocation ends
 - Metrics ready by sync time
 - Only updates when metrics present
 
@@ -1199,28 +1199,45 @@ def sync_agent(self, agent, **kwargs):
 
 2. **Metrics Availability**: By the time `sync_agent` is called, agent has completed execution and metrics are populated.
 
-3. **Zero User Burden**: Users already call `sync_agent` (or it's called automatically). No new methods to learn.
+3. **Zero User Burden**: Strands calls `sync_agent` through the hooks the `Agent` registers, so users call nothing. An explicit call stays possible, and optional.
 
 4. **Conditional Logic**: `if latencyMs > 0` ensures we only update when metrics are actually present.
 
 **Implementation**:
 
 ```python
-def sync_agent(self, agent: Agent, **kwargs: Any) -> None:
-    # First, sync agent state (parent class)
-    super().sync_agent(agent, **kwargs)
+def sync_agent(self, agent: LocalAgent, **kwargs: Any) -> None:
+    # Agent state first (parent class). It is a separate round-trip, so its
+    # failure must not take down the write below, which since #53 carries
+    # the messages of the turn.
+    try:
+        super().sync_agent(agent, **kwargs)
+    finally:
+        self._write_sync(agent)
 
-    # Metrics target the last message, the config targets the agent, but both
-    # land on the same session document, so they travel in a single write.
-    metrics_ops, message_id = self._build_metrics_update(agent)
+
+def _write_sync(self, agent: LocalAgent) -> None:
+    # The sync Strands runs for each MessageAddedEvent writes no metrics
+    # (they are still the previous cycle's, #66) and flushes nothing.
+    if syncing_added_message():
+        metrics_ops, message_ref = {}, None
+    else:
+        metrics_ops, message_ref = self._build_metrics_update(agent)
     config_ops, config_cache_entry = self._build_agent_config_update(agent)
 
+    # The closing sync writes the invocation's pending batch: one $push with
+    # $each, the metrics nested into its last message, the config alongside.
+    if not syncing_added_message() and self._flush_pending(
+        agent.agent_id, metrics_ops, config_ops
+    ):
+        if config_cache_entry is not None:
+            self._agent_config_cache[agent.agent_id] = config_cache_entry
+        return
+
+    # No batch to carry them (an explicit call after the invocation, say):
+    # metrics and config still travel in a single write.
     self._apply_sync_update(
-        agent,
-        metrics_ops,
-        config_ops,
-        message_id,
-        config_cache_entry if config_ops else None,
+        agent, metrics_ops, config_ops, message_ref, config_cache_entry
     )
 ```
 
@@ -1228,10 +1245,12 @@ The keys the manager builds are **relative** to the message
 (`"event_loop_metrics.accumulated_usage"`) or to the agent
 (`"agent_data.model"`). Where those documents live, and the positional selector
 that finds them, belong to the repository — the manager does not access
-`session_repository.collection` (issue #80). `_apply_sync_update()` then picks
-the branch: with metrics the config rides along in
-`update_message_fields()`, and without them it goes alone through
-`update_agent_fields()`. One write either way.
+`session_repository.collection` (issue #80). With a batch pending,
+`create_messages(..., fields_on_last=...)` nests the metrics into the last
+message before the push, because `$set` cannot reach a message the same write
+is creating (#53). Without one, `_apply_sync_update()` picks the branch: with
+metrics the config rides along in `update_message_fields()`, and without them
+it goes alone through `update_agent_fields()`. One write either way.
 
 The reference to the last message comes from the parent's in-memory
 `_latest_agent_message`, which carries the identity `create_message()` stamped
@@ -1244,10 +1263,10 @@ previous message on a lagging replica.
 
 Metrics represent the work done for the last response (assistant message):
 1. User sends message
-2. `append_message(user_message)`
+2. `append_message(user_message)` → written at once
 3. Agent processes (populates metrics)
-4. `append_message(assistant_message)`
-5. `sync_agent()` → metrics added to assistant message
+4. `append_message(assistant_message)` → held in the invocation's batch
+5. Closing `sync_agent()` → the batch is pushed, metrics inside the assistant message
 
 **Filtering on Read**:
 

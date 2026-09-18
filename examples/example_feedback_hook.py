@@ -14,7 +14,7 @@ Example demonstrating the feedback hook functionality.
 
 🔗 **Learn More:** https://github.com/iguinea/mongodb-session-manager/tree/main/docs
 
-This example shows how to use the feedbackHook parameter to intercept
+This example shows how to use the feedback_hook parameter to intercept
 and enhance feedback operations with custom logic like auditing,
 validation, notifications, and FastAPI integration.
 """
@@ -269,7 +269,7 @@ async def main():
         connection_string=MONGO_CONNECTION,
         database_name=DATABASE_NAME,
         collection_name="audit_sessions",
-        feedbackHook=feedback_audit_hook,
+        feedback_hook=feedback_audit_hook,
     )
 
     # Add some feedback
@@ -295,7 +295,7 @@ async def main():
         connection_string=MONGO_CONNECTION,
         database_name=DATABASE_NAME,
         collection_name="validated_sessions",
-        feedbackHook=feedback_validation_hook,
+        feedback_hook=feedback_validation_hook,
     )
 
     try:
@@ -324,7 +324,7 @@ async def main():
         connection_string=MONGO_CONNECTION,
         database_name=DATABASE_NAME,
         collection_name="notification_sessions",
-        feedbackHook=notification_hook,
+        feedback_hook=notification_hook,
     )
 
     # Add feedback that triggers notifications
@@ -345,7 +345,7 @@ async def main():
         connection_string=MONGO_CONNECTION,
         database_name=DATABASE_NAME,
         collection_name="analytics_sessions",
-        feedbackHook=analytics_hook,
+        feedback_hook=analytics_hook,
     )
 
     # Add various feedback
@@ -380,7 +380,7 @@ async def main():
         connection_string=MONGO_CONNECTION,
         database_name=DATABASE_NAME,
         collection_name="combined_sessions",
-        feedbackHook=combined_hook,
+        feedback_hook=combined_hook,
     )
 
     # This will go through all hooks
@@ -411,7 +411,7 @@ async def add_feedback(session_id: str, feedback_data: FeedbackRequest):
         # Get or create session manager with hooks
         session_manager = factory.create_session_manager(
             session_id=session_id,
-            feedbackHook=create_combined_feedback_hook(
+            feedback_hook=create_combined_feedback_hook(
                 feedback_validation_hook,
                 feedback_audit_hook,
                 FeedbackNotificationHook()
@@ -448,7 +448,7 @@ from mongodb_session_manager import (
     is_feedback_sns_hook_available
 )
 
-# Check if SNS hook is available (requires python-helpers package)
+# Check if SNS hook is available (it needs only boto3, installed with the library)
 if is_feedback_sns_hook_available():
     # Create SNS hook with custom templates for production environment
     sns_hook = create_feedback_sns_hook(
@@ -490,7 +490,7 @@ if is_feedback_sns_hook_available():
     session_manager = MongoDBSessionManager(
         session_id="prod-session-123",
         connection_string="mongodb://...",
-        feedbackHook=sns_hook
+        feedback_hook=sns_hook
     )
 
     # Feedback will be sent to SNS with custom prefixes
@@ -535,8 +535,7 @@ if is_feedback_sns_hook_available():
     #   Excellent customer service!
 
 else:
-    print("SNS hook not available - install python-helpers package:")
-    print("pip install python-helpers")
+    print("SNS hook not available - boto3 could not be imported in this environment")
 
 # Multi-Environment Pattern:
 # Configure different prefixes for dev/staging/prod environments

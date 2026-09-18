@@ -330,10 +330,18 @@ if __name__ == "__main__":
 
 How to handle message redaction for privacy or compliance.
 
+Redaction goes through `redact_latest_message()`, and it only ever reaches the **latest** message of an agent: there is no API to redact an arbitrary message after the fact. It happens in two ways:
+
+- **Automatically**, when a Bedrock guardrail intervenes on the input: Strands replaces the user's message and calls `redact_latest_message()` itself.
+- **By hand**, calling `redact_latest_message()` yourself. After `agent(...)` returns, the latest message is the answer.
+
+Either way the manager records a `guardrail_event` on the message and an entry in the session's `guardrail_events` array (see [Guardrail Auditing](../user-guide/guardrail-auditing.md)).
+
 ```python
 import asyncio
 from mongodb_session_manager import create_mongodb_session_manager
 from strands import Agent
+from strands.models import BedrockModel
 
 
 async def main():
@@ -344,9 +352,17 @@ async def main():
         database_name="my_app",
     )
 
-    # Create agent
+    # A Bedrock model with a guardrail: when it blocks the input, Strands
+    # replaces the user's message and redacts it in the session
+    model = BedrockModel(
+        model_id="us.anthropic.claude-sonnet-4-20250514-v1:0",
+        guardrail_id="your-guardrail-id",
+        guardrail_version="1",
+        guardrail_redact_input_message="[User input redacted.]",
+    )
+
     agent = Agent(
-        model="claude-3-sonnet-20240229",
+        model=model,
         agent_id="assistant",
         session_manager=session_manager,
         system_prompt="You are a customer service assistant.",
@@ -354,36 +370,23 @@ async def main():
 
     # User shares sensitive information
     response = agent("My credit card number is 4532-1234-5678-9010")
-    print(f"User: My credit card number is 4532-1234-5678-9010")
     print(f"Agent: {response}\n")
 
-    # Get messages to find the one to redact
-    session_data = session_manager.get_session()
-    messages = session_data.agents[agent.agent_id].messages
+    # Redact by hand: this replaces the latest message, i.e. the answer
+    session_manager.redact_latest_message(
+        {"role": "assistant", "content": [{"text": "[Removed: payment data]"}]},
+        agent,
+        action="REDACTED",
+    )
 
-    # Find the message with credit card info
-    for msg in messages:
-        if "4532-1234-5678-9010" in msg.content:
-            print(f"Found sensitive message: {msg.content}")
-
-            # Redact the message
-            session_manager.redact_message(
-                agent_id=agent.agent_id,
-                message_id=msg.message_id,
-                redacted_reason="Contains sensitive payment information",
-            )
-            print("Message redacted!\n")
-
-    # Verify redaction
-    session_data = session_manager.get_session()
-    messages = session_data.agents[agent.agent_id].messages
-
-    print("Messages after redaction:")
-    for msg in messages:
-        if msg.redacted:
-            print(f"  [REDACTED: {msg.redacted_reason}]")
-        else:
-            print(f"  {msg.content}")
+    # Verify: read the stored history back. to_message() returns the
+    # redacted content when there is one, which is what a restored agent sees.
+    repository = session_manager.session_repository
+    print("Stored messages:")
+    for stored in repository.list_messages(session_manager.session_id, agent.agent_id):
+        marker = "[REDACTED] " if stored.redact_message else ""
+        text = stored.to_message()["content"][0].get("text", "")
+        print(f"  {stored.message['role']}: {marker}{text}")
 
     # Clean up
     session_manager.close()
@@ -393,23 +396,20 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-**Expected Output:**
+**Expected Output** (when the guardrail blocks the input):
 ```
-User: My credit card number is 4532-1234-5678-9010
-Agent: I've received that information...
+Agent: Sorry, the model cannot answer this question.
 
-Found sensitive message: My credit card number is 4532-1234-5678-9010
-Message redacted!
-
-Messages after redaction:
-  [REDACTED: Contains sensitive payment information]
-  I've received that information...
+Stored messages:
+  user: [REDACTED] [User input redacted.]
+  assistant: [REDACTED] [Removed: payment data]
 ```
 
 **Key Points:**
-- Messages can be redacted after the fact
-- Original content is replaced with redaction notice
-- Redaction reason is stored for audit purposes
+- Only the latest message of an agent can be redacted, and a guardrail does it for you
+- A restored agent reads the redacted content (`redact_message`), not the original
+- With a manual redaction the original stays in the stored `message` field: remove it yourself if it must not be kept
+- The `action`, and optionally `stop_reason` and `guardrail_trace`, are stored for audit purposes
 
 ---
 
@@ -449,7 +449,8 @@ async def main():
 
     print("After setting state:", agent.state.get())
 
-    # Sync state to MongoDB
+    # Sync state to MongoDB. Needed here because the state changed outside
+    # an invocation: during agent(...) calls the hooks sync it on their own.
     session_manager.sync_agent(agent)
     print("State synced to MongoDB\n")
 
@@ -500,7 +501,7 @@ Customer tier: gold
 **Key Points:**
 - Agent state persists across restarts
 - Use `agent.state.set()` to store custom data
-- Call `sync_agent()` to persist state to MongoDB
+- State changed during an `agent(...)` call is persisted by the hooks; call `sync_agent()` only for changes made outside one, as here
 - State is automatically restored when agent is recreated
 
 ---
@@ -533,13 +534,10 @@ async def main():
             session_manager=session_manager,
         )
 
-        # Do some work
+        # Do some work: the conversation and the state are persisted as the
+        # invocation runs, so there is nothing to sync by hand afterwards
         response = agent("Hello!")
         print(f"Agent: {response}")
-
-        # Sync final state
-        session_manager.sync_agent(agent)
-        print("Agent state synced")
 
     except Exception as e:
         print(f"Error: {e}")
@@ -556,8 +554,7 @@ if __name__ == "__main__":
 ```
 
 **Best Practices:**
-- Always close the session manager in a `finally` block
-- Sync agent state before shutdown
+- Always close the session manager in a `finally` block: `close()` also writes any messages an invocation that never closed left pending
 - Handle exceptions gracefully
 - Use context managers when available
 
@@ -565,7 +562,7 @@ if __name__ == "__main__":
 
 ## Complete Example: Calculator Tool
 
-This example is based on `/workspace/examples/example_calculator_tool.py` and demonstrates a real-world scenario with tools and state management.
+This example is based on `examples/example_calculator_tool.py` and demonstrates a real-world scenario with tools and state management.
 
 ```python
 #!/usr/bin/env python3
@@ -665,8 +662,8 @@ Be friendly and explain your calculations.""",
     print(f"User: What's my name?")
     print(f"Agent: {response}")
 
-    # Sync everything to MongoDB
-    session_manager.sync_agent(agent)
+    # Everything above is already in MongoDB: each agent(...) call persisted
+    # its messages, the state and the metrics through the session manager.
 
     # Show final state
     print("\n--- Final State ---")
@@ -674,15 +671,11 @@ Be friendly and explain your calculations.""",
     print(f"Agent State: {agent.state.get()}")
     print(f"Total Calculations: {agent.state.get('calculations_count')}")
 
-    # Get metrics if available
-    try:
-        session_data = session_manager.get_session()
-        agent_data = session_data.agents.get(agent.agent_id)
-        if agent_data:
-            print(f"Total Messages: {len(agent_data.messages)}")
-            print(f"Agent Name: {agent_data.name}")
-    except Exception as e:
-        print(f"Could not retrieve metrics: {e}")
+    # Read back what was stored
+    print(f"Total Messages: {session_manager.get_message_count(agent.agent_id)}")
+    config = session_manager.get_agent_config(agent.agent_id)
+    if config:
+        print(f"Model: {config['model']}")
 
     # Clean up
     session_manager.close()
@@ -719,8 +712,8 @@ Agent: Your name is Alice!
 Session ID: calculator-demo-session
 Agent State: {'session_start': '2024-01-26T10:00:00', 'calculations_count': 2}
 Total Calculations: 2
-Total Messages: 8
-Agent Name: Calculator Assistant
+Total Messages: 14
+Model: claude-3-sonnet-20240229
 
 Example completed!
 ```
@@ -762,10 +755,17 @@ client.server_info()  # Will raise exception if can't connect
 # Problem: Session not found when resuming
 # Solution: Ensure you're using the same session_id and database
 
-# Check if session exists
-session_data = session_manager.get_session()
-if not session_data:
-    print("Session not found - creating new session")
+# Check if session exists. Ask the repository: building a session manager
+# creates the session when it does not exist, so it cannot tell you.
+from mongodb_session_manager import MongoDBSessionRepository
+
+repository = MongoDBSessionRepository(
+    connection_string="mongodb://localhost:27017/",
+    database_name="my_app",  # and collection_name, if you set one
+)
+if repository.read_session("resume-demo-session") is None:
+    print("Session not found - a new one will be created")
+repository.close()
 ```
 
 ### Memory Issues
@@ -773,12 +773,23 @@ if not session_data:
 # Problem: Too many messages in session
 # Solution: Implement message pruning or use a new session
 
-# Keep only last N messages
+# Count what is stored (computed in MongoDB, the history is not transferred)
 MAX_MESSAGES = 100
-session_data = session_manager.get_session()
-if len(session_data.agents[agent_id].messages) > MAX_MESSAGES:
-    # Consider starting a new session or implementing pruning
+if session_manager.get_message_count(agent.agent_id) > MAX_MESSAGES:
+    # Consider starting a new session
     pass
+
+# What the agent keeps in its context is bounded by its conversation manager
+# (Strands' default keeps a window of 40 messages), and restoring a session
+# skips the messages it has already trimmed
+from strands.agent.conversation_manager import SlidingWindowConversationManager
+
+agent = Agent(
+    model="claude-3-sonnet-20240229",
+    agent_id="assistant",
+    session_manager=session_manager,
+    conversation_manager=SlidingWindowConversationManager(window_size=20),
+)
 ```
 
 ## Next Steps
@@ -790,6 +801,6 @@ if len(session_data.agents[agent_id].messages) > MAX_MESSAGES:
 
 ## Reference Files
 
-- `/workspace/examples/example_calculator_tool.py` - Full calculator example
-- `/workspace/src/mongodb_session_manager/mongodb_session_manager.py` - Main implementation
-- `/workspace/src/mongodb_session_manager/mongodb_session_repository.py` - Repository layer
+- `examples/example_calculator_tool.py` - Full calculator example
+- `src/mongodb_session_manager/mongodb_session_manager.py` - Main implementation
+- `src/mongodb_session_manager/mongodb_session_repository.py` - Repository layer

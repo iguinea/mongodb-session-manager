@@ -116,9 +116,9 @@ class MongoDBSessionManager(RepositorySessionManager):
             tools=[session_manager.get_metadata_tool()]
         )
 
-        # Use the agent
+        # Use the agent: messages, state and metrics are persisted through
+        # the hooks the agent registers, with no call of your own
         response = agent("Hello!")
-        session_manager.sync_agent(agent)  # Captures metrics
 
         # Manage metadata
         session_manager.update_metadata({"user_name": "Alice", "topic": "AI"})

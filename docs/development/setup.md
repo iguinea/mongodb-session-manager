@@ -267,8 +267,8 @@ uv run python examples/example_fastapi.py
 # Performance benchmarks
 uv run python -m benchmarks
 
-# Async streaming
-uv run python examples/example_stream_async.py
+# Async streaming (FastAPI)
+uv run python examples/example_fastapi_streaming.py
 ```
 
 ### Metadata Examples
@@ -647,20 +647,20 @@ python your_script.py
 
 ### AWS Hook Issues
 
-**Problem**: AWS hooks not available
+**Problem**: AWS hooks not available, or their notifications never arrive
 
-**Solution**: The AWS hooks require the `python-helpers` package which is installed from Git:
+**Solution**: The AWS hooks need no extra package: they only use `boto3`, a
+runtime dependency installed by `uv sync`. Check the AWS side instead:
 ```bash
-# Check if python-helpers is installed
-uv pip list | grep python-helpers
+# boto3 imports in the project environment
+uv run python -c "import boto3; print(boto3.__version__)"
 
-# If not, ensure pyproject.toml has:
-# [tool.uv.sources]
-# python-helpers = { git = "https://github.com/iguinea/python-helpers", rev = "latest" }
-
-# Then reinstall
-uv sync --reinstall-package python-helpers
+# Credentials resolve
+aws sts get-caller-identity
 ```
+The SNS and SQS hooks use `AWS_DEFAULT_REGION` (`eu-west-1` when unset), and
+each hook needs its IAM permission: `sns:Publish`, `sqs:SendMessage` or
+`execute-api:ManageConnections`.
 
 ### Example Script Issues
 
@@ -698,7 +698,7 @@ Now that your development environment is set up:
 
 - **UV Documentation**: https://github.com/astral-sh/uv
 - **MongoDB Documentation**: https://docs.mongodb.com/
-- **Strands Agents**: https://github.com/strands-ai/strands-agents
+- **Strands Agents**: https://strandsagents.com
 - **Python 3.12 Documentation**: https://docs.python.org/3.12/
 
 ## Getting Help

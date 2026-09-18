@@ -141,10 +141,17 @@ manager = MongoDBSessionManager(
 )
 
 
-# With hooks for audit and notifications
+# With hooks for audit and notifications.
+# The hook receives the argument under its own name (metadata= on update,
+# keys= on delete), which is not the parameter name of the wrapped method
+# (delete_metadata(metadata_keys)), so pass it on positionally.
 def audit_metadata(original_func, action, session_id, **kwargs):
     logger.info(f"Metadata {action} on {session_id}")
-    return original_func(**kwargs) if kwargs else original_func()
+    if action == "update":
+        return original_func(kwargs["metadata"])
+    if action == "delete":
+        return original_func(kwargs["keys"])
+    return original_func()  # get
 
 
 def notify_feedback(original_func, action, session_id, **kwargs):
@@ -168,34 +175,44 @@ manager = MongoDBSessionManager(
 ### `append_message`
 
 ```python
-def append_message(self, message: Message, agent: Agent) -> None
+def append_message(self, message: Message, agent: LocalAgent, **kwargs: Any) -> None
 ```
 
-Append a message to the session for the specified agent.
+Persist a message of the agent's conversation.
 
-This method adds a new message to the agent's conversation history in MongoDB. Messages are stored in chronological order with auto-incrementing message IDs.
+**You do not call it yourself.** When an `Agent` is created with `session_manager=...`, Strands calls it for every message added to `agent.messages` (`MessageAddedEvent`): the prompt, each `toolUse` and `toolResult`, and the answer. Calling it by hand for an agent wired that way stores the message twice.
+
+When a message reaches MongoDB depends on what it is:
+
+| Message | Written |
+|---|---|
+| The prompt that opens an invocation (a `user` message with no `toolResult`) | Immediately, as it arrives: nothing can produce it again |
+| What the event loop produces (`toolUse`, `toolResult`, the answer) | In the write that closes the invocation (`AfterInvocationEvent`): one `$push` with `$each` for the whole batch, with the invocation's `event_loop_metrics` inside the last message |
+| A message appended outside an invocation | Immediately, since nothing is bound to flush it later |
+
+`AfterInvocationEvent` fires from a `finally` in the SDK, so an invocation that raises still writes its batch. A batch whose write fails is not retried (the write may have been applied, and pushing it again would duplicate the turn); `close()` writes a batch whose invocation never closed ([issue #53](https://github.com/iguinea/mongodb-session-manager/issues/53)).
+
+Each message is stored with the `message_id` Strands assigns (the previous one plus one) and a `storage_id` of its own, which is what later writes use to find it.
 
 #### Parameters
 
-- **message** (`Message`): The message to append. Typically contains `role` ("user" or "assistant") and `content` fields.
+- **message** (`Message`): The message added to the agent.
 
-- **agent** (`Agent`): The Strands Agent instance associated with this message.
+- **agent** (`LocalAgent`): The agent the message belongs to.
 
 #### Example
 
 ```python
 from strands import Agent
-from strands.types.content import Message
 
 agent = Agent(model="claude-3-sonnet", session_manager=manager)
 
-# Append user message
-user_message = Message(role="user", content="Hello, how are you?")
-manager.append_message(user_message, agent)
+# The prompt is written as it arrives; the answer, with the metrics, in the
+# write that closes the invocation.
+agent("Hello, how are you?")
 
-# Append assistant message
-assistant_message = Message(role="assistant", content="I'm doing well, thank you!")
-manager.append_message(assistant_message, agent)
+# 2 on a new session with no tool calls
+print(manager.get_message_count(agent.agent_id))
 ```
 
 ### `redact_latest_message`
@@ -218,15 +235,20 @@ Redact the latest message and record a guardrail event for auditing.
 
 - **kwargs** (`Any`): Additional keyword arguments:
   - **action** (`str`, default: `"BLOCKED"`): The guardrail action to record. Use the `GUARDRAIL_ACTION_BLOCKED` constant or any custom string (e.g., `"ANONYMIZED"`, `"FILTERED"`).
+  - **stop_reason** (`str`, optional): Stored on the event when given (e.g., `"guardrail_intervened"`).
+  - **guardrail_trace** (`dict`, optional): The Bedrock `GuardrailTrace`. The full trace is stored on the message, and a `policies_triggered` summary is derived from it for both levels.
+
+Strands calls this method itself, with no keyword arguments, when the model provider asks to redact the user's input (a `redactContent` stream event, as Bedrock Guardrails emit). It only ever reaches the **latest** message of that agent: there is no API to redact an arbitrary message after the fact.
 
 #### Guardrail Event Recording
 
 When called, the method:
-1. Delegates to the parent `RepositorySessionManager.redact_latest_message()` to persist the redacted message
-2. Records a `guardrail_event` on the message document: `{"action": "BLOCKED", "timestamp": "..."}`
-3. Pushes an entry to the session-level `guardrail_events[]` array: `{"message_id": N, "agent_id": "...", "action": "BLOCKED", "timestamp": "..."}`
+1. Writes the invocation's pending batch first, so the message being redacted is already in MongoDB
+2. Delegates to the parent `RepositorySessionManager.redact_latest_message()` to persist the redacted message
+3. Records a `guardrail_event` on the message document: `{"action": "BLOCKED", "timestamp": "..."}`, plus `stop_reason`, `policies_triggered` and `trace` when available
+4. Pushes an entry to the session-level `guardrail_events[]` array: the same fields minus `trace`, plus `message_id`, `storage_id` and `agent_id`
 
-Both updates are performed in a single MongoDB operation for efficiency.
+Steps 3 and 4 are performed in a single MongoDB operation.
 
 #### Example
 
@@ -234,7 +256,7 @@ Both updates are performed in a single MongoDB operation for efficiency.
 from mongodb_session_manager.mongodb_session_manager import GUARDRAIL_ACTION_BLOCKED
 
 # Redact with default action (BLOCKED)
-redacted = Message(role="assistant", content="[Content removed for privacy]")
+redacted = {"role": "assistant", "content": [{"text": "[Content removed for privacy]"}]}
 manager.redact_latest_message(redacted, agent)
 
 # Redact with custom action
@@ -255,6 +277,8 @@ def sync_agent(self, agent: LocalAgent, **kwargs: Any) -> None
 ```
 
 Synchronize agent data and automatically capture event loop metrics and agent configuration.
+
+**Calling it yourself is optional.** Strands already calls it through the hooks the `Agent` registers (see the table below), and the call that closes each invocation is the one that writes the invocation's messages with their metrics. An explicit call after `agent(...)` returns costs one more write, which rewrites the metrics on the last message.
 
 This method performs three key operations:
 1. Saves the current agent state to MongoDB, when it differs from what the repository last read or wrote for that agent (see [`update_agent`](mongodb-session-repository.md#update_agent))
@@ -1122,7 +1146,7 @@ def feedback_hook(
 - `original_func`: The original method being intercepted
 - `action`: Always `"add"` for feedback hooks
 - `session_id`: The current session ID
-- `**kwargs`: Contains `feedback` (dict) with the feedback data
+- `**kwargs`: Contains `feedback` (dict) with the feedback data, and `session_manager` (the manager instance)
 
 #### Example Feedback Hooks
 
@@ -1236,6 +1260,8 @@ manager = create_mongodb_session_manager(
 ## Complete Usage Example
 
 ```python
+from datetime import datetime
+
 from mongodb_session_manager import MongoDBSessionManager
 from strands import Agent
 
@@ -1249,15 +1275,13 @@ manager = MongoDBSessionManager(
     maxPoolSize=50,
 )
 
-# Create agent with session persistence
+# Create agent with session persistence. Creating it restores any existing
+# history: Strands calls manager.initialize(agent) itself.
 agent = Agent(
     model="claude-3-sonnet",
     session_manager=manager,
     tools=[manager.get_metadata_tool()],
 )
-
-# Initialize with existing history
-manager.initialize(agent)
 
 # Set initial metadata
 manager.update_metadata(
@@ -1268,16 +1292,14 @@ manager.update_metadata(
     }
 )
 
-# Have a conversation
+# Have a conversation: messages, state and metrics are persisted as it goes
 response = agent("Hello, I need help with my account")
-manager.sync_agent(agent)  # Captures metrics
 
 # Update metadata during conversation
 manager.update_metadata({"status": "active"})
 
 # Continue conversation
 response = agent("Can you check my balance?")
-manager.sync_agent(agent)
 
 # Add user feedback
 manager.add_feedback({"rating": "up", "comment": "Very helpful and quick response!"})

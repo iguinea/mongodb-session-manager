@@ -125,28 +125,25 @@ session_manager = MongoDBSessionManager(
 
 ```mermaid
 graph LR
-    A[agent.run] --> B[Agent Processes]
-    B --> C[Generate Response]
-    C --> D[append_message]
-    D --> E[Store in MongoDB]
-    E --> F[sync_agent]
-    F --> G[Capture Metrics]
-    G --> H[Update MongoDB]
+    A["agent('Hello')"] --> B[Prompt added]
+    B --> C["append_message: prompt stored at once"]
+    C --> D[Agent processes: tool calls, answer]
+    D --> E[Messages wait for the end of the invocation]
+    E --> F["Closing sync_agent: one $push with the batch, metrics on the last message"]
 ```
 
 ```python
-# User message
-session_manager.append_message({"role": "user", "content": "Hello"}, agent)
-
-# Agent processes and responds
+# The agent calls the session manager through the hooks it registers:
+# append_message() for every message it adds and sync_agent() when the
+# invocation ends. There is nothing to call yourself.
 response = agent("Hello")
 
-# Assistant message with metrics
-session_manager.append_message({"role": "assistant", "content": response}, agent)
-
-# Capture event loop metrics
-session_manager.sync_agent(agent)
+# Stored by now: the prompt (written as it arrived) and the answer, written
+# with the invocation's metrics in a single $push when it closed
 ```
+
+!!! warning "Do not call `append_message()` yourself"
+    For an agent built with `session_manager=`, a manual `append_message()` stores the message a second time. An explicit `sync_agent()` after `agent(...)` returns is optional: it costs one more write, which stores the metrics again.
 
 ### 3. Resuming a Session
 
@@ -224,11 +221,8 @@ The session manager automatically persists:
 ```python
 agent = Agent(model="claude-3-sonnet", session_manager=session_manager)
 
-# This automatically stores the message in MongoDB
+# This automatically stores the messages, the agent state and the metrics
 response = agent("Tell me about MongoDB")
-
-# This captures metrics and updates MongoDB
-session_manager.sync_agent(agent)
 ```
 
 **What gets stored:**
@@ -241,13 +235,11 @@ session_manager.sync_agent(agent)
 
 ### Manual Persistence
 
-You can also manually manage persistence:
+Messages are never appended by hand, but some things are yours to write:
 
 ```python
-# Explicitly append messages
-session_manager.append_message({"role": "user", "content": "Hello"}, agent)
-
-# Explicitly sync agent state
+# Sync agent state changed outside an invocation (inside one, the hooks do it)
+agent.state.set("cart", ["laptop"])
 session_manager.sync_agent(agent)
 
 # Update metadata
@@ -309,11 +301,10 @@ Each session is stored as a MongoDB document:
 The session manager captures metrics from the agent's event loop:
 
 ```python
-# Use the agent
+# Use the agent. When the invocation ends, the metrics are taken from
+# agent.event_loop_metrics and stored on its last message, with no call
+# of your own
 response = agent("Hello")
-
-# Sync captures these metrics from agent.event_loop_metrics
-session_manager.sync_agent(agent)
 
 # Metrics stored in MongoDB:
 # - latencyMs: Response time
@@ -617,8 +608,8 @@ from pymongo.errors import PyMongoError
 
 try:
     session_manager = MongoDBSessionManager(...)
-    response = agent("Hello")
-    session_manager.sync_agent(agent)
+    agent = Agent(session_manager=session_manager)
+    response = agent("Hello")  # a failed write surfaces here
 
 except PyMongoError as e:
     logger.error(f"MongoDB error: {e}")

@@ -111,15 +111,7 @@ Yes, you need access to a MongoDB instance. Options include:
 
 ### What about AWS dependencies?
 
-AWS integrations (SNS and SQS hooks) are **optional**. They require the `python-helpers` package:
-
-```toml
-# pyproject.toml
-[tool.uv.sources]
-python-helpers = { git = "https://github.com/iguinea/python-helpers", rev = "latest" }
-```
-
-If you don't need AWS features, the library works fine without them. Check availability with:
+There is nothing extra to install. The AWS hooks (SNS, SQS and WebSocket) only use `boto3`, which is a runtime dependency installed with the library. Using them is **optional**: what they need is AWS credentials and the IAM permissions of each service (`sns:Publish`, `sqs:SendMessage`, `execute-api:ManageConnections`). If you don't use them, nothing calls AWS. Check availability with:
 
 ```python
 from mongodb_session_manager import (
@@ -163,8 +155,7 @@ manager1 = create_mongodb_session_manager(
 
 agent1 = Agent(agent_id="assistant", model="claude-3-sonnet", session_manager=manager1)
 
-response1 = agent1("My name is Alice")
-manager1.sync_agent(agent1)
+response1 = agent1("My name is Alice")  # persisted as it runs
 manager1.close()
 
 # Day 7: Resume conversation
@@ -217,23 +208,26 @@ sales_response = sales_agent("Tell me about pricing")
 
 ### How are metrics captured?
 
-Metrics are **automatically** captured from the agent's event loop at the end of each invocation, and again whenever you call `sync_agent()` yourself:
+Metrics are **automatically** captured from the agent's event loop at the end of each invocation, with no call of your own:
 
 ```python
 # Use the agent
 response = agent("Hello, how are you?")
 
-# Sync agent - automatically captures:
+# Already stored on the last message of the invocation, among others:
 # - latencyMs: Response time
 # - inputTokens: Tokens in the prompt
 # - outputTokens: Tokens in the response
 # - totalTokens: Sum of input and output
-session_manager.sync_agent(agent)
 
-# Metrics are stored in MongoDB on the last message of the invocation
+# Optional: an explicit sync costs one more write, which stores them again
+# with the values the agent holds now
+session_manager.sync_agent(agent)
 ```
 
 Metrics are stored in the `event_loop_metrics` field of the last message of each invocation. Intermediate messages (tool use, tool results) carry none: when Strands syncs after adding each message, the metrics of the model call behind it are not accumulated yet. An invocation that does not reach its closing sync, because a hook for `AfterInvocationEvent` or the conversation manager raised first, is left without metrics.
+
+Since strands 1.56 each `assistant` message also carries, in `message.metadata`, the `usage` and `metrics` of its own model call, written by Strands at no extra cost.
 
 ### What's the difference between metadata and messages?
 
@@ -251,9 +245,9 @@ Metrics are stored in the `event_loop_metrics` field of the last message of each
 - Stored in root `metadata` object
 
 ```python
-# Add messages (conversation)
-manager.append_message({"role": "user", "content": "Hello"}, agent)
-manager.append_message({"role": "assistant", "content": "Hi!"}, agent)
+# Messages (conversation): stored by the agent itself, through the manager
+agent = Agent(agent_id="assistant", session_manager=manager)
+agent("Hello")
 
 # Update metadata (context)
 manager.update_metadata({"user_language": "en", "session_priority": "high"})
@@ -401,9 +395,9 @@ Typical results:
 - **With pooling**: 2-5ms per operation
 - **Improvement**: 5-10x faster
 
-For streaming responses, see:
+For streaming responses, see the FastAPI streaming example:
 ```bash
-uv run python examples/example_stream_async.py
+uv run python examples/example_fastapi_streaming.py
 ```
 
 ## Integration Questions
@@ -485,26 +479,16 @@ class MyAppConfig(AppConfig):
 
 ### Does it support async operations?
 
-Yes! The library supports async streaming:
+Yes! The library supports async streaming. Persistence works the same as with `agent(...)`: the session manager stores the prompt as it arrives and the answer, with the metrics, in one write when the stream ends. Do not call `append_message()` or `sync_agent()` yourself for it; the first would store the messages twice and the second adds a write.
 
 ```python
-async def stream_chat(session_manager, agent, prompt):
-    session_manager.append_message({"role": "user", "content": prompt}, agent)
-
-    response_chunks = []
+async def stream_chat(agent, prompt):
     async for event in agent.stream_async(prompt):
         if "data" in event:
-            response_chunks.append(event["data"])
             yield event["data"]  # Stream to client
-
-    full_response = "".join(response_chunks)
-    session_manager.append_message(
-        {"role": "assistant", "content": full_response}, agent
-    )
-    session_manager.sync_agent(agent)
 ```
 
-See `examples/example_stream_async.py` for complete examples.
+See `examples/example_fastapi_streaming.py` and the [Async Streaming guide](user-guide/async-streaming.md) for complete examples.
 
 ## Troubleshooting
 
@@ -573,24 +557,29 @@ See `examples/example_stream_async.py` for complete examples.
 
 **Solutions**:
 
-1. **Ensure sync_agent() is called**:
+1. **Pass the session manager to the agent**:
    ```python
+   # Persistence and restore happen through the hooks the Agent registers.
+   # There is no sync_agent() or initialize() to call yourself: Strands calls
+   # both, and a second initialize() for the same agent_id raises.
+   agent = Agent(agent_id="assistant", session_manager=session_manager)
    response = agent("Hello")
-   session_manager.sync_agent(agent)  # MUST call this!
    ```
 
-2. **Check message limit**:
+2. **Check the messages are stored**:
    ```python
-   # List messages to verify they're stored
-   messages = session_manager.list_messages(agent_id="assistant")
+   # Count them (computed in MongoDB)
+   print(f"Stored messages: {session_manager.get_message_count('assistant')}")
+
+   # Or list them through the repository: session_id, agent_id, then an
+   # optional limit and offset
+   messages = session_manager.session_repository.list_messages(
+       session_manager.session_id, "assistant"
+   )
    print(f"Stored messages: {len(messages)}")
    ```
 
-3. **Verify agent is initialized**:
-   ```python
-   # Initialize agent with session
-   session_manager.initialize(agent)
-   ```
+3. **Check the conversation manager**: the agent only keeps a window of the conversation in context (Strands' default, `SlidingWindowConversationManager`, keeps 40 messages), and restoring a session skips the messages it has already trimmed. Pass a larger `window_size`, or another conversation manager, if the agent needs more.
 
 ### Connection pool exhausted
 
@@ -648,21 +637,21 @@ See `examples/example_stream_async.py` for complete examples.
 
 ### AWS hooks not available
 
-**Problem**: `is_feedback_sns_hook_available()` returns `False`
+**Problem**: `is_feedback_sns_hook_available()` returns `False`, a `create_*_hook()` factory returns `None`, or notifications never arrive
 
-**Solution**: The AWS hooks require `python-helpers` package:
+**Solution**: The AWS hooks need nothing beyond `boto3`, which is installed with the library, so check the AWS side:
 
 ```bash
-# Check if python-helpers is installed
-uv pip list | grep python-helpers
+# boto3 must import in the environment the application runs in
+uv run python -c "import boto3; print(boto3.__version__)"
 
-# If not installed, check pyproject.toml has:
-# [tool.uv.sources]
-# python-helpers = { git = "https://github.com/iguinea/python-helpers", rev = "latest" }
-
-# Then reinstall
-uv sync --reinstall-package python-helpers
+# Credentials must resolve (environment, profile or instance role)
+aws sts get-caller-identity
 ```
+
+- **Region**: the SNS and SQS hooks use `AWS_DEFAULT_REGION` (`eu-west-1` when unset); the WebSocket hook takes `region=`.
+- **Permissions**: `sns:Publish`, `sqs:SendMessage` or `execute-api:ManageConnections`, depending on the hook.
+- **Failures are not silent**: a notification that fails is logged once at `ERROR`, with the session id and the traceback, and counted in `hooks_background_stats().failed`.
 
 ## Advanced Topics
 
@@ -792,7 +781,10 @@ manager = create_mongodb_session_manager(
            # Encrypt sensitive fields
            if "credit_card" in metadata:
                metadata["credit_card"] = encrypt(metadata["credit_card"])
-       return original_func(kwargs.get("metadata"), kwargs.get("keys"))
+           return original_func(metadata)
+       if action == "delete":
+           return original_func(kwargs["keys"])
+       return original_func()  # get
    ```
 
 2. **Delete sensitive fields after use**:

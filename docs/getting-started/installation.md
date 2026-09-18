@@ -21,9 +21,11 @@ and the tests, not by the library, so they are not installed with it. If your
 application uses them, declare them yourself. Before 1.0.0 they came in as
 dependencies of this package.
 
-### Optional Dependencies
-For AWS integrations (SNS/SQS hooks):
-- `python-helpers` - Contains custom_aws.sns and custom_aws.sqs modules
+### AWS Integrations
+The AWS hooks (SNS, SQS and WebSocket) need no extra package: they only use
+`boto3`, installed with the library. What they need is AWS credentials and the
+IAM permission of each service (`sns:Publish`, `sqs:SendMessage`,
+`execute-api:ManageConnections`).
 
 In a clone of the repository, two dependency groups
 ([PEP 735](https://peps.python.org/pep-0735/)) cover the rest. Neither is
@@ -57,9 +59,6 @@ cd mongodb-session-manager
 # Install the library, the examples' stack and the dev tools
 # (`uv sync` installs the `dev` group by default)
 uv sync
-
-# Install with AWS integrations
-uv add python-helpers
 ```
 
 #### Verify Installation
@@ -91,9 +90,6 @@ pip install -e .
 
 # To run the examples too (pip >= 25.1)
 pip install --group examples
-
-# Optional: Install AWS integration dependencies
-pip install python-helpers
 ```
 
 ### Method 3: Development Installation
@@ -285,23 +281,16 @@ uv run python examples/example_fastapi.py
 # Performance benchmarks
 uv run python -m benchmarks
 
-# Async streaming example
-uv run python examples/example_stream_async.py
+# Async streaming example (FastAPI)
+uv run python examples/example_fastapi_streaming.py
 ```
 
 ## AWS Integration Setup (Optional)
 
-If you plan to use AWS SNS/SQS hooks:
-
-### Install AWS Dependencies
-
-```bash
-# Using UV
-uv add python-helpers
-
-# Using pip
-pip install python-helpers
-```
+If you plan to use the AWS hooks (SNS, SQS, WebSocket), there is nothing extra
+to install: they only use `boto3`, which comes with the library. They need AWS
+credentials and the IAM permission of each service: `sns:Publish`,
+`sqs:SendMessage` or `execute-api:ManageConnections`.
 
 ### Configure AWS Credentials
 
@@ -360,12 +349,18 @@ uv sync  # or pip install -e .
 2. Check MongoDB is accessible at the specified host/port
 3. Verify network connectivity
 
-#### Issue: "custom_aws module not found"
+#### Issue: An AWS hook is not available or its notifications never arrive
 
-**Solution**: Install python-helpers package:
+**Solution**: The hooks need only `boto3`, installed with the library, so check
+the AWS side:
 ```bash
-uv add python-helpers
+# Credentials must resolve in the environment the application runs in
+aws sts get-caller-identity
 ```
+Then check the region (the SNS and SQS hooks read `AWS_DEFAULT_REGION`, and use
+`eu-west-1` when it is unset) and the IAM permission of the service. A failed
+notification is logged at `ERROR` with its session id and counted in
+`hooks_background_stats().failed`.
 
 #### Issue: UV command not found
 
@@ -394,7 +389,7 @@ MONGODB_DATABASE=production_db
 MONGODB_COLLECTION=agent_sessions
 
 # AWS Configuration (if using hooks)
-AWS_REGION=eu-west-1
+AWS_DEFAULT_REGION=eu-west-1  # the region the SNS and SQS hooks use
 SNS_TOPIC_ARN_GOOD=arn:aws:sns:eu-west-1:123456789:feedback-good
 SNS_TOPIC_ARN_BAD=arn:aws:sns:eu-west-1:123456789:feedback-bad
 SQS_QUEUE_URL=https://sqs.eu-west-1.amazonaws.com/123456789/metadata-sync
