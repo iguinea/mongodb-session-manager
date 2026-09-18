@@ -1,5 +1,10 @@
 # Changelog
 
+## [2026-09-18] PR #113 - Update: metadataHook y feedbackHook dejan de aceptarse (#111) (@iguinea)
+
+- Update: metadataHook y feedbackHook dejan de aceptarse (#111)
+- Fix: la anotación de metadata_hook y feedback_hook describe el hook r…
+
 ## [2026-09-18] PR #112 - Chore: runtime reducido a lo que importa src/ y lock sin vulnerabilidades (#111) (@iguinea)
 
 - Chore: runtime reducido a lo que importa src/ y lock sin vulnerabilid…
