@@ -553,8 +553,8 @@ A dot in a key addresses a field inside a stored document, the same way in `get`
 
 The rule, and what is rejected before anything is written, is in [names that become paths](mongodb-session-repository.md#names-that-become-paths).
 
-!!! warning "The tool spec was malformed before v0.22.0"
-    `inputSchema` was hand-written and assigned verbatim, without the `{"json": ...}` wrapper that `ToolSpec` requires. Every model provider unwraps that key: the Anthropic one raised `KeyError`, and Bedrock sent the bare schema, which botocore rejects before the request leaves the process. **An agent given this tool failed on its first call, whether or not it used the tool.** It is now built by Strands from the function's signature and docstring, which is also what puts the rule above in front of the model.
+!!! note "The tool spec was malformed before v0.22.0, and the SDK repaired it"
+    `inputSchema` was hand-written and assigned verbatim, without the `{"json": ...}` wrapper that `ToolSpec` declares. **Nothing broke:** `ToolRegistry.validate_tool_spec()` wraps a bare schema with `normalize_schema()` before it reaches any provider, in every strands release from 1.25 to 1.56. What it cost is that `normalize_schema()` invents the missing descriptions, so the model was handed `"Property action"`, `"Property metadata"` and `"Property keys"` under a one-line tool description. The spec is now built by Strands from the function's signature and docstring, which is what puts the rule above in front of the model. Outside the tool registry the bare schema *is* rejected by botocore, which is what the regression test pins.
 
 #### Example
 

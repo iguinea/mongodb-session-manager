@@ -668,10 +668,13 @@ class TestMetadataToolSpec:
         """`ToolSpec.inputSchema` is a tagged union whose only member is `json`.
 
         A hand-written schema was assigned to `inputSchema` verbatim, without
-        that wrapper. Every provider reads `inputSchema["json"]`: the Anthropic
-        one raised `KeyError`, and Bedrock sent the bare schema, which botocore
-        rejects before the request leaves the process -- so an agent holding
-        this tool failed on its *first* call, whether or not it used it (#47).
+        that wrapper. No agent ever broke over it: `validate_tool_spec()` wraps
+        a bare schema before it reaches a provider, in every strands from 1.25
+        to 1.56. What that repair costs is the point -- `normalize_schema()`
+        invents the descriptions it does not find, so the model was handed
+        `"Property action"` instead of what the docstring says -- and it is a
+        backwards-compatibility branch, which is not something to depend on
+        (#47).
         """
         spec = manager.get_metadata_tool().tool_spec
 
@@ -679,10 +682,11 @@ class TestMetadataToolSpec:
         assert spec["inputSchema"]["json"]["required"] == ["action"]
 
     def test_botocore_accepts_the_request_that_carries_it(self, manager):
-        """The regression, checked against the API contract itself.
+        """The spec checked against the API contract itself, off the registry.
 
-        No AWS call and no credentials: botocore validates the parameters
-        against the service model it ships.
+        A `tool_spec` handed straight to a provider gets no repair: this is the
+        path where a bare schema is really rejected, and botocore says so
+        without credentials or an AWS call, against the service model it ships.
         """
         import botocore.session
         from botocore.validate import validate_parameters
@@ -708,14 +712,22 @@ class TestMetadataToolSpec:
         assert "dot notation" in spec["description"].lower()
         assert "replace" in spec["description"].lower()
 
-    def test_every_parameter_carries_its_description(self, manager):
+    def test_every_parameter_carries_its_own_description(self, manager):
+        """Its own, not the one `normalize_schema()` invents.
+
+        That is what the model actually read before: the repair the tool
+        registry applies to a schema with no descriptions fills them with
+        `"Property <name>"`, which is well-formed and says nothing.
+        """
         properties = manager.get_metadata_tool().tool_spec["inputSchema"]["json"][
             "properties"
         ]
 
         assert set(properties) == {"action", "metadata", "keys"}
         for name, schema in properties.items():
-            assert schema.get("description"), f"{name} has no description"
+            description = schema.get("description")
+            assert description, f"{name} has no description"
+            assert description != f"Property {name}", f"{name} has the placeholder"
 
 
 class TestMetadataToolPaths:

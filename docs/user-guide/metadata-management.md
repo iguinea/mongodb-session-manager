@@ -397,15 +397,27 @@ so the docstring **is** the contract the model reads:
 }
 ```
 
-!!! danger "Fixed in v0.22.0: the tool broke the request that carried it"
+!!! note "Fixed in v0.22.0: the schema was malformed, and the SDK was repairing it"
     `inputSchema` used to be hand-written and assigned verbatim, **without the
-    `{"json": ...}` wrapper** that `ToolSpec` requires. Every model provider
-    unwraps that key: the Anthropic one raised `KeyError`, and Bedrock sent the
-    bare schema, which botocore rejects with
+    `{"json": ...}` wrapper** that `ToolSpec` declares.
+
+    **Nothing broke in production.** `ToolRegistry.validate_tool_spec()` has a
+    backwards-compatibility branch — `if "json" not in tool_spec["inputSchema"]`
+    — that wraps a bare schema with `normalize_schema()` before it reaches any
+    provider. It is there in strands 1.25, 1.30, 1.40, 1.45, 1.50.2 and 1.56,
+    so every agent built with `Agent(tools=[metadata_tool])` worked.
+
+    What it did cost is what this page is about: `normalize_schema()` fills the
+    missing descriptions with placeholders, so the model was handed its three
+    parameters described as `"Property action"`, `"Property metadata"` and
+    `"Property keys"`, under a one-line tool description. And a spec that is
+    only correct because a third party repairs it is one removed compatibility
+    branch away from breaking.
+
+    Outside the tool registry — handing a `tool_spec` straight to a provider —
+    the bare schema *is* rejected: botocore answers
     `Unknown parameter in toolConfig.tools[0].toolSpec.inputSchema` before the
-    request leaves the process. **An agent given this tool failed on its first
-    call, whether or not it ever used the tool.** If you kept the tool out of
-    your agents for that reason, it works now.
+    request leaves the process. That is the path the regression test covers.
 
 ## Metadata Hooks
 
