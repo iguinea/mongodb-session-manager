@@ -12,6 +12,9 @@ Complete, executable scripts demonstrating MongoDB Session Manager features. The
    ```bash
    uv sync
    ```
+   FastAPI, uvicorn, uvloop and `strands-agents-tools` are not dependencies of
+   the library. They live in the `examples` dependency group, which `uv sync`
+   installs as part of `dev`.
 
 ### Running Examples
 
@@ -222,8 +225,8 @@ If you get `ModuleNotFoundError`:
 # Install dependencies
 uv sync
 
-# Or with pip
-pip install -e .
+# Or with pip (>= 25.1): the library plus the examples' stack
+pip install -e . --group examples
 ```
 
 ### UV Not Found

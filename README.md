@@ -31,6 +31,10 @@ uv add git+https://github.com/iguinea/mongodb-session-manager.git
 pip install git+https://github.com/iguinea/mongodb-session-manager.git
 ```
 
+The package depends only on `pymongo`, `strands-agents` and `boto3`. FastAPI,
+uvicorn, uvloop and `strands-agents-tools` belong to the examples: declare them
+in your application if it uses them.
+
 For local development:
 
 ```bash
@@ -412,8 +416,8 @@ tests/
 ```
 
 ```bash
-# Install dev dependencies
-uv sync --extra dev
+# Install dev dependencies (the `dev` group, installed by default)
+uv sync
 
 # Run all unit tests (no MongoDB needed)
 uv run python -m pytest tests/unit/ -v

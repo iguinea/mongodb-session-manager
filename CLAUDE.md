@@ -8,10 +8,12 @@ MongoDB Session Manager - A MongoDB session manager library for Strands Agents t
 
 **Tech Stack:** Python 3.12+, UV package manager, MongoDB, Strands Agents SDK (`strands-agents>=1.56.0`)
 
+**Runtime dependencies are only what `src/` imports** (`pymongo`, `strands-agents`, `boto3`); `tests/unit/test_runtime_dependencies.py` enforces it in both directions. What the examples need (FastAPI, uvicorn, uvloop, `strands-agents-tools`) lives in the `examples` dependency group (PEP 735, not published), and `dev` includes it because the tests exercise the FastAPI example (#111)
+
 ## Development Commands
 
 ```bash
-# Install dependencies
+# Install dependencies (the `dev` group, which includes `examples`, by default)
 uv sync
 
 # Run any example
@@ -31,13 +33,9 @@ uv run ruff format .
 uv build
 
 # Add dependencies
-uv add <package-name>
-uv add --dev <package-name>
-
-# Run playground (chat interface)
-cd playground/chat && make backend-fastapi-streaming  # Port 8880
-cd playground/chat && make frontend                   # Port 8881
-
+uv add <package-name>                    # only if src/ imports it
+uv add --group examples <package-name>   # needed by an example
+uv add --dev <package-name>              # tooling and tests
 ```
 
 ## Architecture

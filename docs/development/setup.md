@@ -130,8 +130,8 @@ Once UV is installed, install the project dependencies:
 uv sync
 
 # This creates a virtual environment and installs:
-# - Core dependencies (pymongo, strands-agents, etc.)
-# - Development dependencies (pytest, ruff, etc.)
+# - Core dependencies (pymongo, strands-agents, boto3)
+# - The `dev` group (pytest, ruff, etc.), which includes the `examples` group
 # - The project itself in editable mode
 ```
 
@@ -145,22 +145,34 @@ The `uv sync` command will:
 
 The authoritative list is `pyproject.toml`; this section summarises it.
 
-**Core Dependencies** (required for the library):
+**Core Dependencies** (what a consumer installs, and only what `src/` imports):
 - `pymongo>=4.16.0`: MongoDB Python driver
 - `strands-agents>=1.56.0`: Strands Agents SDK
-- `strands-agents-tools>=0.2.19`: Strands tools
-- `fastapi>=0.128.0`: For FastAPI integration
-- `uvicorn>=0.40.0`: ASGI server
-- `uvloop>=0.22.1`: High-performance event loop
-- `pydantic-settings>=2.12.0`: Typed settings
 - `boto3>=1.42.88`: AWS SDK, for the bundled hooks
 
-**Development Dependencies** (the `dev` extra, for testing and development):
-- `pytest>=9.0.2`: Testing framework
-- `pytest-cov>=6.0.0`: Coverage reporting
-- `pytest-mock>=3.15.1`: Mocking utilities
-- `pytest-asyncio>=1.3.0`: Async test support
-- `ruff>=0.16.7`: Formatter and linter
+`tests/unit/test_runtime_dependencies.py` fails if a declared dependency is not
+imported by the package, or if the package imports something it does not
+declare. The second case would otherwise go unnoticed: the suite runs with the
+`dev` group, which installs the examples' stack too.
+
+**Dependency groups** ([PEP 735](https://peps.python.org/pep-0735/), not
+published with the package):
+
+- `examples`: what the examples need
+  - `fastapi>=0.128.0`: FastAPI examples
+  - `uvicorn>=0.40.0`: ASGI server
+  - `uvloop>=0.22.1`: the event loop the FastAPI examples ask uvicorn for
+  - `strands-agents-tools>=0.2.19`: the calculator tool example
+- `dev`: testing and development, plus the `examples` group, because the tests
+  exercise the FastAPI example
+  - `pytest>=9.0.2`: Testing framework
+  - `pytest-cov>=6.0.0`: Coverage reporting
+  - `pytest-mock>=3.15.1`: Mocking utilities
+  - `pytest-asyncio>=1.3.0`: Async test support
+  - `ruff>=0.16.7`: Formatter and linter
+
+Add a dependency to the right place: `uv add <pkg>` if `src/` imports it,
+`uv add --group examples <pkg>` for an example, `uv add --dev <pkg>` for a tool.
 
 ## MongoDB Setup
 

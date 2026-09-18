@@ -86,8 +86,13 @@ uv sync
 
 **Using pip:**
 ```bash
-pip install pymongo strands-agents strands-agents-tools fastapi uvloop
+# Installs the library with pymongo, strands-agents and boto3
+pip install git+https://github.com/iguinea/mongodb-session-manager.git
 ```
+
+FastAPI, uvicorn, uvloop and `strands-agents-tools` are not dependencies of the
+library: the examples use them. In a clone, `uv sync` installs them with the
+`dev` group; with pip, `pip install --group examples` (pip 25.1 or later).
 
 Currently, the package is not published to PyPI. Install from source.
 
