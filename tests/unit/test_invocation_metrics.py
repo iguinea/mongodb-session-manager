@@ -10,8 +10,8 @@ El contrato (`features/8_invocation_metrics_on_last_message/plan.md`):
 
 - El sync de cierre (`AfterInvocationEvent`) escribe las métricas en el último
   mensaje de la invocación, y el sync de cada `MessageAddedEvent` no las toca.
-- Una llamada explícita a `sync_agent()` las escribe siempre. OV escribe el TTFT
-  en el agente y luego sincroniza a mano.
+- Una llamada explícita a `sync_agent()` las escribe siempre. Un consumidor escribe
+  el TTFT en el agente y luego sincroniza a mano.
 - Una invocación que no llega a cerrar se queda sin métricas. Es un límite
   documentado, no un descuido.
 """
@@ -255,7 +255,7 @@ class TestOneWritePerInvocation:
 
 class TestExplicitSync:
     def test_explicit_sync_agent_writes_the_current_metrics(self):
-        """El flujo de OV: TTFT escrito en el agente y sync a mano después.
+        """El flujo de un consumidor: TTFT escrito en el agente y sync a mano después.
 
         Es lo que descarta escribir las métricas solo desde AfterInvocationEvent.
         """

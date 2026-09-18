@@ -9,7 +9,7 @@ sesión que Strands registra (`initialize`, `append_message` y `sync_agent`) son
 síncronos; sustituir el driver por uno async no permite hacer `await` dentro de
 ese contrato. Tampoco se adopta write-behind: cambiaría las garantías de
 read-after-write, el orden del array de mensajes y el `updated_at` raíz que
-consumen Control Center y el runtime.
+consumen los visores de sesiones y los runtimes de los consumidores.
 
 La integración no streaming de FastAPI mueve a un worker compartido el camino
 síncrono completo: crear el manager, restaurar y construir el agente, invocarlo,
@@ -124,8 +124,8 @@ Se preguntó a los dos consumidores de la librería si el cambio les afecta. Los
 dos respondieron que es transparente —ninguno usa la integración FastAPI— pero
 de sus respuestas salen las precondiciones que ahora documenta la guía.
 
-`genai-mrg-assistant-ov` (pin v0.9.1) corre sobre `BedrockAgentCoreApp` con
-invocación síncrona bloqueante. Tiene recarga de prompts en caliente cuya
+Uno de ellos corre sobre `BedrockAgentCoreApp` con invocación síncrona
+bloqueante. Tiene recarga de prompts en caliente cuya
 corrección **depende de que el turno bloquee el event loop**: no hay lock sobre
 las globales de configuración de sus sub-agentes y lo único que hace segura la
 recarga es que no haya ningún `await` dentro del turno, de modo que solo puede
@@ -134,8 +134,7 @@ como regla general. Además, el escenario de cancelación de este informe ya es 
 bug abierto suyo: el cliente deja de esperar por timeout y el runtime persiste
 una respuesta que el usuario nunca vio.
 
-`genai-mrg-sap-mcp` (pin v0.5.0, 11 servicios ECS) es un servidor fastmcp que
-solo usa persistencia y metadata, y hoy llama a la librería síncrona
+El otro es un servidor fastmcp que solo usa persistencia y metadata, y hoy llama a la librería síncrona
 directamente desde el event loop en tools `async`. Es el caso que sí encaja.
 
 De esa consulta salió un hallazgo que no estaba en la investigación: los hooks

@@ -20,7 +20,7 @@ issue, mensajes de commit y titulos de release:
 |----|-----|
 | Nombre del repositorio consumidor | «un consumidor», «un equipo consumidor» |
 | Ruta de fichero suya, con o sin numero de linea | El comportamiento que se observo |
-| Nombre de endpoint (`/crm/start_chat`) | «una ruta que emite tres updates en cascada» |
+| Nombre de endpoint (`/su-servicio/su-ruta`) | «una ruta que emite tres updates en cascada» |
 | Numero de issue de un repo privado | Nada, o el hecho tecnico que contiene |
 | Nombre de coleccion, base de datos o cola reales | Un placeholder |
 | Recuento de servicios, tamano de flota, volumen de trafico | El orden de magnitud, si hace falta |

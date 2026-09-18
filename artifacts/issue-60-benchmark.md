@@ -81,8 +81,8 @@ Los comandos por turno no cambian (15,2 en los tres): es cola, no trabajo extra.
 
 ## Amazon DocumentDB 5.0 DEV
 
-Cluster de desarrollo en `eu-west-1`, alcanzado por tunel SSH al bastion DEV; el
-repositorio privado de OV conserva los identificadores de infraestructura. TLS,
+Cluster de desarrollo en `eu-west-1`, alcanzado por tunel SSH al bastion DEV; los
+identificadores de infraestructura viven en el runbook privado del equipo. TLS,
 `directConnection=true`, `retryWrites=false`, `readPreference=secondaryPreferred`
 en el cliente. Credenciales consumidas desde Secrets Manager, nunca impresas ni
 guardadas. 3 calentamientos y 15 repeticiones. El `ping` quedo en 47,4 ms p50

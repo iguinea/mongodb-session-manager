@@ -67,12 +67,12 @@ documento raiz: `PROJECTION_DEFAULT -> IDHACK`, `totalKeysExamined=1` y
 ## Amazon DocumentDB 5.0 DEV
 
 Cluster de desarrollo en `eu-west-1`, accedido por tunel SSH al bastion DEV.
-El repositorio privado de OV conserva los identificadores de infraestructura.
+Los identificadores de infraestructura viven en el runbook privado del equipo.
 PyMongo uso `directConnection=true` por tratarse de un
 unico port-forward, con TLS, `retryWrites=false` y
 `readPreference=secondaryPreferred`. Las credenciales se consumieron desde
 Secrets Manager sin guardarlas en el repositorio ni mostrarlas en la salida.
-El procedimiento reutilizable, sin duplicar los datos privados de OV, queda en
+El procedimiento reutilizable, sin duplicar esos datos privados, queda en
 [`docs/development/testing.md`](../docs/development/testing.md#testing-with-the-development-documentdb).
 
 La suite de integracion completa paso contra el motor real:

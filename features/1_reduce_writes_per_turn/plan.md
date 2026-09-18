@@ -1,9 +1,8 @@
 # Plan: reducir escrituras a MongoDB/DocumentDB por turno
 
 **Estado:** implementado en v0.10.0 (issue #54). Ver §11 para el resultado medido.
-**Origen:** traza OTEL del runtime `mrg_assistant_whatsapp_runtime` (dev, eu-west-1),
-sesión de `genai-mrg-assistant-ov` sobre DocumentDB, colección `ov.whatsapp`, con
-mongodb-session-manager v0.9.1.
+**Origen:** traza OTEL del runtime de un consumidor (dev, eu-west-1), sesión sobre
+DocumentDB, con mongodb-session-manager v0.9.1.
 **Versión objetivo:** 0.10.0 (cambio de comportamiento interno, API pública intacta)
 
 ---
@@ -19,7 +18,7 @@ Un turno real de 12,1 s ejecuta **72 operaciones Mongo** que suman ~1,35 s (11 %
 | `createIndexes` | 8 | 20 ms |
 
 Reparto por dueño en la traza: 626 ms bajo el agente Supervisor, 531 ms dentro de la
-tool `info_suministro_agent` (sub-agente) y 194 ms fuera de agente (apertura y cierre
+tool que invoca al sub-agente y 194 ms fuera de agente (apertura y cierre
 de sesión). Unos 438 ms caen **después de la última llamada al LLM**, es decir en la
 ruta crítica antes de devolver la respuesta al usuario.
 
@@ -118,7 +117,7 @@ potencialmente atrasada**:
    contenido sensible expuesto en el Session Viewer. Que solo se dispare con guardrails
    no es un atenuante — cuando falla, falla exactamente en la dirección que el guardrail
    existe para evitar. Y es **indetectable desde el visor**: no hay checksum ni marca
-   con la que contrastar (confirmado por el equipo del Control Center).
+   con la que contrastar (confirmado por el equipo de un visor de sesiones consumidor).
 
 Las correcciones 2 y 3 de la Fase 1 eliminan los casos 1 y 2 de raíz: no por ahorrar
 un `find`, sino porque **dejan de leer lo que ya se sabe en memoria**. Ese es el
@@ -141,13 +140,13 @@ en los casos 1 y 2 no hace falta leer en absoluto.
 
 Identificado por el equipo consumidor en su propio repo, se arregla allí:
 
-- `context.py::sync_and_track` llama a `sync_agent` tras el cierre de invocación:
+- Su envoltorio de invocación llama a `sync_agent` tras el cierre de invocación:
   +1 find y +3 updates por agente (~190 ms). En el Supervisor tiene motivo (el TTFT se
   rellena después de `agent()`); en los sub-agentes no.
 - `set_prompt_metadata`: 2 updates, 89 ms. Es API nuestra, pero la frecuencia de
   llamada la decide el consumidor.
-- 21 `find` de `get_metadata` en `server.py`, cada uno trayendo `customer_sap_data`
-  entero (37 ms en total).
+- 21 `find` de `get_metadata` en su servidor, cada uno trayendo entero un campo de
+  metadata voluminoso (37 ms en total).
 
 ---
 
@@ -157,8 +156,8 @@ Identificado por el equipo consumidor en su propio repo, se arregla allí:
 esquema del documento.
 
 **Corrección tras implementar:** ese objetivo de 12 es del **turno real completo**, que
-incluye los ahorros del lado del consumidor (quitar el sync doble de `sync_and_track`
-en los sub-agentes y mover el TTFT del supervisor a un hook, ~8 updates). Esta librería
+incluye los ahorros del lado del consumidor (quitar el sync doble de los sub-agentes
+y mover el TTFT del supervisor a un hook, ~8 updates). Esta librería
 por sí sola llega a **15** en el escenario aislado equivalente, partiendo de 21. Mezclar
 ambas cifras llevó a fijar un criterio que ninguna implementación honesta podía cumplir
 sin la Fase 3, que está descartada. Los dos números son correctos; miden cosas distintas.
@@ -296,7 +295,7 @@ GREEN:
 
 Complemento en `tests/integration/` con `CommandListener` real contra MongoDB local,
 marcado `@pytest.mark.integration`. Ojo con DocumentDB 5.0: soporta menos etapas de
-agregación que mongomock, y al equipo del Control Center ya le ha pasado que algo pase
+agregación que mongomock, y a un equipo consumidor ya le ha pasado que algo pase
 CI y reviente en producción. Aquí no usamos agregaciones en la ruta de escritura, pero
 cualquier `$[elem]`/`arrayFilters` que entre por la issue del caso 3 debe validarse en
 dev, no solo en local.
@@ -312,30 +311,25 @@ Orden de verificación local: `ruff format .` → `ruff check .` → `pytest tes
   menos veces.
 - **Un efecto observable:** `agents.<id>.updated_at` dejará de refrescarse en cada
   `sync_agent` redundante. **Punto cerrado: ningún consumidor depende de él.**
-  - `genai-mrg-assistant-ov`: 0 lecturas en el código que despliega (strands-agent,
-    testing-chat, Lambdas, CDK, skills).
-  - **Session Viewer / Control Center** (repo `genai-minari-virtual-agent-control-center`,
-    main, commit `ab66c36`): verificado en código. El timeline ordena por el
-    `created_at` de cada mensaje (`service.py:495, 568`), con desempate por orden de
-    inserción del array `messages` gracias a la estabilidad del sort de Python; el
-    exportador hace lo mismo (`conversations_export.py:137-190`). `message_id` solo se
-    usa para casar eventos de guardrail por `(agent_id, message_id)`, nunca para
-    ordenar. Los listados, filtros y «última actividad» van todos contra campos raíz
-    (`service.py:222, 250, 680`). La única lectura de `agents.<id>.updated_at` en todo
-    el repo es `service.py:520`, que lo mete en `AgentSummary` del detalle de sesión y
-    no lo consume nadie: el frontend no lo pinta y la API externa ni lo expone
-    (`SimplifiedAgent` en `models_external.py` no tiene el campo). Sin índice, `$match`,
-    `$sort` ni agregación que lo toque.
+  - Un consumidor: 0 lecturas en todo el código que despliega.
+  - **Un visor de sesiones consumidor**: verificado en su código. El timeline ordena
+    por el `created_at` de cada mensaje, con desempate por orden de inserción del
+    array `messages` gracias a la estabilidad del sort de Python; el exportador hace
+    lo mismo. `message_id` solo se usa para casar eventos de guardrail por
+    `(agent_id, message_id)`, nunca para ordenar. Los listados, filtros y «última
+    actividad» van todos contra campos raíz. La única lectura de
+    `agents.<id>.updated_at` en todo su código lo mete en el resumen de agente del
+    detalle de sesión y no lo consume nadie: el frontend no lo pinta y su API externa
+    ni lo expone. Sin índice, `$match`, `$sort` ni agregación que lo toque.
 
 ### Invariante: `updated_at` raíz
 
 Este es el campo que **sí** importa fuera, y hay **dos consumidores confirmados**:
 
-1. `production_chat/generar_informe_chats.py` (genai-mrg-assistant-ov): calcula «Fin» y
-   «Duración» con el `updated_at` de la raíz.
-2. **Session Viewer / Control Center**: «Fin» y «Duración» del detalle de sesión y del
-   export (`conversations_export.py:383-384`), más las stats agregadas
-   (`service.py:815-818, 1198-1201`). Si el raíz se quedase «viejo», una sesión
+1. Un script de informes de un consumidor calcula «Fin» y «Duración» con el
+   `updated_at` de la raíz.
+2. **Un visor de sesiones consumidor**: «Fin» y «Duración» del detalle de sesión y del
+   export, más las stats agregadas. Si el raíz se quedase «viejo», una sesión
    mostraría una duración corta de menos.
 
 Ese campo **no puede dejar de refrescarse al cierre del turno**.
@@ -450,12 +444,12 @@ anteriores y ausente en el último. Es también un running total, cuelga del mis
 sub-documento y se escribe en la misma operación, así que cae con el mismo fallo. Sirve
 para contrastar.
 
-**Impacto en el Control Center, corregido al alza:** no son dos agregaciones sino
-**cuatro** usos del `$arrayElemAt: [..., -1]` en `service.py` (`:753` tokens por
-sesión/día, `:902` atribución por modelo, `:1208` desglose por agente y export, `:1392`
-uso de herramientas). El cuarto significa que el caso 1 no solo borra los tokens del
-agente en sus stats: borra **su uso de herramientas entero**. Lo blindan en su issue
-`minari-tech/genai-minari-virtual-agent-control-center#285`, que recoge la invariante
+**Impacto en el visor de sesiones consumidor, corregido al alza:** no son dos
+agregaciones sino **cuatro** usos del `$arrayElemAt: [..., -1]` en su backend (tokens
+por sesión/día, atribución por modelo, desglose por agente y export, uso de
+herramientas). El cuarto significa que el caso 1 no solo borra los tokens del
+agente en sus stats: borra **su uso de herramientas entero**. Lo blindan en una issue
+de su repositorio, que recoge la invariante
 del `AfterInvocationEvent` y los dos escenarios que la rompen, con el turno abortado
 marcado explícitamente como «este no lo corrige nadie».
 
@@ -463,7 +457,7 @@ marcado explícitamente como «este no lo corrige nadie».
 priorizado blindar el lado del visor. Este plan no depende de ese resultado.
 
 **Un resultado no prueba el bug de esta librería, pero es una anomalía real.** El equipo
-del Control Center advirtió primero de que sus agregaciones hacen
+del visor advirtió primero de que sus agregaciones hacen
 `{$arrayElemAt: [..., -1]}` a ciegas y ya dan 0 «por diseño». Revisado a la luz de la
 invariante de arriba, esa advertencia se debilita: si el último mensaje *siempre* debería
 llevar métricas, ese `[-1]` no es una lotería sino una lectura que debería acertar
@@ -475,7 +469,7 @@ causas**. En particular, un turno que aborta entre el `create_message` y el `syn
 replicación tenga nada que ver. Antes de concluir, cruzar los `session_id` que salgan
 con errores del runtime en esa ventana temporal.
 
-**Corroboración cruzada del modelo.** El Control Center tiene documentado como gotcha
+**Corroboración cruzada del modelo.** El visor tiene documentado como gotcha
 que `accumulated_usage` aparece en mensajes de **cualquier rol**, no solo `assistant`, y
 por eso su backend lee de todos los roles. Esa observación, hecha de forma independiente
 y antes de este análisis, es justo lo que predice el código: `_get_last_message_id`
@@ -495,7 +489,7 @@ una fila de 0 tokens válida en el pipeline del visor (que usa
 Tampoco permite **distinguir los dos modos de fallo**: tanto «el update no casa con
 nada» como «las métricas del N se escriben sobre el N-1» dejan el último mensaje sin
 `accumulated_usage`, o sea el mismo síntoma. El detalle de sesión sí los separaría: es
-robusto (`service.py:486-493` recorre todos los mensajes y se queda con el último
+robusto (recorre todos los mensajes y se queda con el último
 `accumulated_usage` que encuentre), así que enseñaría un total plausible en el segundo
 modo y uno incompleto en el primero.
 
@@ -527,11 +521,11 @@ eje que importa (latencia por escritura en DocumentDB).
       registro por cliente, `matched_count`)
 - [x] Issue en GitHub — #54, implementada en el PR #55
 - [x] Confirmar que ningún consumidor depende de la granularidad de
-      `agents.<id>.updated_at` — confirmado por el equipo de genai-mrg-assistant-ov
-      sobre su repo; invariante del `updated_at` raíz verificada en §6
-- [x] Confirmar con quien mantenga el **Session Viewer / Control Center** si su
-      timeline ordena por `agents.<id>.updated_at` — **no**; verificado en código
-      (commit `ab66c36`), ordena por `created_at` del mensaje. Ver §6
+      `agents.<id>.updated_at` — confirmado por un equipo consumidor sobre su repo;
+      invariante del `updated_at` raíz verificada en §6
+- [x] Confirmar con quien mantenga el **visor de sesiones consumidor** si su
+      timeline ordena por `agents.<id>.updated_at` — **no**; verificado en su
+      código, ordena por `created_at` del mensaje. Ver §6
 - [x] ~~Decidir si la Fase 2.6 necesita flag~~ — descartada en revisión (ver Fase 2.6)
 - [x] `MagicMock` admite weakref; además hay fixture de reset del registro
       (`clean_index_registry` en `tests/unit/test_write_amplification.py`)

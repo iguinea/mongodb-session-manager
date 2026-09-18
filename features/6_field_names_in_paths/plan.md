@@ -50,7 +50,7 @@ cualquier round-trip**, igual en el repositorio real y en el doble.
   nombres de campo (no consulta campos con prefijo `$` dentro de `$in`/`$nin`/`$all` en objetos
   anidados) va en la misma dirección que la regla. No hay acceso aquí a un clúster DocumentDB: lo
   rechazado no llega al servidor, así que da igual cómo lo trataría.
-- **SessionViewer** (Control Center, `prompt-manager-skill/backend/src/session_viewer/service.py`):
+- **Un visor de sesiones consumidor** (SessionViewer), que lee la colección directamente:
   lee los documentos en bruto y construye él mismo `agents.{aid}` y `metadata.{key}`. Como la forma
   no cambia, no le afecta. Los nombres que se rechazan le darían los mismos problemas.
 - **Quién recibe ahora un `ValueError`**: `agent_id` con `.`, `$` inicial, vacío o NUL (nunca

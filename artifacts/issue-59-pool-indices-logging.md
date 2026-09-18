@@ -74,15 +74,11 @@ librería— y **fallan `create_agent()`, `create_message()`, `update_agent()`,
 `update_one`. El fallo no aparece al conectar: `initialize()` hace `ping`, el ping
 va bien, y la sesión se crea. Revienta en el primer mensaje.
 
-Hoy no afecta a producción porque los cuatro consumidores conocidos pasan
-`retryWrites=False` **también como kwarg**, además de en la URI —
-`genai-mrg-assistant-ov/strands-agent/src/server.py:1125`,
-`genai-mrg-assistant-crm/services/agentcore-agent/session_factory.py:85`,
-`.../services/virtual-agent/src/virtualagents_server.py:160`,
-`.../appRunner/session_viewer/backend/main.py:240` («Required for DocumentDB
-compatibility»). OV tiene incluso un test que lo fija
-(`tests/test_server.py:662`). Es decir: **todos han tropezado con esto y lo han
-parcheado en su lado**.
+Hoy no afecta a producción porque los consumidores conocidos pasan
+`retryWrites=False` **también como kwarg**, además de en la URI; uno lo anota en
+su código como «Required for DocumentDB compatibility», y otro tiene incluso un
+test que lo fija. Es decir: **todos han tropezado con esto y lo han parcheado en
+su lado**.
 
 **Recomendación.** Un default solo debe aplicarse si el usuario no expresó ese
 parámetro *ni por kwarg ni en la URI*. `pymongo.uri_parser.parse_uri()` devuelve
@@ -247,7 +243,7 @@ handshake y después enmudece.
 
 ### Lo que el consumidor real pide, y lo que recibe
 
-`genai-mrg-assistant-crm/appRunner/session_viewer/backend/main.py:1103-1127`:
+El health check de un visor de sesiones consumidor hace, en esencia:
 
 ```python
 @app.get("/health", response_model=HealthResponse)
@@ -298,7 +294,7 @@ harness de #60 sin efecto medible.
 `mongodb_session_repository.py` lanza contra la colección, una es el `insert_one`
 de `create_session()` y las otras 22 filtran por `_id`. Los seis índices de
 `_ensure_indexes()` existen para consumidores externos, y el consumidor real es
-el SessionViewer (`appRunner/session_viewer/backend/main.py:546-602`, `:963-966`):
+el SessionViewer, un visor de sesiones que consulta la colección directamente:
 
 ```python
 query["session_id"] = {"$regex": re.escape(session_id), "$options": "i"}
@@ -461,8 +457,8 @@ porque compara métodos, no comportamiento.
 
 **Recomendación.** Sembrar anidado o dejar de sembrar. Dejar de sembrar es lo más
 limpio —un campo vacío no aporta nada que un campo ausente no dé— pero cambia la
-forma del documento, así que hay que mirarlo con el SessionViewer: su
-`detect_field_type()` (`main.py:700-745`) muestrea documentos con
+forma del documento, así que hay que mirarlo con el SessionViewer: su detección
+del tipo de campo muestrea documentos con
 `{"$exists": True, "$ne": None}` para decidir el tipo de un campo de filtro, y un
 campo que solo existe cuando alguien lo ha escrito cambia lo que ese muestreo ve.
 Sea cual sea la decisión, el doble in-memory debería seguirla, y el contrato
