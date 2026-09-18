@@ -772,7 +772,6 @@ class TestMetadataToolPaths:
         result = stored(action="get", keys=["user.name", "user.surname"])
 
         assert "Ana" in result
-        assert "surname" not in result
 
     def test_a_dict_value_warns_that_it_replaced_the_subdocument(
         self, stored, fake_repo
@@ -796,6 +795,59 @@ class TestMetadataToolPaths:
             "name": "Eva",
             "zip": "28001",
         }
+
+
+class TestMetadataToolNamesWhatIsMissing:
+    """An absence the model cannot see is an absence it cannot act on (#107).
+
+    Of the three shapes a batched read can take, only the mixed one was silent:
+    nothing found says so, everything found is self-evident, and some found
+    carried what existed and no word about the rest. That is the shape a model
+    produces whenever it groups its reads, and the one where it most needs to
+    know -- it can neither retry under another name nor conclude that the data
+    does not live in metadata at all.
+    """
+
+    @pytest.fixture
+    def stored(self, manager_fake):
+        manager_fake.update_metadata(
+            {"account": "A-21", "session_id": "abc", "cleared": None}
+        )
+        return manager_fake.get_metadata_tool()
+
+    def test_a_mixed_request_names_what_was_not_found(self, stored):
+        result = stored(action="get", keys=["account", "absent", "also_absent"])
+
+        assert "A-21" in result
+        assert "Not found: ['absent', 'also_absent']" in result
+
+    def test_everything_found_says_nothing_extra(self, stored):
+        result = stored(action="get", keys=["account", "session_id"])
+
+        assert "A-21" in result
+        assert "Not found" not in result
+
+    def test_nothing_found_keeps_its_own_reply(self, stored):
+        """Already unambiguous, and the only case that was."""
+        result = stored(action="get", keys=["absent"])
+
+        assert result == "No metadata found for keys: ['absent']"
+
+    def test_a_stored_null_counts_as_found(self, stored):
+        """`None` is a value someone wrote, not a key that is not there."""
+        result = stored(action="get", keys=["cleared", "absent"])
+
+        assert "Not found: ['absent']" in result
+        assert "cleared" in result.split("Not found")[0]
+
+    def test_a_dotted_path_that_is_missing_is_named_too(self, manager_fake):
+        manager_fake.update_metadata({"user": {"name": "Ana"}})
+        tool = manager_fake.get_metadata_tool()
+
+        result = tool(action="get", keys=["user.name", "user.surname"])
+
+        assert "Ana" in result
+        assert "Not found: ['user.surname']" in result
 
 
 # ---------------------------------------------------------------------------

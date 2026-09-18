@@ -723,6 +723,11 @@ class MongoDBSessionManager(RepositorySessionManager):
         A requested key is a path, the same as it is when writing: the agent
         that stored `user.name` asks for `user.name`. It is resolved on the
         document the read already returned, so it costs no round-trip (#47).
+
+        The keys that were not found are named. A reply that carried only what
+        existed left the agent unable to tell an absence from a key it had not
+        asked for, so it could neither retry with another name nor conclude
+        that the data does not live in metadata at all (#107).
         """
         all_metadata = self.get_metadata()
         if not all_metadata or "metadata" not in all_metadata:
@@ -731,13 +736,19 @@ class MongoDBSessionManager(RepositorySessionManager):
         metadata_dict = all_metadata["metadata"]
         if keys:
             filtered = {}
+            missing = []
             for key in keys:
                 found, value = resolve_path(metadata_dict, key)
                 if found:
                     filtered[key] = value
-            if filtered:
-                return f"Metadata retrieved: {json.dumps(filtered, default=str)}"
-            return f"No metadata found for keys: {keys}"
+                else:
+                    missing.append(key)
+            if not filtered:
+                return f"No metadata found for keys: {keys}"
+            retrieved = f"Metadata retrieved: {json.dumps(filtered, default=str)}"
+            if missing:
+                return f"{retrieved}. Not found: {missing}"
+            return retrieved
 
         if metadata_dict:
             return f"All metadata: {json.dumps(metadata_dict, default=str)}"
@@ -807,9 +818,10 @@ class MongoDBSessionManager(RepositorySessionManager):
                       siblings ({"user.name": "Ana"}); a key whose value is a
                       document replaces the whole document stored under it
                       ({"user": {"name": "Ana"}} drops every other field of user).
-                keys: For get action, optional list of specific keys to retrieve.
-                      For delete action, list of keys to remove. Dotted keys
-                      address nested fields here too ("user.name", "tags.0").
+                keys: For get action, optional list of specific keys to retrieve;
+                      the reply names any of them that are not stored. For delete
+                      action, list of keys to remove. Dotted keys address nested
+                      fields here too ("user.name", "tags.0").
 
             Returns:
                 A string describing the result of the operation
