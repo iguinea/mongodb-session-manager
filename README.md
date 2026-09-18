@@ -1,6 +1,6 @@
 # MongoDB Session Manager
 
-[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/iguinea/mongodb-session-manager)
+[![Version](https://img.shields.io/badge/version-1.0.1-blue.svg)](https://github.com/iguinea/mongodb-session-manager)
 [![Python](https://img.shields.io/badge/python-3.12+-green.svg)](https://python.org)
 
 A MongoDB session manager for [Strands Agents](https://strandsagents.com) that provides persistent storage for agent conversations and state, with connection pooling optimized for stateless environments.

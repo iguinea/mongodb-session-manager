@@ -236,13 +236,17 @@ class MetadataWebSocketHook:
 
         # Extract only the relevant fields for WebSocket propagation
         if self.metadata_fields:
-            # If specific fields are configured, only send those
+            # If specific fields are configured, only send those. On a delete
+            # the metadata carries the deleted keys, so they are selected by
+            # presence and kept: the consumer needs to know *what* was deleted
+            # (#120). On an update, None values stay filtered out — projecting
+            # the whole configuration instead would publish fields nobody
+            # deleted.
             relevant_metadata = {
-                field: metadata.get(field) for field in self.metadata_fields
-            }
-            # Remove None values to keep message compact
-            relevant_metadata = {
-                k: v for k, v in relevant_metadata.items() if v is not None
+                field: metadata[field]
+                for field in self.metadata_fields
+                if field in metadata
+                and (operation == "delete" or metadata[field] is not None)
             }
         else:
             # If no specific fields configured, send all metadata except connection_id
@@ -294,15 +298,24 @@ class MetadataWebSocketHook:
 
 
 def _build_delete_metadata(original_func, keys: list) -> dict[str, Any]:
-    """Build metadata dict for delete operations, preserving connection_id."""
+    """Build metadata dict for delete operations, preserving connection_id.
+
+    `get_metadata()` returns the session document projected on its metadata
+    (`{"_id": ..., "metadata": {...}}`), so the routing id lives one level
+    down — reading it flat always found None and the delete was never sent
+    (#120). It is read before the caller runs the delete, and it wins over a
+    tombstone of itself: deleting `connection_id` must still leave the event
+    with a destination.
+    """
+    deleted = {key: None for key in keys}
     try:
-        current_metadata = original_func.__self__.get_metadata()
-        return {
-            "connection_id": current_metadata.get("connection_id"),
-            **{key: None for key in keys},
-        }
+        document = original_func.__self__.get_metadata() or {}
+        connection_id = (document.get("metadata") or {}).get("connection_id")
     except Exception:
-        return {key: None for key in keys}
+        return deleted
+    if connection_id is not None:
+        deleted["connection_id"] = connection_id
+    return deleted
 
 
 def create_metadata_hook(
@@ -366,8 +379,11 @@ def create_metadata_hook(
                     order_key=f"websocket:{session_id}",
                 )
             elif action == "delete" and "keys" in kwargs:
-                result = original_func(kwargs["keys"])
+                # Built before the delete runs: the routing id has to come
+                # from the pre-delete state, or deleting `connection_id`
+                # itself would leave the event without a destination (#120).
                 deleted_metadata = _build_delete_metadata(original_func, kwargs["keys"])
+                result = original_func(kwargs["keys"])
                 dispatch_async(
                     websocket_hook.on_metadata_change(
                         session_id, deleted_metadata, action

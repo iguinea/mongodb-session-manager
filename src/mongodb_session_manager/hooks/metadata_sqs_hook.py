@@ -169,13 +169,17 @@ class MetadataSQSHook:
         """
         # Extract only the relevant fields for SSE propagation
         if self.metadata_fields:
-            # If specific fields are configured, only send those
+            # If specific fields are configured, only send those. On a delete
+            # the metadata carries the deleted keys, so they are selected by
+            # presence and kept: the consumer needs to know *what* was deleted
+            # (#120). On an update, None values stay filtered out — projecting
+            # the whole configuration instead would publish fields nobody
+            # deleted.
             relevant_metadata = {
-                field: metadata.get(field) for field in self.metadata_fields
-            }
-            # Remove None values to keep message compact
-            relevant_metadata = {
-                k: v for k, v in relevant_metadata.items() if v is not None
+                field: metadata[field]
+                for field in self.metadata_fields
+                if field in metadata
+                and (operation == "delete" or metadata[field] is not None)
             }
         else:
             # If no specific fields configured, send all metadata
