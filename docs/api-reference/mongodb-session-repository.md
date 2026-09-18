@@ -918,6 +918,7 @@ Updates only the specified metadata fields while preserving all other existing f
 #### Raises
 
 - `ValueError`: If any key has an empty segment, a segment starting with `$` or a NUL byte. The whole dictionary is checked first, so nothing is written.
+- `ValueError`: If the session does not exist.
 - `PyMongoError`: If the database operation fails.
 
 #### Example
@@ -985,6 +986,7 @@ Removes the specified metadata fields using MongoDB's `$unset` operator while pr
 #### Raises
 
 - `ValueError`: Under the same rule as `update_metadata`, before anything is removed.
+- `ValueError`: If the session does not exist.
 - `PyMongoError`: If the database operation fails.
 
 #### Example
@@ -1020,6 +1022,7 @@ Appends a feedback entry to the session's feedbacks array with an automatic `cre
 
 #### Raises
 
+- `ValueError`: If the session does not exist.
 - `PyMongoError`: If the database operation fails.
 
 #### Example

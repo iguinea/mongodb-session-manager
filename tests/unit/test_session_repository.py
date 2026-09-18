@@ -1090,6 +1090,13 @@ class TestMetadataOperations:
         set_ops = update_call[0][1]["$set"]
         assert set_ops == {"metadata.key1": "val1", "metadata.key2": "val2"}
 
+    def test_update_metadata_raises_when_session_missing(
+        self, mock_repository, mock_mongo_collection
+    ):
+        mock_mongo_collection.update_one.return_value = MagicMock(matched_count=0)
+        with pytest.raises(ValueError, match="Session s1 not found"):
+            mock_repository.update_metadata("s1", {"key": "value"})
+
     def test_get_metadata(self, mock_repository, mock_mongo_collection):
         mock_mongo_collection.find_one.return_value = {"metadata": {"key": "value"}}
         result = mock_repository.get_metadata("s1")
@@ -1100,6 +1107,24 @@ class TestMetadataOperations:
         update_call = mock_mongo_collection.update_one.call_args
         unset_ops = update_call[0][1]["$unset"]
         assert unset_ops == {"metadata.key1": "", "metadata.key2": ""}
+
+    def test_delete_metadata_raises_when_session_missing(
+        self, mock_repository, mock_mongo_collection
+    ):
+        mock_mongo_collection.update_one.return_value = MagicMock(matched_count=0)
+        with pytest.raises(ValueError, match="Session s1 not found"):
+            mock_repository.delete_metadata("s1", ["key"])
+
+    def test_delete_absent_metadata_key_from_existing_session_succeeds(
+        self, mock_repository, mock_mongo_collection
+    ):
+        mock_mongo_collection.update_one.return_value = MagicMock(
+            matched_count=1, modified_count=0
+        )
+
+        mock_repository.delete_metadata("s1", ["missing"])
+
+        mock_mongo_collection.update_one.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -1115,6 +1140,13 @@ class TestFeedbackOperations:
         feedback_doc = update_call[0][1]["$push"]["feedbacks"]
         assert feedback_doc["rating"] == "up"
         assert "created_at" in feedback_doc
+
+    def test_add_feedback_raises_when_session_missing(
+        self, mock_repository, mock_mongo_collection
+    ):
+        mock_mongo_collection.update_one.return_value = MagicMock(matched_count=0)
+        with pytest.raises(ValueError, match="Session s1 not found"):
+            mock_repository.add_feedback("s1", {"rating": "up"})
 
     def test_get_feedbacks_returns_list(self, mock_repository, mock_mongo_collection):
         mock_mongo_collection.find_one.return_value = {
