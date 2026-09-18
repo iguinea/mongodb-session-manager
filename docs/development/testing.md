@@ -510,19 +510,17 @@ read-preference, or driver change. DocumentDB is private: the local test suite
 reaches it through the development bastion and never by opening the database to
 the internet.
 
-The private OV repository is the source of truth for the current bastion IP,
-DocumentDB endpoint, SSH key, CA bundle, Secrets Manager id, and security-group
-ids. See `docs/rag-pipeline.md` ("Túneles SSH a DocumentDB") and the
-"Acceso SSH al bastion (SG)" section of its `CLAUDE.md`. Those environment
-details are deliberately not copied into this public repository.
+The team's private runbook is the source of truth for the current bastion IP,
+DocumentDB endpoint, SSH key, CA bundle, Secrets Manager id, security-group ids,
+and AWS profile. Those environment details are deliberately not copied into this
+public repository.
 
 ### Prerequisites and access check
 
-The development AWS profile is `MRG-dev` and the region is `eu-west-1`. Fill the
-remaining values from the OV runbook:
+The region is `eu-west-1`. Fill the remaining values from the private runbook:
 
 ```bash
-export AWS_PROFILE=MRG-dev
+export AWS_PROFILE=<dev-aws-profile>
 export AWS_REGION=eu-west-1
 export BASTION_HOST=<dev-bastion-ip>
 export DOCDB_HOST=<dev-documentdb-cluster-endpoint>
@@ -536,11 +534,11 @@ nc -zvw 3 "$BASTION_HOST" 22
 ```
 
 If SSH already succeeds, do not change any security group. If it times out,
-compare the current public IP with the bastion rule documented by OV. Only the
-inbound TCP/22 rule whose description is `Movil` is authorized for automated
-replacement, always as a single `/32`; do not touch rules belonging to other
-people or add `0.0.0.0/0`. Re-read the private OV runbook before making that
-external change.
+compare the current public IP with the bastion rule documented in the private
+runbook. Only the inbound TCP/22 rule the runbook designates for automated
+replacement may be updated, always as a single `/32`; do not touch rules
+belonging to other people or add `0.0.0.0/0`. Re-read the private runbook before
+making that external change.
 
 ### Open the tunnel and obtain credentials
 

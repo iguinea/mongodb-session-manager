@@ -65,7 +65,7 @@ el autor, Codex y OpenCode, cada uno con su propia sonda.
 | 3 herramientas en ciclos sucesivos | 7 escrituras; el `assistant(tool_use)` del ciclo 2 guarda `cycles=2` con los tokens del ciclo 1 | 1 escritura, `(4, 5120)` en el `assistant` final |
 | Mismo `Agent`, dos invocaciones | 4 escrituras; el `user` de la 2.ª hereda las métricas de la 1.ª | 2; el `user` sin métricas |
 | El modelo falla en el ciclo 2 | 2 escrituras; el `toolResult` con `(2, 1280)` | 1 escritura, mismo documento final |
-| Flujo de OV: TTFT en el agente + `sync_agent()` a mano | TTFT 321 | 321 (con D, solo `AfterInvocation`: **0**) |
+| Flujo de un consumidor: TTFT en el agente + `sync_agent()` a mano | TTFT 321 | 321 (con D, solo `AfterInvocation`: **0**) |
 | `create_message` del final lanza **antes** de guardar | La escritura de cierre apunta a un mensaje inexistente y no casa | Ninguna escritura |
 | `create_message` del final **se aplica y después lanza** (ack perdido) | 1280 en `toolResult` y en el final | 1280 en el final (con la marca de la v1 del plan: **nada**) |
 | `sync_agent()` explícito desde otro hilo mientras se persiste un mensaje | — | El explícito escribe; el automático, no (con la marca: el explícito no escribía y el automático sí) |
@@ -92,7 +92,7 @@ mensaje llegará de serie en `message.metadata`, sin escrituras adicionales.
 | A — no escribir en `MessageAdded` de un `assistant` | 9 | N+1 | Sigue escribiendo un snapshot por ciclo en el `toolResult` y las métricas obsoletas en el `user` de un agente de vida larga. Además necesita distinguir `MessageAdded` de `AfterInvocation`, y el rol no basta |
 | B — atribuir al `assistant` que generó el ciclo | 9 | N+1 | Más estado por agente para dar lo que Strands 1.56 ya da en `message.metadata` |
 | C — no escribir si `(message_id, usage, tool_usage)` no cambió | 10 | 2N+1 | Tal como está escrita no quita la 9, porque cambia el `message_id` |
-| D — métricas solo en `AfterInvocationEvent` | 8 | 1 | Rompe OV: escribe el TTFT y llama a `sync_agent()` a mano (`strands-agent/src/server.py:2846-2854`, `context.py:351`) |
+| D — métricas solo en `AfterInvocationEvent` | 8 | 1 | Rompe a un consumidor que escribe el TTFT y llama a `sync_agent()` a mano |
 | **D′ — el sync de `MessageAdded` no escribe métricas; el resto, sí** | **8** | **1** | — |
 
 Premisas de la issue que este plan corrige:
@@ -232,7 +232,7 @@ una subclase que registra cada `update_message_fields`.
 
 **Guardarraíles (pasan desde el primer día):**
 
-6. `test_explicit_sync_agent_writes_the_current_metrics`: el flujo de OV (TTFT). Tumba D.
+6. `test_explicit_sync_agent_writes_the_current_metrics`: el flujo de un consumidor (TTFT). Tumba D.
 7. `test_a_failed_invocation_records_its_metrics_on_its_last_message`: el modelo falla en el ciclo 2.
 8. `test_a_failing_sync_on_a_message_does_not_cost_the_closing_metrics`: `update_agent` lanza en el
    sync de un mensaje y el cierre escribe igual (OpenCode, P2).
@@ -300,26 +300,24 @@ una subclase que registra cada `update_message_fields`.
   intermedios no llevan `event_loop_metrics`; los documentos anteriores conservan las suyas.
 - **Convivencia de versiones:** managers 0.14 y 0.15 pueden escribir en la misma sesión, y en los dos
   casos el último mensaje de cada invocación cerrada lleva métricas.
-- **Control Center** (`backend/src/session_viewer/service.py`, `main` en `deb9df9`), verificado por
-  los dos revisores:
-  - Las stats (`$arrayElemAt: -1`, `:753`, `:902`, `:1208`, `:1392`) y el total del detalle
-    (`:481-493`) no cambian.
-  - El timeline (`:502`), su burbuja por mensaje (`frontend/.../components.js:885-925`) y la API
-    externa (`timeline[].metrics`) mostrarán métricas solo en el último mensaje de cada invocación.
+- **Un visor de sesiones consumidor**, verificado en su código por los dos revisores:
+  - Las stats (`$arrayElemAt: -1`) y el total del detalle no cambian.
+  - El timeline, su burbuja por mensaje y su API externa mostrarán métricas solo en el último
+    mensaje de cada invocación.
   - Límite de §4.4.1: una invocación que no cierra cuenta 0 en sus stats (antes, un total parcial).
-  - Aparte, sin relación con #66: sus stats suponen que `accumulated_usage` es de la sesión (su issue
-    285). Con un `Agent` por petición es de la invocación, así que cuentan solo la última de cada
-    agente.
-- **OV** (`genai-mrg-assistant-ov`, fijado a v0.9.1):
+  - Aparte, sin relación con #66: sus stats suponen que `accumulated_usage` es de la sesión (lo
+    sigue una issue de su repositorio). Con un `Agent` por petición es de la invocación, así que
+    cuentan solo la última de cada agente.
+- **Un consumidor con runtime propio**:
   - El runtime sigue funcionando: el TTFT llega por `sync_agent()` explícito.
-  - `scripts/latencia_tools_dump.py:79-95` separa invocaciones cuando `latencyMs` baja. Con un punto por
-    invocación, fusiona las consecutivas de latencia creciente; Codex lo reprodujo con su
-    `invocaciones_de_serie`. Con datos 0.15, cada punto es una invocación.
-  - `presupuesto-latencia.py` toma el máximo en ventana y sigue funcionando.
-- **CRM** (fijado a v0.5.0): su visor se queda con el último `assistant` que tenga métricas y sigue
-  funcionando. `feedback_analyzer.py` y `backtest/select_sample.py` suman todos los mensajes: darán
-  cifras menos infladas, y `n_calls` contará invocaciones. Ningún revisor lo verificó; viene del
-  informe de consumidores.
+  - Su script de análisis de latencia separa invocaciones cuando `latencyMs` baja. Con un punto por
+    invocación, fusiona las consecutivas de latencia creciente; Codex lo reprodujo con una sonda
+    propia. Con datos 0.15, cada punto es una invocación.
+  - Otro script suyo toma el máximo de latencia en ventana y sigue funcionando.
+- **Otro consumidor**: su visor se queda con el último `assistant` que tenga métricas y sigue
+  funcionando. Sus scripts de análisis de feedback y de selección de muestras suman todos los
+  mensajes: darán cifras menos infladas, y `n_calls` contará invocaciones. Ningún revisor lo
+  verificó; viene del informe de consumidores.
 - **API de la librería:** nada deja de funcionar. Lo observable es que menos mensajes llevan métricas.
   Quien sobrescriba `register_hooks()` en una subclase recibirá el registry envuelto.
 - **Versión:** 0.15.0.
@@ -330,8 +328,8 @@ una subclase que registra cada `update_message_fields`.
   acumulado).
 - En #69, sin abrir issue nueva: el caso `HookOrder.SDK_LAST` de §4.4.3, `BidiAgentStopEvent → sync_agent()`
   y la persistencia de `message.metadata`.
-- Adaptar el script de OV y avisar al Control Center del alcance real de sus stats: son repos ajenos y
-  se decide con Iñaki.
+- Adaptar el script de latencia de un consumidor y avisar al visor de sesiones del alcance real de sus
+  stats: son repos ajenos y se decide con Iñaki.
 - Deduplicar syncs explícitos repetidos con las mismas métricas (C).
 
 ## 9. Revisión adversarial: qué se hizo con cada hallazgo

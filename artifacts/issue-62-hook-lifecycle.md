@@ -21,8 +21,7 @@ en `hooks/background_work.py`, con cuatro reglas y un cierre explícito:
    `shutdown_hooks_async(timeout)` desde dentro de un loop— drena lo que puede,
    cancela el resto y devuelve los contadores.
 
-Política por hook, acordada con el consumidor que los registra en producción
-(`genai-mrg-assistant-crm`):
+Política por hook, acordada con el consumidor que los registra en producción:
 
 | Hook | Entrega | Orden | Overflow |
 |---|---|---|---|
@@ -183,21 +182,20 @@ proceso).
 
 ## Requisitos por hook
 
-Los fijó el equipo de `genai-mrg-assistant-crm`, único consumidor con hooks
-registrados, sobre sus dos servicios (`virtual-agent`, FastAPI con hooks a nivel
-de módulo; `agentcore-agent`, entrypoint síncrono con el hook por petición):
+Los fijó el equipo del único consumidor con hooks registrados, sobre sus dos
+formas de despliegue (un servicio FastAPI con hooks a nivel de módulo, y un
+entrypoint síncrono con el hook por petición):
 
 - **Feedback SNS: tiene que llegar.** Alimenta su circuito de quejas de cliente;
   perder una es perder una queja sin rastro, y no hay reconciliación posterior.
   Volumen: uno por conversación como mucho.
 - **Metadata WebSocket: la pérdida es tolerable, el desorden no.** Su widget hace
-  `Object.assign` puro, sin timestamp ni secuencia
-  (`frontend/chat/libs/modules/websocket-handlers.js:165`), y su ruta
-  `/crm/start_chat` emite **tres updates de la misma sesión en cascada**. Si el
+  `Object.assign` puro, sin timestamp ni secuencia, y la ruta que abre una
+  conversación emite **tres updates de la misma sesión en cascada**. Si el
   segundo pisa al tercero, la vista se queda en un estado intermedio de forma
   permanente. El orden por sesión resuelve un problema real suyo, no teórico.
-- **Volumen:** 3 `update_metadata` en `/crm/start_chat`, 0-2 por turno de chat,
-  una sesión concurrente por widget. El límite de 64 no lo rozan.
+- **Volumen:** 3 `update_metadata` al abrir una conversación, 0-2 por turno de
+  chat, una sesión concurrente por widget. El límite de 64 no lo rozan.
 - **Presupuesto de cierre:** 30 s (default de ECS entre SIGTERM y SIGKILL; su
   CDK no fija `stopTimeout`). 5 s de timeout les sobra.
 
@@ -214,18 +212,18 @@ WARNING. El efecto observable es idéntico; el riesgo, no.
 
 Pidieron también que una actualización nueva **sustituyera** a la que espera. Se
 implementó así y el gate lo tumbó por la forma del payload. Al comunicárselo,
-confirmaron que el descarte les habría metido un bug concreto: sus tres pushes
-de `/crm/start_chat` no son equivalentes.
+confirmaron que el descarte les habría metido un bug concreto: los tres pushes
+de esa ruta no son equivalentes.
 
 | Push | Contenido | ¿Delta? |
 |---|---|---|
-| `chat.py:48` | dict completo (`customer_*`, `connection_id`, `case_type`) | No |
-| `chat.py:57` | el anterior enriquecido con SAP, **único que lleva `customer_address`** | No |
-| `chat.py:86` | `{case_type, classification_reason, connection_id}` | **Sí** |
+| Primero | dict completo (`customer_*`, `connection_id`, `case_type`) | No |
+| Segundo | el anterior enriquecido desde un sistema externo, **único que lleva `customer_address`** | No |
+| Tercero | `{case_type, classification_reason, connection_id}` | **Sí** |
 
 Con «gana la última», una colisión entre el segundo y el tercero descartaba el
 segundo, y `customer_address` no vuelve a viajar nunca — su widget lo usa para
-el título del chat (`websocket-handlers.js:188`). Habrían cambiado un bug de
+el título del chat. Habrían cambiado un bug de
 orden por uno de pérdida de campos, más difícil de ver. Su propio diagnóstico:
 razonaron sobre `case_type`, que sí es idempotente, y generalizaron al resto del
 dict.

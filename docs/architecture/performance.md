@@ -120,7 +120,7 @@ The repository remains synchronous. Strands registers `initialize`,
 async MongoDB driver cannot be awaited there without changing the Strands
 session-manager contract. A write-behind queue was also rejected: it would
 break the read-after-write, message-order and root `updated_at` guarantees that
-the Control Center and runtime consumers rely on.
+session viewers and runtime consumers rely on.
 
 For a **non-streaming FastAPI endpoint**, put the complete synchronous path in
 the framework's shared worker pool, as

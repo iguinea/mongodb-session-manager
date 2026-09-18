@@ -147,9 +147,8 @@ manager que migra al restaurar. Los cuatro últimos son las regresiones que tumb
 - **Forma de los documentos:** sin cambios de esquema ni migración.
 - **Versiones mezcladas:** un manager antiguo sigue reescribiendo; uno nuevo solo escribe cambios.
   Escriben la misma forma de documento.
-- **Session Viewer del Control Center:** lee `agents.<id>.created_at/updated_at`
-  (`backend/src/session_viewer/service.py:519-520`), no los de `agent_data`, y de `agent_data` solo
-  `model`, `system_prompt` y `prompt_metadata`. GLM lo confirmó también en el workspace de Orca.
+- **Un visor de sesiones consumidor:** lee `agents.<id>.created_at/updated_at`, no los de
+  `agent_data`, y de `agent_data` solo `model`, `system_prompt` y `prompt_metadata`. GLM lo confirmó también en el workspace de Orca.
 - **Versiones del SDK:** la regla no depende de atributos privados de Strands; vale igual en 1.30 y 1.56.
 - **Entradas que dejan de funcionar:** ninguna. Cambio observable: §4.6 y §4.7.
 
