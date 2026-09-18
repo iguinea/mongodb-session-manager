@@ -535,7 +535,7 @@ def manage_metadata(
 
 **Get Metadata**:
 - `action="get"`: Returns all metadata
-- `action="get", keys=["field1", "field2"]`: Returns only specified fields
+- `action="get", keys=["field1", "field2"]`: Returns only specified fields, and **names any of them that are not stored** (`Not found: ['field2']`). An absence the agent cannot see is one it cannot act on: it can neither retry with another name nor conclude the data does not live in metadata
 - `action="get", keys=["user.name", "tags.0"]`: A key is a path, so it reads the nested field a dotted key wrote
 
 **Set/Update Metadata**:

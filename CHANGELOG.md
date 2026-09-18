@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.23.0] - 2026-09-18
+
+### Changed
+- **`manage_metadata("get", keys=[...])` nombra las claves que no encontró** (#107). Devolvía solo las que existen, así que una petición mixta —dos de tres— llegaba al modelo sin ninguna indicación de que la tercera no estaba. No podía distinguir «no existe» de «no la pedí», y por tanto no podía ni reintentar con otro nombre ni concluir que el dato no vive en metadata. Ahora la respuesta añade `. Not found: ['clave']`. Los otros dos casos no cambian: si están todas, la respuesta es la de siempre; si no está ninguna, sigue siendo `No metadata found for keys: [...]`, que ya era inequívoca. Una clave almacenada con valor `null` cuenta como encontrada — es un valor que alguien escribió, no una ausencia
+
+### Notes
+- De las tres formas que puede tomar una lectura agrupada, **solo la mixta era muda**: si no hay nada se dice, si está todo es evidente, y si hay algo se devolvía lo que existe y ni una palabra del resto. Es justo la forma que produce un modelo cuando agrupa sus lecturas, y aquella en la que más necesita saberlo
+- Cambia el **texto** de una respuesta del tool, que es contrato con el modelo y no con el código: ningún consumidor parsea ese string. Sin cambios de esquema ni migración
+- **DocumentDB**: sin operadores ni patrones de consulta nuevos. Se resuelve sobre el documento que la lectura ya trajo, sin round-trips adicionales
+
 ## [2026-09-18] PR #105 - Docs: corregir el alcance del inputSchema mal formado (#47) (@iguinea)
 
 - Docs: corregir el alcance del inputSchema mal formado (#47)

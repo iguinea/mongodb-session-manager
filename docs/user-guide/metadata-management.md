@@ -278,6 +278,11 @@ result = metadata_tool(action="get")
 result = metadata_tool(action="get", keys=["user_id", "priority"])
 # Returns: "Metadata retrieved: {\"user_id\": \"alice-123\", \"priority\": \"high\"}"
 
+# 2b. GET where some of them are not stored: the reply names them
+result = metadata_tool(action="get", keys=["user_id", "escalation_reason"])
+# Returns: "Metadata retrieved: {\"user_id\": \"alice-123\"}.
+#           Not found: ['escalation_reason']"
+
 # 3. SET/UPDATE - Add or update metadata
 result = metadata_tool(action="set", metadata={"priority": "high", "status": "active"})
 # Returns: "Successfully updated metadata fields: ['priority', 'status']"
