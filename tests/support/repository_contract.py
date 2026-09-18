@@ -416,17 +416,19 @@ class SessionRepositoryContract:
             store.update_agent_fields("nope", "a1", {"agent_data.model": "m"}) is False
         )
 
-    def test_update_agent_fields_creates_a_bare_agent(self, store, populated):
-        """Writing on an unknown agent builds it without a messages array.
+    def test_update_agent_fields_returns_false_without_agent(self, store, populated):
+        """An agent-scoped write cannot create a half-built agent."""
+        before = self._raw_session(store, populated)
 
-        That is what MongoDB's $set on `agents.<id>.<field>` leaves behind, so
-        every reader has to cope with a half-built agent. The double must not
-        be kinder than the real thing here either -- it is the anti-drift net.
-        """
         assert (
             store.update_agent_fields(populated, "ghost", {"agent_data.model": "m"})
-            is True
+            is False
         )
+        assert self._raw_session(store, populated) == before
+
+    def test_readers_tolerate_a_half_built_legacy_agent(self, store, populated):
+        """Readers still cope with the corrupt shape left by the old bug."""
+        self._seed_legacy_bare_agent(store, populated)
 
         assert store.get_agent_config(populated, "ghost")["model"] == "m"
         assert store.count_messages(populated, "ghost") == 0
@@ -813,6 +815,10 @@ class SessionRepositoryContract:
         It bypasses create_message() on purpose: that method stamps an identity
         by design, so this is the only way to get a pre-#78 message.
         """
+        raise NotImplementedError
+
+    def _seed_legacy_bare_agent(self, store, session_id: str) -> None:
+        """Write the half-built agent shape produced by update_agent_fields before #119."""
         raise NotImplementedError
 
     def _raw_messages_with_id(

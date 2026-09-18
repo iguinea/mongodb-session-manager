@@ -972,6 +972,12 @@ class TestAgentConfigOperations:
         with pytest.raises(ValueError, match="Session test-session not found"):
             agent_in_session.update_agent_config("a1", model="x")
 
+    def test_update_agent_config_names_the_missing_agent(self, manager, mock_repo):
+        mock_repo.update_agent_fields.return_value = False
+
+        with pytest.raises(ValueError, match="has no agent ghost"):
+            manager.update_agent_config("ghost", model="x")
+
     def test_list_agents(self, agent_in_session, fake_repo):
         fake_repo.create_agent(
             "test-session",
@@ -1086,6 +1092,12 @@ class TestSetPromptMetadata:
 
         with pytest.raises(ValueError, match="Session test-session not found"):
             agent_in_session.set_prompt_metadata("a1", {"prompt_id": "p1"})
+
+    def test_set_prompt_metadata_names_the_missing_agent(self, manager, mock_repo):
+        mock_repo.update_agent_fields.return_value = False
+
+        with pytest.raises(ValueError, match="has no agent ghost"):
+            manager.set_prompt_metadata("ghost", {"prompt_id": "p1"})
 
 
 # ---------------------------------------------------------------------------

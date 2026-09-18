@@ -433,7 +433,7 @@ def update_agent_fields(
 
 Write fields under `agents.<agent_id>` without touching its messages.
 
-The non-positional sibling of [`update_message_fields`](#update_message_fields): the filter names the session only. Used when there is no message to point at — for instance the first sync of an agent that has not appended anything yet.
+The non-positional sibling of [`update_message_fields`](#update_message_fields): the filter names the session and requires `agents.<agent_id>` to exist, but does not require a message. Used when there is no message to point at — for instance the first sync of an agent that has not appended anything yet. The `$exists` guard prevents MongoDB's dotted `$set` from creating a half-built agent when the ID is unknown (#119).
 
 #### Parameters
 
@@ -445,7 +445,7 @@ The non-positional sibling of [`update_message_fields`](#update_message_fields):
 
 #### Returns
 
-`bool`: `True` when the session was found. An empty `set_operations` returns `False` without a round-trip.
+`bool`: `True` when the session and the agent were found. An empty `set_operations` returns `False` without a round-trip.
 
 #### Raises
 

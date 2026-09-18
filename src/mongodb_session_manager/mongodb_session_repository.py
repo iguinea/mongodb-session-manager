@@ -973,27 +973,31 @@ class MongoDBSessionRepository(SessionRepository):
         """Write fields under agents.<agent_id> without touching its messages.
 
         The non-positional sibling of update_message_fields(): the filter names
-        the session only. Used when there is no message to point at, such as the
-        first sync of an agent that has not appended anything yet.
+        the session and requires the agent to exist. The existence guard keeps
+        MongoDB's dotted $set from creating a half-built agent (#119). Used when
+        there is no message to point at, such as the first sync of an agent that
+        has not appended anything yet.
 
         Args:
             set_operations: Keys relative to the agent document.
 
         Returns:
-            True when the session was found.
+            True when the session and the agent were found.
 
         Raises:
             ValueError: If the agent_id or a key would be parsed as syntax,
                 checked before the early return for an empty write.
         """
-        prefixed = self._prefixed(
-            self._agent_path(agent_id), set_operations, _AGENT_FIELD
-        )
+        agent_path = self._agent_path(agent_id)
+        prefixed = self._prefixed(agent_path, set_operations, _AGENT_FIELD)
         if not prefixed:
             return False
 
         try:
-            result = self.collection.update_one({"_id": session_id}, {"$set": prefixed})
+            result = self.collection.update_one(
+                {"_id": session_id, agent_path: {"$exists": True}},
+                {"$set": prefixed},
+            )
         except PyMongoError as e:
             logger.error(
                 f"Failed to update agent {agent_id} in session {session_id}: {e}"

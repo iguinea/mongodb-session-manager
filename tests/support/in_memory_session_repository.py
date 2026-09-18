@@ -494,11 +494,12 @@ class InMemorySessionRepository(SessionRepository):
         session = self._sessions.get(session_id)
         if session is None:
             return False
+        if agent_id not in session["agents"]:
+            return False
 
-        # An unknown agent is created bare, with no messages array, because
-        # that is what MongoDB's $set on agents.<id>.<field> leaves behind.
-        # Every reader here copes with it the way the real repository does.
-        agent = session["agents"].setdefault(agent_id, {})
+        # Readers still tolerate half-built agents left by the old bug and
+        # seeded through raw access, but this write never creates one (#119).
+        agent = session["agents"][agent_id]
         for path, value in set_operations.items():
             _set_dotted(agent, path, copy.deepcopy(value))
         return True

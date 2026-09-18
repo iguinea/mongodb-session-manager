@@ -1113,7 +1113,7 @@ class MongoDBSessionManager(RepositorySessionManager):
             system_prompt: New system prompt (optional)
 
         Raises:
-            ValueError: If agent doesn't exist
+            ValueError: If the session or agent doesn't exist
 
         Example:
             # Update only model
@@ -1149,7 +1149,9 @@ class MongoDBSessionManager(RepositorySessionManager):
             if not self.session_repository.update_agent_fields(
                 self.session_id, agent_id, update_fields
             ):
-                raise ValueError(f"Session {self.session_id} not found")
+                raise ValueError(
+                    f"Session {self.session_id} not found or has no agent {agent_id}"
+                )
 
             logger.info(
                 f"Updated agent config for {agent_id}: {list(update_fields.keys())}"
@@ -1173,12 +1175,14 @@ class MongoDBSessionManager(RepositorySessionManager):
                 deployment_id, deployment_name, temperature (optional, float)
 
         Raises:
-            ValueError: If session not found
+            ValueError: If the session or agent doesn't exist
         """
         if not self.session_repository.update_agent_fields(
             self.session_id, agent_id, {"agent_data.prompt_metadata": prompt_metadata}
         ):
-            raise ValueError(f"Session {self.session_id} not found")
+            raise ValueError(
+                f"Session {self.session_id} not found or has no agent {agent_id}"
+            )
         logger.info(
             f"Set prompt metadata for agent {agent_id}: "
             f"prompt_id={prompt_metadata.get('prompt_id')}, "
