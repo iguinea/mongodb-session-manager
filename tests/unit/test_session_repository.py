@@ -295,7 +295,9 @@ class TestHotPathLogging:
                 ),
             )
 
-        assert any("Created message" in record.message for record in caplog.records)
+        assert any(
+            "message(s) for agent a1" in record.message for record in caplog.records
+        )
 
     def test_creating_a_session_is_worth_an_info_record(self, mock_repository, caplog):
         with caplog.at_level(logging.INFO):
@@ -679,9 +681,10 @@ class TestMessageOperations:
 
         pushed = mock_mongo_collection.update_one.call_args[0][1]["$push"][
             "agents.a1.messages"
-        ]
-        assert pushed["storage_id"] == storage_id_of(sample_session_message)
-        assert pushed["storage_id"]
+        ]["$each"]
+        assert len(pushed) == 1
+        assert pushed[0]["storage_id"] == storage_id_of(sample_session_message)
+        assert pushed[0]["storage_id"]
 
     def test_create_message_does_not_hand_over_an_identity_it_failed_to_store(
         self, mock_repository, mock_mongo_collection, sample_session_message

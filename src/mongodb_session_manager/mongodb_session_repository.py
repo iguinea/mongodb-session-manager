@@ -6,7 +6,7 @@ import logging
 import secrets
 import threading
 import weakref
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from datetime import UTC, datetime
 from typing import Any
@@ -19,7 +19,12 @@ from strands.session.session_repository import SessionRepository
 from strands.types.session import Session, SessionAgent, SessionMessage
 
 from .agent_content import LastPersistedAgents
-from .field_names import nested_document, validate_agent_id, validate_field_paths
+from .field_names import (
+    apply_fields,
+    nested_document,
+    validate_agent_id,
+    validate_field_paths,
+)
 from .message_identity import (
     STORAGE_ID_FIELD,
     MessageRef,
@@ -34,6 +39,11 @@ TIMEZONE_UTC_SUFFIX = "+00:00"
 
 # MongoDB's append-to-array update operator, used by every write that pushes.
 _PUSH = "$push"
+
+# What a set of keys is, to name it in the error when one of them cannot go into
+# a path (#79). They travel to field_names.py, which builds the message.
+_AGENT_FIELD = "agent field"
+_MESSAGE_FIELD = "message field"
 
 # Aggregation operators shared by the server-side domain reads (#58).
 _MATCH = "$match"
@@ -653,20 +663,76 @@ class MongoDBSessionRepository(SessionRepository):
         attached to the SessionMessage, which Strands keeps for the rest of the
         turn and hands back for the redaction.
         """
+        self.create_messages(session_id, agent_id, [session_message], **kwargs)
+
+    def create_messages(
+        self,
+        session_id: str,
+        agent_id: str,
+        session_messages: Sequence[SessionMessage],
+        fields_on_last: Mapping[str, Any] | None = None,
+        agent_set_operations: Mapping[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """Append messages to an agent, in order, in a single write.
+
+        The sibling of create_message() for a whole batch: `$each` preserves the
+        order of the list, and the array only ever grows at its end, so a batch
+        is indistinguishable from the same messages pushed one by one -- except
+        in the number of round-trips, which on DocumentDB is what costs 40-55 ms
+        each (#53).
+
+        Args:
+            session_messages: The messages, in conversation order. Each is born
+                with its own storage_id, attached back onto it (#78).
+            fields_on_last: Fields to store on the last message of the batch,
+                as dot-notation keys relative to its document
+                ("event_loop_metrics.cycle_metrics"). They are nested into the
+                document before it is pushed, because `$set` cannot reach a
+                message the same write is creating. This is how the metrics of
+                an invocation cost no write of their own.
+            agent_set_operations: Keys relative to the agent document, to land
+                in the same round-trip.
+
+        Raises:
+            ValueError: If the session does not exist, or if the agent_id or a
+                field key would be parsed as syntax. The names are checked
+                before the early return for an empty batch, so a bad one fails
+                the same way whether or not there is anything to write.
+        """
         agent_path = self._agent_path(agent_id)
+        agent_fields = self._prefixed(
+            agent_path, agent_set_operations or {}, _AGENT_FIELD
+        )
+        # Checked here, and applied further down, so a bad key fails the same
+        # way whether or not there is a batch to write it on.
+        validate_field_paths(fields_on_last or {}, _MESSAGE_FIELD)
+
+        if not session_messages:
+            return
+
         now = datetime.now(UTC)
-        storage_id = new_storage_id()
-        message_data = session_message.__dict__.copy()
-        message_data[STORAGE_ID_FIELD] = storage_id
-        message_data["created_at"] = now
-        message_data["updated_at"] = now
+        storage_ids = [new_storage_id() for _ in session_messages]
+        documents = [
+            {
+                **session_message.__dict__,
+                STORAGE_ID_FIELD: storage_id,
+                "created_at": now,
+                "updated_at": now,
+            }
+            for session_message, storage_id in zip(
+                session_messages, storage_ids, strict=True
+            )
+        ]
+        apply_fields(documents[-1], fields_on_last or {}, _MESSAGE_FIELD)
 
         try:
             result = self.collection.update_one(
                 {"_id": session_id},
                 {
-                    _PUSH: {f"{agent_path}.messages": message_data},
+                    _PUSH: {f"{agent_path}.messages": {"$each": documents}},
                     "$set": {
+                        **agent_fields,
                         f"{agent_path}.updated_at": now,
                         "updated_at": now,
                     },
@@ -676,13 +742,17 @@ class MongoDBSessionRepository(SessionRepository):
             if result.matched_count == 0:
                 raise ValueError(f"Session {session_id} not found")
 
-            attach_storage_id(session_message, storage_id)
+            for session_message, storage_id in zip(
+                session_messages, storage_ids, strict=True
+            ):
+                attach_storage_id(session_message, storage_id)
             logger.debug(
-                f"Created message {session_message.message_id} for agent {agent_id}"
+                f"Created {len(documents)} message(s) for agent {agent_id}: "
+                f"{[m.message_id for m in session_messages]}"
             )
 
         except PyMongoError as e:
-            logger.error(f"Failed to create message: {e}")
+            logger.error(f"Failed to create messages: {e}")
             raise
 
     def read_message(
@@ -819,9 +889,9 @@ class MongoDBSessionRepository(SessionRepository):
         """
         agent_path = self._agent_path(agent_id)
         message_prefix = f"{agent_path}.messages.$"
-        set_operations = self._prefixed(message_prefix, message_fields, "message field")
+        set_operations = self._prefixed(message_prefix, message_fields, _MESSAGE_FIELD)
         set_operations.update(
-            self._prefixed(agent_path, agent_fields or {}, "agent field")
+            self._prefixed(agent_path, agent_fields or {}, _AGENT_FIELD)
         )
 
         if touch_timestamps:
@@ -909,7 +979,7 @@ class MongoDBSessionRepository(SessionRepository):
                 checked before the early return for an empty write.
         """
         prefixed = self._prefixed(
-            self._agent_path(agent_id), set_operations, "agent field"
+            self._agent_path(agent_id), set_operations, _AGENT_FIELD
         )
         if not prefixed:
             return False

@@ -737,19 +737,23 @@ chunks produces exactly the same writes.
 Measured on a warm turn (the session already exists) with a supervisor and a
 sub-agent (one tool call):
 
-| | v0.9.1 | #54 | + #65 | + #67 | + #66 |
-|---|---|---|---|---|---|
-| `update` | 21 | 15 | 13 | 10 | 8 |
-| `find` | 13 | 6 | 6 | 6 | 6 |
-| `createIndexes` | 8 | 0 | 0 | 0 | 0 |
-| **total** | **42** | **21** | **19** | **16** | **14** |
+| | v0.9.1 | #54 | + #65 | + #67 | + #66 | + #53 |
+|---|---|---|---|---|---|---|
+| `update` | 21 | 15 | 13 | 10 | 8 | 4 |
+| `find` | 13 | 6 | 6 | 6 | 6 | 4 |
+| `createIndexes` | 8 | 0 | 0 | 0 | 0 | 0 |
+| **total** | **42** | **21** | **19** | **16** | **14** | **10** |
 
-The 8 remaining writes break down as:
+The 4 remaining writes break down as:
 
 | Writes | Operation | When |
 |---:|---|---|
-| 6 | `create_message` (`$push`) | One per message: 4 from the supervisor, 2 from the sub-agent |
-| 2 | Metrics on the last message | One per agent, when its invocation closes (`AfterInvocationEvent`) |
+| 2 | The user's question (`$push`) | One per invocation, written on arrival |
+| 2 | The batch of the invocation (`$push` with `$each`), metrics inside | One per agent, when its invocation closes (`AfterInvocationEvent`) |
+
+They do not grow with the number of tool calls: an agent that calls N tools used
+to cost 2N+2 writes and now costs 2. See
+[Messages travel in the batch of their invocation](#messages-travel-in-the-batch-of-their-invocation).
 
 Neither the agent state nor its config travels. `update_agent()` skips an agent
 whose content is what the repository last read or wrote (#67), which covers the
@@ -760,7 +764,7 @@ and only writes when they differ (#65). On a brand-new session the first sync
 still writes it once.
 
 Re-measured with the same listener after the bump to strands 1.56 (#69): the
-counts do not move, 8 `update` and 6 reads (4 `find` and 2 `aggregate`) in both
+counts did not move, 8 `update` and 6 reads (4 `find` and 2 `aggregate`) in both
 1.30 and 1.56. The upgrade does cost **one extra write per existing session**,
 once: strands 1.34 added `model_state` to the agent's internal snapshot, so the
 first sync after the bump finds content that differs from what was stored and
@@ -800,6 +804,55 @@ get them. Both are pinned in `tests/unit/test_invocation_metrics.py` (#69).
 (`agents.<id>.agent_data.<field>`). Setting `agent_data` as a whole replaced the
 subdocument and wiped the model, system prompt and `prompt_metadata` that the
 session manager stores there.
+
+#### Messages travel in the batch of their invocation
+
+Up to v0.22.0 every message cost a `$push` of its own: 6 of the 8 writes of the
+reference turn, and 2N+2 for an agent calling N tools. Since #53 the messages the
+event loop produces — the `toolUse`, its `toolResult`, the answer — wait for the
+write that closes the invocation and go out in one `$push` with `$each`, in
+order. The metrics ride **inside** that push, in the document of the last
+message: the event loop only has them accumulated when the invocation closes,
+which is exactly when the batch is flushed, so they stop costing a write too.
+
+**The user's question does not wait.** It is written on arrival, because it is
+the only thing in a turn that nothing can produce again. Everything else the
+model reproduces on a retry.
+
+What makes the batch safe is that `AfterInvocationEvent` comes out of a `finally`
+in `strands/agent/agent.py`: an invocation that raises — a failing model, a tool
+that throws — closes all the same, so the batch is written anyway. The window a
+batch adds is the process dying outright.
+
+Three rules keep it honest:
+
+- A message appended **outside** an invocation is written immediately. The
+  manager brackets the window with its own `BeforeInvocationEvent` and
+  `AfterInvocationEvent` callbacks, so a message added by a hook running after
+  the closing sync (`order=HookOrder.SDK_LAST`, #69) never sits in a batch
+  nobody is going to flush.
+- A batch that fails is **not retried**. A write that raises may have been
+  applied — an update that reaches the server and loses its ack — and pushing it
+  again would duplicate the turn.
+- `super().sync_agent()` runs in a `try/finally`. The agent state and the
+  messages are separate round-trips, and the state failing must not take the
+  turn's messages down with it.
+
+Measured with the #60 harness, history of 100, `base` = v0.22.0. Command counts
+per operation are **identical on both engines**, so `$each` needs no adaptation
+for DocumentDB:
+
+| Operation | cmd/op | MongoDB 8.2.7 p50 | DocumentDB 5.0 DEV p50 |
+|---|---|---|---|
+| `turn.simple` | 7.0 → **6.0** | 4.33 → **3.40 ms** | 262.0 → **168.0 ms** |
+| `turn.tool` | 9.0 → **6.0** | 12.97 → **5.46 ms** | 357.5 → **173.9 ms** |
+| `turn.supervisor` | 15.5 → **11.5** | 16.35 → **11.30 ms** | 864.4 → **547.5 ms** |
+
+Under concurrency 16 on DocumentDB, `turn.supervisor` goes from 5,624 to
+3,804 ms p50 and from 1.5 to 2.2 op/s. Full tables, the five invariants and the
+one externally visible change (a live reader sees the turn appear at its close,
+not message by message) are in
+`artifacts/issue-53-append-message-batching.md`.
 
 ### Index Cardinality
 

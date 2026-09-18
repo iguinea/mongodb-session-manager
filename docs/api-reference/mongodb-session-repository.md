@@ -563,6 +563,71 @@ assistant_msg = SessionMessage(
 repo.create_message("user-123", "assistant-1", assistant_msg)
 ```
 
+### `create_messages`
+
+```python
+def create_messages(
+    self,
+    session_id: str,
+    agent_id: str,
+    session_messages: Sequence[SessionMessage],
+    fields_on_last: Mapping[str, Any] | None = None,
+    agent_set_operations: Mapping[str, Any] | None = None,
+    **kwargs: Any,
+) -> None
+```
+
+Append several messages to an agent, in order, in a **single write**.
+
+The sibling of `create_message()` for a whole batch — in fact `create_message()`
+is this method with a list of one. `$each` preserves the order of the list and
+the array only ever grows at its end, so a batch is indistinguishable from the
+same messages pushed one by one, except in the number of round-trips. On
+DocumentDB each of those costs 40-55 ms regardless of its size, which is why the
+session manager groups the messages of an invocation
+([issue #53](https://github.com/iguinea/mongodb-session-manager/issues/53)).
+
+Every message is born with its own `storage_id`, attached back onto the
+`SessionMessage` passed in, exactly as in `create_message()`.
+
+#### Parameters
+
+- **session_id** (`str`): ID of the session.
+
+- **agent_id** (`str`): ID of the agent receiving the messages.
+
+- **session_messages** (`Sequence[SessionMessage]`): The messages, in
+  conversation order. An empty sequence writes nothing.
+
+- **fields_on_last** (`Mapping[str, Any] | None`): Fields to store on the last
+  message of the batch, as dot-notation keys relative to its document
+  (`"event_loop_metrics.cycle_metrics"`). They are nested into the document
+  before it is pushed, because `$set` cannot reach a message the same write is
+  creating. This is how the metrics of an invocation cost no write of their own.
+
+- **agent_set_operations** (`Mapping[str, Any] | None`): Keys relative to the
+  agent document (`"agent_data.model"`), to land in the same round-trip.
+
+#### Raises
+
+- `ValueError`: If the session does not exist, or if the `agent_id` or a field
+  key would be parsed as MongoDB syntax. Names are checked before the early
+  return for an empty batch.
+- `PyMongoError`: If the database operation fails.
+
+#### Example
+
+```python
+repo.create_messages(
+    "user-123",
+    "assistant-1",
+    [tool_use_msg, tool_result_msg, answer_msg],
+    fields_on_last={
+        "event_loop_metrics.accumulated_usage": {"totalTokens": 1280},
+    },
+)
+```
+
 ### `read_message`
 
 ```python

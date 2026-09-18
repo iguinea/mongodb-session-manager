@@ -21,7 +21,7 @@ round-trip, with an error that says why.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 
@@ -61,8 +61,55 @@ def validate_field_paths(paths: Iterable[str], what: str) -> None:
                 )
 
 
+def apply_fields(
+    document: dict[str, Any], fields: Mapping[str, Any], what: str = "field"
+) -> dict[str, Any]:
+    """Write dot-notation paths onto a document, as `$set` would.
+
+    What `$set` does with dot notation, done in Python: it is how fields reach a
+    document that is not there yet to be `$set` on -- a message being `$push`ed,
+    or a metadata seed created with the session.
+
+    Args:
+        document: The document to write on, modified in place.
+        fields: Paths, relative to that document, and their values.
+        what: What the paths are, to name them in the error ("message field").
+
+    Returns:
+        The same document, for convenience.
+
+    Raises:
+        ValueError: When a path is not valid, under the same rule as
+            validate_field_paths(); or when two paths cannot coexist because
+            one would have to be both a value and a subdocument (`user` and
+            `user.name`). MongoDB rejects that same pair in a single `$set`,
+            and building it here would silently drop one of the two.
+    """
+    validate_field_paths(fields, what)
+
+    for path, value in fields.items():
+        segments = str(path).split(".")
+        here = document
+        for segment in segments[:-1]:
+            branch = here.setdefault(segment, {})
+            if not isinstance(branch, dict):
+                raise ValueError(
+                    f"{what} {path!r} conflicts with {segment!r}, which is "
+                    f"already a value: a field cannot hold a value and a subdocument"
+                )
+            here = branch
+        leaf = segments[-1]
+        if isinstance(here.get(leaf), dict):
+            raise ValueError(
+                f"{what} {path!r} conflicts with a longer path already "
+                f"nested under {leaf!r}: a field cannot hold a value and a subdocument"
+            )
+        here[leaf] = value
+    return document
+
+
 def nested_document(paths: Iterable[str], value: Any = "") -> dict[str, Any]:
-    """Build the document a set of dot-notation paths describes.
+    """Build the document a set of dot-notation paths describes, all with one value.
 
     A dot is a path separator everywhere else in this library, so a document
     seeded with the literal key `user.name` is not the field that
@@ -77,38 +124,12 @@ def nested_document(paths: Iterable[str], value: Any = "") -> dict[str, Any]:
         The document, nested as deep as each path goes.
 
     Raises:
-        ValueError: When a path is not valid, under the same rule as
-            validate_field_paths(); or when two paths cannot coexist because
-            one would have to be both a value and a subdocument (`user` and
-            `user.name`). MongoDB rejects that same pair in a single `$set`,
-            and building it here would silently drop one of the two.
+        ValueError: Under the same rules as apply_fields().
     """
-    # Walked twice below, and the signature promises to take any iterable: a
-    # generator was exhausted by the validation and built nothing, so the seed
-    # disappeared without an error.
-    paths = list(paths)
-    validate_field_paths(paths, "metadata field")
-
-    document: dict[str, Any] = {}
-    for path in paths:
-        segments = str(path).split(".")
-        here = document
-        for segment in segments[:-1]:
-            branch = here.setdefault(segment, {})
-            if not isinstance(branch, dict):
-                raise ValueError(
-                    f"metadata field {path!r} conflicts with {segment!r}, which is "
-                    f"already a value: a field cannot hold a value and a subdocument"
-                )
-            here = branch
-        leaf = segments[-1]
-        if isinstance(here.get(leaf), dict):
-            raise ValueError(
-                f"metadata field {path!r} conflicts with a longer path already "
-                f"nested under {leaf!r}: a field cannot hold a value and a subdocument"
-            )
-        here[leaf] = value
-    return document
+    # Materialised before it is walked: the signature promises to take any
+    # iterable, and a generator was exhausted by the validation and built
+    # nothing, so the seed disappeared without an error.
+    return apply_fields({}, {path: value for path in list(paths)}, "metadata field")
 
 
 def resolve_path(document: dict[str, Any], path: str) -> tuple[bool, Any]:

@@ -11,8 +11,10 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from pymongo import MongoClient
 from strands import Agent, tool
+from strands.hooks import AfterInvocationEvent, BeforeInvocationEvent, HookOrder
 from strands.session.repository_session_manager import RepositorySessionManager
 from strands.types.content import Message
+from strands.types.session import SessionMessage
 
 from .field_names import resolve_path, validate_agent_id, validate_field_paths
 from .message_identity import MessageRef, ref_of
@@ -213,6 +215,16 @@ class MongoDBSessionManager(RepositorySessionManager):
         # single manager can serve several agents in the same session.
         self._agent_config_cache: dict[str, tuple] = {}
 
+        # Messages of the invocation in flight, per agent, waiting for the write
+        # that closes it (#53). Ordered as they were appended: the array they go
+        # into is the conversation.
+        self._pending_messages: dict[str, list[SessionMessage]] = {}
+
+        # Agents with an invocation open. Only inside one is there something
+        # bound to close -- and therefore to flush -- so only there may a
+        # message wait.
+        self._agents_invoking: set[str] = set()
+
         # Apply metadata hook if provided
         if metadata_hook:
             self._apply_metadata_hook(metadata_hook)
@@ -262,6 +274,92 @@ class MongoDBSessionManager(RepositorySessionManager):
 
         self.delete_metadata = wrapped_delete
 
+    def append_message(
+        self, message: Message, agent: LocalAgent, **kwargs: Any
+    ) -> None:
+        """Append a message, immediately or with the batch of its invocation.
+
+        What the event loop produces -- a toolUse, a toolResult, the answer --
+        waits for the write that closes the invocation, so a turn costs one
+        `$push` instead of one per message (#53). `AfterInvocationEvent` comes
+        out of a `finally` in `strands/agent/agent.py`, so an invocation that
+        raises still flushes; what a batch cannot survive is the process dying.
+
+        Two messages do not wait. The one that opens the invocation, because it
+        is the user's question, the only thing in a turn that nothing can
+        produce again, and writing it on arrival keeps it as durable as it was
+        before batching. And any message appended outside an invocation, which
+        has nothing bound to close it and would sit in the batch until close().
+
+        Ordering is preserved by flushing before any immediate write: the array
+        this ends up in *is* the conversation, so nothing may overtake what is
+        still pending.
+        """
+        if agent.agent_id not in self._agents_invoking or self._opens_an_invocation(
+            message
+        ):
+            self._flush_pending(agent.agent_id)
+            super().append_message(message, agent, **kwargs)
+            return
+
+        # The index and the bookkeeping of `_latest_agent_message` are Strands'
+        # rule (`RepositorySessionManager.append_message`), repeated here
+        # because only the write is being deferred. `test_message_batching.py`
+        # fails if an SDK upgrade changes how a message is numbered.
+        latest = self._latest_agent_message[agent.agent_id]
+        next_index = (latest.message_id + 1) if latest else 0
+        session_message = SessionMessage.from_message(message, next_index)
+        self._latest_agent_message[agent.agent_id] = session_message
+        self._pending_messages.setdefault(agent.agent_id, []).append(session_message)
+
+    @staticmethod
+    def _opens_an_invocation(message: Message) -> bool:
+        """Say whether a message is a prompt, rather than event loop output.
+
+        Told apart by content and not by position: a `toolResult` is also a
+        `user` message, and which event fires when is the SDK's business, while
+        what a message *is* is visible in the message itself.
+        """
+        if message.get("role") != "user":
+            return False
+        return not any(
+            isinstance(block, dict) and "toolResult" in block
+            for block in message.get("content") or []
+        )
+
+    def _flush_pending(
+        self,
+        agent_id: str,
+        fields_on_last: dict[str, Any] | None = None,
+        agent_set_operations: dict[str, Any] | None = None,
+    ) -> bool:
+        """Write the batch of an agent, if it has one.
+
+        The batch is let go whether the write lands or raises, and the error
+        propagates to the caller as `create_message()`'s always did. It is
+        deliberately not retried: a write that raised may well have been
+        applied -- an update that reached the server and lost its ack is the
+        case `test_invocation_metrics.py` keeps -- and pushing it again would
+        duplicate the messages of a turn, which is worse than the loss it would
+        be trying to prevent. Losing the batch is what a failed
+        `create_message()` already did, one message at a time.
+
+        Returns:
+            Whether there was anything to write.
+        """
+        pending = self._pending_messages.pop(agent_id, None)
+        if not pending:
+            return False
+
+        self.session_repository.create_messages(
+            self.session_id,
+            agent_id,
+            pending,
+            fields_on_last=fields_on_last,
+            agent_set_operations=agent_set_operations,
+        )
+        return True
+
     def redact_latest_message(
         self, redact_message: Message, agent: LocalAgent, **kwargs: Any
     ) -> None:
@@ -271,7 +369,12 @@ class MongoDBSessionManager(RepositorySessionManager):
         same SessionMessage it used. Asking where the last message is a second
         time would be asking a different question: the answer could be another
         manager's message, and the audit trail would point at it.
+
+        The batch is written first: a guardrail intervenes on the message that
+        has just been added, which is the one still waiting in it, and the
+        redaction locates it with the positional operator -- it has to be there.
         """
+        self._flush_pending(agent.agent_id)
         super().redact_latest_message(redact_message, agent, **kwargs)
 
         # super() raises when there is nothing to redact, so by here there is a
@@ -408,8 +511,32 @@ class MongoDBSessionManager(RepositorySessionManager):
         AfterInvocationEvent. The registry is wrapped so that the callbacks of
         MessageAddedEvent run tagged, and sync_agent() can leave the metrics out
         of that sync: they are still the previous cycle's (issue #66).
+
+        Two callbacks of this class' own bracket the invocation, so a batch is
+        only ever held while there is something guaranteed to close it (#53).
+        The closing one runs last and flushes again, which covers both orders it
+        can end up in against a hook that appends a message of its own: if that
+        hook runs first its message is in the batch and goes out here, and if it
+        runs after, the invocation is already over and its message is written
+        immediately.
         """
         super().register_hooks(MessageAddedTagging(registry), **kwargs)
+
+        registry.add_callback(
+            BeforeInvocationEvent,
+            lambda event: self._agents_invoking.add(event.agent.agent_id),
+            order=HookOrder.SDK_FIRST,
+        )
+        registry.add_callback(
+            AfterInvocationEvent,
+            lambda event: self._invocation_ended(event.agent),
+            order=HookOrder.SDK_LAST,
+        )
+
+    def _invocation_ended(self, agent: LocalAgent) -> None:
+        """Close the window in which messages may wait, and write what is left."""
+        self._agents_invoking.discard(agent.agent_id)
+        self._flush_pending(agent.agent_id)
 
     def sync_agent(self, agent: LocalAgent, **kwargs: Any) -> None:
         """Sync agent data and capture model/system_prompt.
@@ -431,9 +558,19 @@ class MongoDBSessionManager(RepositorySessionManager):
         Since strands 1.56 a `BidiAgent` also arrives here, on
         `BidiAgentStopEvent`. It has no event loop, so it syncs without metrics
         (issue #69).
-        """
-        super().sync_agent(agent, **kwargs)
 
+        What super() writes -- the agent state -- and what this class writes are
+        separate round-trips, so the second runs in a `finally`: the state
+        failing must not take the messages of the turn down with it, now that
+        the write which stores them is this one (#53).
+        """
+        try:
+            super().sync_agent(agent, **kwargs)
+        finally:
+            self._write_sync(agent)
+
+    def _write_sync(self, agent: LocalAgent) -> None:
+        """Write the metrics, the agent config and the pending batch, as one."""
         # Metrics and agent config land on the same session document, so they
         # are combined into a single write. On DocumentDB every write costs
         # 40-55 ms regardless of its size, so the number of round-trips is what
@@ -443,6 +580,19 @@ class MongoDBSessionManager(RepositorySessionManager):
         else:
             metrics_ops, message_ref = self._build_metrics_update(agent)
         config_ops, config_cache_entry = self._build_agent_config_update(agent)
+
+        # The sync of each MessageAddedEvent is not the end of anything: the
+        # batch closes with the invocation, and until then there is nothing to
+        # write it onto.
+        if not syncing_added_message() and self._flush_pending(
+            agent.agent_id, metrics_ops, config_ops
+        ):
+            # The metrics belong to the last message of the batch, which the
+            # flush has just stored with them inside: they cost no write of
+            # their own, and neither does the agent config that rode along.
+            if config_cache_entry is not None:
+                self._agent_config_cache[agent.agent_id] = config_cache_entry
+            return
 
         # _build_agent_config_update() returns ({}, None) together, so the cache
         # entry is already None whenever there are no config operations.
@@ -689,7 +839,25 @@ class MongoDBSessionManager(RepositorySessionManager):
         return getattr(agent.model, "model_id", str(agent.model))
 
     def close(self) -> None:
-        """Close the underlying MongoDB connection."""
+        """Flush whatever is still pending and close the MongoDB connection.
+
+        The last chance for messages whose invocation never closed: what runs
+        just before `AfterInvocationEvent` in the same `finally` --
+        `conversation_manager.apply_management()` -- can raise and leave the
+        batch unwritten (#66). A flush that fails here is logged and not
+        re-raised: closing the connection is what the caller asked for, and
+        raising instead would leak it.
+        """
+        for agent_id in list(self._pending_messages):
+            pending = len(self._pending_messages.get(agent_id, []))
+            try:
+                self._flush_pending(agent_id)
+            except Exception:
+                logger.exception(
+                    f"Lost {pending} message(s) of agent {agent_id} in session "
+                    f"{self.session_id}: the batch of an invocation that never "
+                    f"closed could not be written"
+                )
         self.session_repository.close()
 
     # CUSTOM METHODS
@@ -1034,15 +1202,21 @@ class MongoDBSessionManager(RepositorySessionManager):
             agent_id: ID of the agent to count messages for
 
         Returns:
-            Number of messages, or 0 if agent doesn't exist
+            Number of messages, or 0 if agent doesn't exist. Messages of an
+            invocation still in flight count: this manager appended them, so
+            from here they are part of the conversation even though the write
+            that stores them has not happened yet (#53).
 
         Example:
             count = session_manager.get_message_count("assistant-1")
             if count == 0:
                 print("This is the first interaction")
         """
+        pending = len(self._pending_messages.get(agent_id, []))
         try:
-            return self.session_repository.count_messages(self.session_id, agent_id)
+            return self.session_repository.count_messages(self.session_id, agent_id) + (
+                pending
+            )
         except Exception as e:
             logger.error(f"Failed to get message count for {agent_id}: {e}")
             return 0

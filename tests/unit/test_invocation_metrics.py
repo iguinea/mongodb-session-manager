@@ -47,11 +47,24 @@ TOKENS_PER_CYCLE = USAGE["totalTokens"]
 
 
 class RecordingRepository(InMemorySessionRepository):
-    """Doble que anota cada escritura de métricas: (message_id, tokens, hilo)."""
+    """Doble que anota cada escritura de métricas: (message_id, tokens, hilo).
+
+    Las métricas llegan por dos caminos, y los dos se anotan aquí: sobre un
+    mensaje ya almacenado (`update_message_fields`) o dentro del mensaje que el
+    lote de la invocación está creando (`create_messages`, #53). Lo que el
+    contrato de #66 fija es *cuántas veces* y *sobre qué mensaje*, no por qué
+    método viajan.
+    """
 
     def __init__(self) -> None:
         super().__init__()
         self.metrics_writes: list[tuple[int, int, str]] = []
+
+    def _record_metrics(self, message_id: int, usage: dict[str, Any] | None) -> None:
+        if usage is not None:
+            self.metrics_writes.append(
+                (message_id, usage["totalTokens"], threading.current_thread().name)
+            )
 
     def update_message_fields(
         self,
@@ -61,17 +74,34 @@ class RecordingRepository(InMemorySessionRepository):
         set_operations: dict[str, Any],
         agent_set_operations: dict[str, Any] | None = None,
     ) -> bool:
-        usage = set_operations.get("event_loop_metrics.accumulated_usage")
-        if usage is not None:
-            self.metrics_writes.append(
-                (
-                    ref.message_id,
-                    usage["totalTokens"],
-                    threading.current_thread().name,
-                )
-            )
+        self._record_metrics(
+            ref.message_id, set_operations.get("event_loop_metrics.accumulated_usage")
+        )
         return super().update_message_fields(
             session_id, agent_id, ref, set_operations, agent_set_operations
+        )
+
+    def create_messages(
+        self,
+        session_id: str,
+        agent_id: str,
+        session_messages: Any,
+        fields_on_last: dict[str, Any] | None = None,
+        agent_set_operations: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        if session_messages:
+            self._record_metrics(
+                session_messages[-1].message_id,
+                (fields_on_last or {}).get("event_loop_metrics.accumulated_usage"),
+            )
+        return super().create_messages(
+            session_id,
+            agent_id,
+            session_messages,
+            fields_on_last=fields_on_last,
+            agent_set_operations=agent_set_operations,
+            **kwargs,
         )
 
 
@@ -298,47 +328,69 @@ class TestFailures:
         assert only_last_carries_metrics(repo), tokens_by_message(repo)
         assert tokens_by_message(repo)[-1][1] == TOKENS_PER_CYCLE
 
-    def test_a_message_stored_despite_a_failing_append_still_gets_the_closing_metrics(
-        self,
-    ):
-        """create_message se aplica y lanza (el ack se pierde): el cierre lo anota."""
+    def test_a_batch_stored_despite_a_failing_write_keeps_its_metrics(self):
+        """El lote se aplica y lanza (el ack se pierde): lo escrito queda escrito.
+
+        Era `create_message` quien se aplicaba y perdía el ack; desde #53 el que
+        puede hacerlo es el `$push` del cierre, que lleva los mensajes y sus
+        métricas dentro. Lo que fija este caso es que el error sube y que lo que
+        llegó al almacén está completo -- y, sobre todo, que nadie lo reintenta:
+        un segundo intento duplicaría el turno.
+        """
 
         class AppliedThenRaises(RecordingRepository):
-            def create_message(self, session_id, agent_id, session_message, **kw):
-                super().create_message(session_id, agent_id, session_message, **kw)
-                if session_message.message_id == 3:
+            def create_messages(self, session_id, agent_id, session_messages, **kw):
+                super().create_messages(session_id, agent_id, session_messages, **kw)
+                # Solo el del cierre: es el que lleva las métricas dentro. El
+                # prompt también pasa por aquí, y tumbarlo dejaría el turno sin
+                # llegar al modelo.
+                if kw.get("fields_on_last"):
                     raise TimeoutError("ack perdido")
 
         repo = AppliedThenRaises()
+        manager = new_manager(repo)
 
         with pytest.raises(Exception, match="ack perdido"):
-            new_agent(repo, tool_turns(1))("hola")
+            new_agent(repo, tool_turns(1), session_manager=manager)("hola")
+        manager.close()
 
         assert only_last_carries_metrics(repo), tokens_by_message(repo)
+        assert [m["message_id"] for m in stored_messages(repo)] == [0, 1, 2, 3]
 
     def test_a_failing_sync_on_a_message_does_not_cost_the_closing_metrics(self):
-        """update_agent lanza en el sync del toolResult; el cierre escribe igual."""
+        """update_agent lanza en el sync del toolResult; el cierre escribe igual.
 
-        class FailsOnToolResultSync(RecordingRepository):
-            fail_next_update = False
+        El disparador es el segundo `update_agent` del turno, que es ese sync:
+        el primero es el del prompt, y el del toolUse no llega aquí porque su
+        contenido no ha cambiado (#67). Contarlos, en vez de reconocer el
+        toolResult al almacenarlo, es lo que queda desde que ese mensaje espera
+        en el lote (#53).
 
-            def create_message(self, session_id, agent_id, session_message, **kw):
-                super().create_message(session_id, agent_id, session_message, **kw)
-                content = session_message.message["content"]
-                self.fail_next_update = any("toolResult" in c for c in content)
+        Lo que se prueba no cambia -- un sync intermedio que falla no le cuesta
+        las métricas al cierre -- y ahora también que no le cuesta los mensajes,
+        que viajan con ellas: el `finally` del sync escribe el lote aunque
+        super() haya lanzado.
+        """
+
+        class FailsOnTheSecondSync(RecordingRepository):
+            updates = 0
 
             def update_agent(self, session_id, session_agent, **kw):
-                if self.fail_next_update:
-                    self.fail_next_update = False
+                self.updates += 1
+                if self.updates == 2:
                     raise RuntimeError("update_agent caído")
                 return super().update_agent(session_id, session_agent, **kw)
 
-        repo = FailsOnToolResultSync()
+        repo = FailsOnTheSecondSync()
 
         with pytest.raises(Exception, match="update_agent caído"):
             new_agent(repo, tool_turns(1))("hola")
 
-        assert tokens_by_message(repo)[-1] == (2, TOKENS_PER_CYCLE)
+        assert tokens_by_message(repo) == [
+            (0, None),
+            (1, None),
+            (2, TOKENS_PER_CYCLE),
+        ]
 
     def test_config_of_a_new_agent_is_persisted_before_the_first_model_call(self):
         """El sync de cada mensaje deja las métricas, no la configuración."""
