@@ -1,5 +1,9 @@
 # Changelog
 
+## [2026-09-18] PR #104 - Fix: el tool de metadata rompía la petición y no leía lo que escribía (#47) (@iguinea)
+
+- Fix: el tool de metadata rompía la petición y no leía lo que escribía…
+
 ## [0.22.0] - 2026-09-17
 
 ### Fixed
