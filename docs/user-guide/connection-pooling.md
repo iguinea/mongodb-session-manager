@@ -211,6 +211,52 @@ The pool initializes with optimized defaults for high concurrency:
 }
 ```
 
+### Startup Ping Deadline (#122)
+
+`initialize()` verifies the connection with a `ping` before returning the
+client. That ping runs under a deadline — by default **5000 ms** — so a server
+that accepts TCP and then goes mute cannot hold your application's startup for
+the accumulated phase budgets (5 s of server selection plus 30 s of socket:
+~35 s measured).
+
+```python
+# Default: the ping is bounded to 5 s (or the client's timeoutMS, whichever
+# is smaller)
+client = MongoDBConnectionPool.initialize("mongodb://localhost:27017/")
+
+# A slower startup budget for a server that takes long to become reachable
+client = MongoDBConnectionPool.initialize(
+    "mongodb://localhost:27017/", initialize_timeout_ms=15000
+)
+
+# Opt out entirely: pymongo's own budget governs (the client's timeoutMS,
+# if set; otherwise the phase timeouts accumulate)
+client = MongoDBConnectionPool.initialize(
+    "mongodb://localhost:27017/", initialize_timeout_ms=None
+)
+```
+
+What the ceiling means:
+
+- It is a **startup SLA**, not a driver default. It composes with the client's
+  `timeoutMS` by `min` over positive values: a stricter `timeoutMS` is never
+  lengthened, and `timeoutMS=0` (pymongo's "no timeout") does not disable the
+  ceiling.
+- It **deliberately overrides looser explicit settings for this one ping**:
+  with `timeoutMS=60000` or a raised `serverSelectionTimeoutMS`, a server that
+  takes longer than 5 s to become reachable fails `initialize()` where it used
+  to succeed. Raise `initialize_timeout_ms` or pass `None` if that is your
+  case.
+- Under an active deadline pymongo **replaces** the per-phase budgets with the
+  time remaining (it does not clamp to them), so this is an aggregate ceiling
+  on startup, not a per-phase one.
+- The parameter is consumed by the pool: it never reaches `MongoClient` and is
+  not part of the singleton key. A second `initialize()` with the same
+  connection string and options returns the existing client without re-pinging,
+  whatever ceiling the second call named.
+- On failure the client is closed and the error re-raised, as before; the log
+  names the deadline that governed and where it came from.
+
 ## Performance Benefits
 
 ### Connection Overhead Elimination

@@ -45,10 +45,25 @@ _POOL_DEFAULTS: dict[str, Any] = {
 # How long a health check may take before it is an answer in itself.
 #
 # Without one, a ping inherits serverSelectionTimeoutMS and socketTimeoutMS: 5 s
-# against an unreachable server, and 20 s measured against a server that went
+# against an unreachable server, and 30 s measured against a server that went
 # mute with the connection already established. Callers run this from a /health
 # endpoint, often on the event loop.
 DEFAULT_HEALTH_CHECK_TIMEOUT_MS = 1000
+
+# How long creating the pool may wait for its startup ping (#122).
+#
+# The ping used to run with no deadline at all: against a server that accepts
+# TCP and then goes mute it blocked startup for the accumulated phase budgets,
+# 5 s of server selection plus 30 s of socket -- 35,015 s measured -- while the
+# FastAPI lifespan held the application back. This is a startup SLA, not a
+# driver default: it composes with the client's own timeoutMS by min, over
+# positive values only, and it deliberately overrides looser explicit settings
+# for this one ping. None opts out entirely. See _ping_deadline().
+DEFAULT_INITIALIZE_TIMEOUT_MS = 5000
+
+# The sentinel for 'the caller did not name initialize_timeout_ms', so the
+# logs can tell the default from an explicit choice.
+_INITIALIZE_TIMEOUT_UNSET = object()
 
 
 class MongoDBConnectionPool:
@@ -82,11 +97,52 @@ class MongoDBConnectionPool:
 
         Args:
             connection_string: MongoDB connection string
+            initialize_timeout_ms: Ceiling for the startup ping, in
+                milliseconds. Default 5000; `None` removes the wrapper and
+                leaves the ping to pymongo's own budget (the client's
+                `timeoutMS`, if set, governs). It is a startup SLA, not a
+                driver default: it composes with the client's `timeoutMS` by
+                min over positive values, and it deliberately overrides looser
+                explicit settings (`timeoutMS=60000`, `timeoutMS=0`, a raised
+                `serverSelectionTimeoutMS`) for this one ping -- a server that
+                takes longer than the ceiling to become reachable fails here
+                where it used to succeed. Under an active deadline pymongo
+                replaces the per-phase budgets with the time remaining rather
+                than clamping to them, so this is an aggregate ceiling on
+                startup. It is consumed here and never reaches `MongoClient`
+                or the singleton key: a second `initialize()` with the same
+                connection string and options returns the existing client
+                whatever ceiling this call named.
             **kwargs: Additional arguments for MongoClient (maxPoolSize, etc.)
 
         Returns:
             The MongoClient instance
+
+        Raises:
+            ValueError: If `initialize_timeout_ms` is named and is neither a
+                positive integer nor `None`. Raised before any client is
+                closed or built.
         """
+        initialize_timeout_ms = kwargs.pop(
+            "initialize_timeout_ms", _INITIALIZE_TIMEOUT_UNSET
+        )
+        if initialize_timeout_ms is _INITIALIZE_TIMEOUT_UNSET:
+            default_used = True
+            initialize_timeout_ms = DEFAULT_INITIALIZE_TIMEOUT_MS
+        elif initialize_timeout_ms is None:
+            default_used = False
+        elif (
+            isinstance(initialize_timeout_ms, bool)
+            or not isinstance(initialize_timeout_ms, int)
+            or initialize_timeout_ms <= 0
+        ):
+            raise ValueError(
+                f"initialize_timeout_ms must be a positive integer or None, "
+                f"got {initialize_timeout_ms!r}"
+            )
+        else:
+            default_used = False
+
         with cls._lock:
             instance = cls._instance or cls()
 
@@ -115,6 +171,9 @@ class MongoDBConnectionPool:
                 telemetry,
             ]
 
+            ping_deadline: float | None = None
+            ping_origin = "ping not reached"
+
             try:
                 instance._client = MongoClient(connection_string, **merged_kwargs)
                 instance._connection_string = connection_string
@@ -125,8 +184,18 @@ class MongoDBConnectionPool:
                 instance._telemetry = telemetry
                 instance._server_version = None
 
-                # Test the connection
-                instance._client.admin.command("ping")
+                # Test the connection, bounded in time (#122): the ping used to
+                # run with no deadline, and against a server that accepts TCP
+                # and then goes mute it blocked startup for the accumulated
+                # phase budgets -- 5 s of selection plus 30 s of socket.
+                ping_deadline, ping_origin = cls._ping_deadline(
+                    instance._client, initialize_timeout_ms, default_used
+                )
+                if ping_deadline is None:
+                    instance._client.admin.command("ping")
+                else:
+                    with pymongo_timeout(ping_deadline):
+                        instance._client.admin.command("ping")
 
                 # Read back from the client, not from the kwargs: an option
                 # that came from the connection string is not in them, and what
@@ -137,13 +206,17 @@ class MongoDBConnectionPool:
                     f"maxPoolSize: {effective['maxPoolSize']}, "
                     f"minPoolSize: {effective['minPoolSize']}, "
                     f"maxIdleTimeMS: {effective['maxIdleTimeMS']}, "
-                    f"retryWrites: {effective['retryWrites']}"
+                    f"retryWrites: {effective['retryWrites']}, "
+                    f"ping deadline: {ping_origin}"
                 )
 
                 return instance._client
 
             except PyMongoError as e:
-                logger.error(f"Failed to initialize MongoDB connection pool: {e}")
+                logger.error(
+                    f"Failed to initialize MongoDB connection pool "
+                    f"(ping deadline: {ping_origin}): {e}"
+                )
                 # Dropping the reference is not closing it: the client is
                 # already built, with a monitor thread per server and, with
                 # minPoolSize, connections on the way. pymongo does not close on
@@ -160,6 +233,50 @@ class MongoDBConnectionPool:
                 instance._client = None
                 instance._telemetry = None
                 raise
+
+    @staticmethod
+    def _ping_deadline(
+        client: MongoClient, initialize_timeout_ms: int | None, default_used: bool
+    ) -> tuple[float | None, str]:
+        """The startup ping's deadline in seconds, and where it came from.
+
+        `initialize_timeout_ms` is a startup SLA, not a driver default: it
+        caps how long creating this pool may wait for the ping. It composes
+        with the client's own `timeoutMS` by min -- and only over positive
+        values: in pymongo's own truthiness (`_csot.remaining()`) `None` and
+        `0.0` both mean 'no budget', and feeding `0.0` to the min would
+        produce `pymongo.timeout(0)`, which is no deadline at all -- 30 s
+        measured against a mute server. Under an active deadline pymongo
+        replaces the per-phase budgets with the time remaining rather than
+        clamping to them, so this is an aggregate ceiling on startup, and a
+        looser explicit setting loses to it for this one ping: that is the
+        point, and the compatibility edge is documented in initialize().
+
+        Returns:
+            The deadline in seconds, or `None` when the caller opted out and
+            the ping runs under pymongo's own budget; and the origin, for the
+            logs -- nothing about this decision may vanish silently (#111).
+        """
+        if initialize_timeout_ms is None:
+            return (
+                None,
+                "disabled: initialize_timeout_ms=None (the client's own "
+                "timeoutMS, if any, governs)",
+            )
+        kind = "default" if default_used else "explicit"
+        ceiling_s = initialize_timeout_ms / 1000
+        client_timeout = client.options.timeout
+        if (
+            client_timeout is not None
+            and client_timeout > 0
+            and client_timeout < ceiling_s
+        ):
+            return (
+                client_timeout,
+                f"initialize_timeout_ms={initialize_timeout_ms} ({kind}) "
+                f"capped by client timeoutMS={round(client_timeout * 1000)}ms",
+            )
+        return ceiling_s, f"initialize_timeout_ms={initialize_timeout_ms} ({kind})"
 
     @classmethod
     def _resolve_options(
@@ -283,9 +400,9 @@ class MongoDBConnectionPool:
 
         The timeout is the point. Without one the call inherits
         serverSelectionTimeoutMS and socketTimeoutMS: 5 s against an
-        unreachable server, 20 s measured against one that went mute with its
+        unreachable server, 30 s measured against one that went mute with its
         connection already open. That is a thread, or an event loop, held for
-        20 s.
+        30 s.
 
         Args:
             timeout_ms: How long the ping may take before it counts as a
