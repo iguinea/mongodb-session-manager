@@ -1,6 +1,5 @@
 """Unit tests for MongoDBSessionManager."""
 
-import warnings
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -180,39 +179,28 @@ class TestSessionManagerInit:
         mgr.add_feedback({"rating": "up"})
         hook.assert_called_once()
 
+    @pytest.mark.parametrize(
+        ("removed", "replacement"),
+        [("metadataHook", "metadata_hook"), ("feedbackHook", "feedback_hook")],
+    )
     @patch("mongodb_session_manager.mongodb_session_manager.MongoDBSessionRepository")
-    def test_deprecation_warning_camel_case_metadata_hook(self, mock_repo_cls):
-        mock_repo_cls.return_value = MagicMock(
-            read_session=MagicMock(return_value=None)
-        )
-        hook = MagicMock()
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            MongoDBSessionManager(
-                session_id="s1",
-                connection_string="mongodb://localhost:27017/",
-                metadataHook=hook,
-            )
-        assert any(
-            "metadataHook is deprecated" in str(warning.message) for warning in w
-        )
+    def test_camel_case_hook_names_are_rejected(
+        self, mock_repo_cls, removed, replacement
+    ):
+        """Removed in 1.0.0 (#111), and loudly.
 
-    @patch("mongodb_session_manager.mongodb_session_manager.MongoDBSessionRepository")
-    def test_deprecation_warning_camel_case_feedback_hook(self, mock_repo_cls):
-        mock_repo_cls.return_value = MagicMock(
-            read_session=MagicMock(return_value=None)
-        )
-        hook = MagicMock()
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
+        The Strands parent takes `**kwargs` and ignores them, so without an
+        explicit check the old name would be swallowed and the hook would
+        silently never run.
+        """
+        with pytest.raises(TypeError, match=replacement):
             MongoDBSessionManager(
                 session_id="s1",
                 connection_string="mongodb://localhost:27017/",
-                feedbackHook=hook,
+                **{removed: MagicMock()},
             )
-        assert any(
-            "feedbackHook is deprecated" in str(warning.message) for warning in w
-        )
+
+        mock_repo_cls.assert_not_called()
 
     @patch("mongodb_session_manager.mongodb_session_manager.MongoDBSessionRepository")
     def test_passes_mongo_options_to_repo(self, mock_repo_cls):

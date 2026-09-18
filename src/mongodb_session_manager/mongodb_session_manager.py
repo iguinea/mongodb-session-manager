@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import warnings
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, ClassVar
@@ -51,6 +50,8 @@ _MONGO_CLIENT_OPTIONS = frozenset(
         "tlsAllowInvalidCertificates",
     }
 )
+
+_REMOVED_HOOK_NAMES = {"metadataHook": "metadata_hook", "feedbackHook": "feedback_hook"}
 
 
 class MongoDBSessionManager(RepositorySessionManager):
@@ -164,21 +165,14 @@ class MongoDBSessionManager(RepositorySessionManager):
                 cases in tests/support/repository_contract.py
             **kwargs: Additional arguments passed to parent class and MongoClient
         """
-        # Support deprecated camelCase parameter names (metadataHook, feedbackHook)
-        if "metadataHook" in kwargs:
-            warnings.warn(
-                "metadataHook is deprecated, use metadata_hook instead",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            metadata_hook = metadata_hook or kwargs.pop("metadataHook")
-        if "feedbackHook" in kwargs:
-            warnings.warn(
-                "feedbackHook is deprecated, use feedback_hook instead",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            feedback_hook = feedback_hook or kwargs.pop("feedbackHook")
+        # The camelCase names were removed in 1.0.0 (#111). They must fail here:
+        # the Strands parent ignores unknown kwargs, so the hook would silently
+        # never run.
+        for removed, replacement in _REMOVED_HOOK_NAMES.items():
+            if removed in kwargs:
+                raise TypeError(
+                    f"{removed} was removed in 1.0.0, use {replacement} instead"
+                )
         # Extract MongoDB client kwargs
         mongo_kwargs = {}
         parent_kwargs = {}
