@@ -1,5 +1,9 @@
 # Changelog
 
+## [2026-09-18] PR #106 - Docs: regla de procedencia anonimizada para los repos consumidores (@iguinea)
+
+- Docs: regla de procedencia anonimizada para los repos consumidores
+
 ## [2026-09-18] PR #105 - Docs: corregir el alcance del inputSchema mal formado (#47) (@iguinea)
 
 - Docs: corregir el alcance del inputSchema mal formado (#47)
