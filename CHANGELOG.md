@@ -1,5 +1,9 @@
 # Changelog
 
+## [2026-09-18] PR #128 - Docs: plan del techo de arranque del ping de initialize() (#122) (@iguinea)
+
+- Docs: accept plan for the initialize() ping startup ceiling (#122)
+
 ## [2026-09-18] PR #127 - Fix: update_agent_fields ya no crea agentes fantasma sobre agentes inexistentes (#119) (@iguinea)
 
 - Fix: update_agent_fields ya no crea agentes fantasma sobre agentes in…
