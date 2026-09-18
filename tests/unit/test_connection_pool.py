@@ -1,6 +1,6 @@
 """Unit tests for MongoDBConnectionPool."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 from pymongo.errors import ConfigurationError, PyMongoError
@@ -17,6 +17,7 @@ def fake_client(**effective):
     """
     client = MagicMock()
     client.admin.command.return_value = {"ok": 1}
+    client.options.timeout = effective.get("timeout")
     client.options.pool_options.max_pool_size = effective.get("maxPoolSize", 100)
     client.options.pool_options.min_pool_size = effective.get("minPoolSize", 10)
     client.options.pool_options.max_idle_time_seconds = effective.get(
@@ -162,6 +163,196 @@ class TestInitialize:
         MongoDBConnectionPool.initialize("mongodb://localhost/")
         call_kwargs = mock_client_cls.call_args[1]
         assert call_kwargs["maxIdleTimeMS"] == 300000
+
+
+# ---------------------------------------------------------------------------
+# initialize: the startup ping's deadline (#122)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(
+    params=[0, -1, True, False, "5000", 5.0, 5000.0],
+    ids=["zero", "negative", "true", "false", "str", "float-small", "float-integral"],
+)
+def bad_ceiling(request):
+    """Everything that is not a positive int or None."""
+    return request.param
+
+
+class TestInitializePingDeadline:
+    """The startup ping runs under a deadline (#122).
+
+    Without one it inherited the accumulated phase budgets -- 5 s of server
+    selection plus 30 s of socket, ~35 s measured against a server that
+    accepts TCP and then goes mute -- while the application's startup waits.
+    """
+
+    @patch("mongodb_session_manager.mongodb_connection_pool.pymongo_timeout")
+    @patch("mongodb_session_manager.mongodb_connection_pool.MongoClient")
+    def test_the_ping_runs_under_the_default_ceiling(
+        self, mock_client_cls, mock_timeout
+    ):
+        mock_client = fake_client()
+        mock_client_cls.return_value = mock_client
+
+        MongoDBConnectionPool.initialize("mongodb://localhost/")
+
+        mock_timeout.assert_called_once_with(5.0)
+        mock_client.admin.command.assert_called_once_with("ping")
+
+    @patch("mongodb_session_manager.mongodb_connection_pool.pymongo_timeout")
+    @patch("mongodb_session_manager.mongodb_connection_pool.MongoClient")
+    def test_a_stricter_client_timeout_ms_caps_the_ceiling(
+        self, mock_client_cls, mock_timeout
+    ):
+        """A stricter explicit timeoutMS is never lengthened."""
+        mock_client = fake_client(timeout=1.0)
+        mock_client_cls.return_value = mock_client
+
+        MongoDBConnectionPool.initialize("mongodb://localhost/")
+
+        mock_timeout.assert_called_once_with(1.0)
+
+    @patch("mongodb_session_manager.mongodb_connection_pool.pymongo_timeout")
+    @patch("mongodb_session_manager.mongodb_connection_pool.MongoClient")
+    def test_a_zero_timeout_ms_is_no_budget_not_zero(
+        self, mock_client_cls, mock_timeout
+    ):
+        """min(5, 0.0) would be timeout(0): no deadline at all, 30 s measured.
+
+        In pymongo's own truthiness (`_csot.remaining()`) None and 0.0 both
+        mean 'no budget', so the ceiling stands alone.
+        """
+        mock_client = fake_client(timeout=0.0)
+        mock_client_cls.return_value = mock_client
+
+        MongoDBConnectionPool.initialize("mongodb://localhost/")
+
+        mock_timeout.assert_called_once_with(5.0)
+
+    @patch("mongodb_session_manager.mongodb_connection_pool.pymongo_timeout")
+    @patch("mongodb_session_manager.mongodb_connection_pool.MongoClient")
+    def test_an_explicit_ceiling_beats_a_looser_client_timeout(
+        self, mock_client_cls, mock_timeout
+    ):
+        mock_client = fake_client(timeout=60.0)
+        mock_client_cls.return_value = mock_client
+
+        MongoDBConnectionPool.initialize(
+            "mongodb://localhost/", initialize_timeout_ms=3000
+        )
+
+        mock_timeout.assert_called_once_with(3.0)
+
+    @patch("mongodb_session_manager.mongodb_connection_pool.pymongo_timeout")
+    @patch("mongodb_session_manager.mongodb_connection_pool.MongoClient")
+    def test_none_disables_the_wrapper(self, mock_client_cls, mock_timeout):
+        """The caller who opts out gets today's behavior: pymongo's own
+        timeoutMS, if any, governs the ping."""
+        mock_client = fake_client(timeout=60.0)
+        mock_client_cls.return_value = mock_client
+
+        MongoDBConnectionPool.initialize(
+            "mongodb://localhost/", initialize_timeout_ms=None
+        )
+
+        mock_timeout.assert_not_called()
+        mock_client.admin.command.assert_called_once_with("ping")
+
+    @patch("mongodb_session_manager.mongodb_connection_pool.MongoClient")
+    def test_the_parameter_never_reaches_the_client(self, mock_client_cls):
+        mock_client = fake_client()
+        mock_client_cls.return_value = mock_client
+
+        MongoDBConnectionPool.initialize(
+            "mongodb://localhost/", initialize_timeout_ms=5000
+        )
+
+        assert "initialize_timeout_ms" not in mock_client_cls.call_args[1]
+
+    @patch("mongodb_session_manager.mongodb_connection_pool.MongoClient")
+    def test_the_parameter_is_not_part_of_the_singleton_key(self, mock_client_cls):
+        """It is a per-attempt control: the fast path returns the existing
+        client without re-pinging, whatever ceiling this call asked for."""
+        mock_client = fake_client()
+        mock_client_cls.return_value = mock_client
+
+        MongoDBConnectionPool.initialize(
+            "mongodb://localhost/", initialize_timeout_ms=5000
+        )
+        MongoDBConnectionPool.initialize(
+            "mongodb://localhost/", initialize_timeout_ms=3000
+        )
+
+        assert mock_client_cls.call_count == 1
+
+    @patch("mongodb_session_manager.mongodb_connection_pool.MongoClient")
+    def test_a_bad_ceiling_is_rejected_before_any_client_work(
+        self, mock_client_cls, bad_ceiling
+    ):
+        """0, negatives, bools and non-ints are ValueError before a client is
+        built: a later error would escape the PyMongoError cleanup and leave
+        a live client behind."""
+        with pytest.raises(ValueError, match="initialize_timeout_ms"):
+            MongoDBConnectionPool.initialize(
+                "mongodb://localhost/", initialize_timeout_ms=bad_ceiling
+            )
+
+        mock_client_cls.assert_not_called()
+
+    @patch("mongodb_session_manager.mongodb_connection_pool.MongoClient")
+    def test_a_bad_ceiling_does_not_close_the_previous_client(self, mock_client_cls):
+        mock_client = fake_client()
+        mock_client_cls.return_value = mock_client
+
+        MongoDBConnectionPool.initialize("mongodb://localhost/")
+        with pytest.raises(ValueError, match="initialize_timeout_ms"):
+            MongoDBConnectionPool.initialize(
+                "mongodb://other/", initialize_timeout_ms=0
+            )
+
+        mock_client.close.assert_not_called()
+        assert MongoDBConnectionPool.get_client() is mock_client
+
+    @patch("mongodb_session_manager.mongodb_connection_pool.MongoClient")
+    def test_the_success_log_names_the_deadline(self, mock_client_cls, caplog):
+        mock_client = fake_client()
+        mock_client_cls.return_value = mock_client
+
+        with caplog.at_level("INFO"):
+            MongoDBConnectionPool.initialize("mongodb://localhost/")
+
+        assert "initialize_timeout_ms=5000 (default)" in caplog.text
+
+    @patch("mongodb_session_manager.mongodb_connection_pool.MongoClient")
+    def test_the_success_log_names_the_cap(self, mock_client_cls, caplog):
+        mock_client = fake_client(timeout=1.0)
+        mock_client_cls.return_value = mock_client
+
+        with caplog.at_level("INFO"):
+            MongoDBConnectionPool.initialize("mongodb://localhost/")
+
+        assert "capped by client timeoutMS=1000ms" in caplog.text
+
+    @patch("mongodb_session_manager.mongodb_connection_pool.MongoClient")
+    def test_the_failure_log_names_the_deadline(self, mock_client_cls, caplog):
+        mock_client = fake_client()
+        mock_client.admin.command.side_effect = PyMongoError("server went mute")
+        mock_client_cls.return_value = mock_client
+
+        with caplog.at_level("ERROR"), pytest.raises(PyMongoError):
+            MongoDBConnectionPool.initialize("mongodb://localhost/")
+
+        assert "initialize_timeout_ms=5000 (default)" in caplog.text
+
+    @patch("mongodb_session_manager.mongodb_connection_pool.MongoClient")
+    def test_a_failure_before_the_ping_says_so(self, mock_client_cls, caplog):
+        mock_client_cls.side_effect = PyMongoError("no DNS answer")
+
+        with caplog.at_level("ERROR"), pytest.raises(PyMongoError):
+            MongoDBConnectionPool.initialize("mongodb://localhost/")
+
+        assert "ping not reached" in caplog.text
 
 
 # ---------------------------------------------------------------------------
@@ -489,10 +680,12 @@ class TestHealthCheck:
         mock_client = fake_client()
         mock_client_cls.return_value = mock_client
 
+        # initialize() now bounds its own startup ping too (#122): the first
+        # call is its default ceiling, the second the health check's budget.
         MongoDBConnectionPool.initialize("mongodb://localhost/")
         MongoDBConnectionPool.health_check(timeout_ms=250)
 
-        mock_timeout.assert_called_once_with(0.25)
+        assert mock_timeout.call_args_list == [call(5.0), call(0.25)]
 
     @patch("mongodb_session_manager.mongodb_connection_pool.MongoClient")
     def test_reports_how_long_it_took(self, mock_client_cls):
@@ -650,7 +843,9 @@ class TestGetPoolStats:
         MongoDBConnectionPool.initialize("mongodb://localhost/")
         MongoDBConnectionPool.get_pool_stats()
 
-        mock_timeout.assert_called_once()
+        # Two calls now: initialize()'s own ping budget (#122) and the
+        # version lookup's one-second ceiling.
+        assert mock_timeout.call_count == 2
 
     @patch("mongodb_session_manager.mongodb_connection_pool.MongoClient")
     def test_reports_pool_utilisation(self, mock_client_cls):
