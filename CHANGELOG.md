@@ -1,5 +1,29 @@
 # Changelog
 
+## [2026-09-18] PR #108 - Feat: el tool de metadata nombra las claves que no encontró (#107) (@iguinea)
+
+- Feat: el tool de metadata nombra las claves que no encontró (#107)
+- Merge remote-tracking branch 'origin/main' into feature/issue-107-nam…
+
+## [0.23.0] - 2026-09-18
+
+### Changed
+- **`manage_metadata("get", keys=[...])` nombra las claves que no encontró** (#107). Devolvía solo las que existen, así que una petición mixta —dos de tres— llegaba al modelo sin ninguna indicación de que la tercera no estaba. No podía distinguir «no existe» de «no la pedí», y por tanto no podía ni reintentar con otro nombre ni concluir que el dato no vive en metadata. Ahora la respuesta añade `. Not found: ['clave']`. Los otros dos casos no cambian: si están todas, la respuesta es la de siempre; si no está ninguna, sigue siendo `No metadata found for keys: [...]`, que ya era inequívoca. Una clave almacenada con valor `null` cuenta como encontrada — es un valor que alguien escribió, no una ausencia
+
+### Notes
+- De las tres formas que puede tomar una lectura agrupada, **solo la mixta era muda**: si no hay nada se dice, si está todo es evidente, y si hay algo se devolvía lo que existe y ni una palabra del resto. Es justo la forma que produce un modelo cuando agrupa sus lecturas, y aquella en la que más necesita saberlo
+- Cambia el **texto** de una respuesta del tool, que es contrato con el modelo y no con el código: ningún consumidor parsea ese string. Sin cambios de esquema ni migración
+- **DocumentDB**: sin operadores ni patrones de consulta nuevos. Se resuelve sobre el documento que la lectura ya trajo, sin round-trips adicionales
+
+## [2026-09-18] PR #106 - Docs: regla de procedencia anonimizada para los repos consumidores (@iguinea)
+
+- Docs: regla de procedencia anonimizada para los repos consumidores
+
+## [2026-09-18] PR #105 - Docs: corregir el alcance del inputSchema mal formado (#47) (@iguinea)
+
+- Docs: corregir el alcance del inputSchema mal formado (#47)
+- Docs: retirar de la nota la identificación del consumidor (#47)
+
 ## [2026-09-18] PR #104 - Fix: el tool de metadata rompía la petición y no leía lo que escribía (#47) (@iguinea)
 
 - Fix: el tool de metadata rompía la petición y no leía lo que escribía…
@@ -7,7 +31,7 @@
 ## [0.22.0] - 2026-09-17
 
 ### Fixed
-- **El `inputSchema` del tool de metadata rompía la petición que lo llevaba** (#47). Estaba escrito a mano y se asignaba tal cual a `ToolSpec.inputSchema`, que es una unión etiquetada cuyo único miembro es `json`. Todos los proveedores leen `inputSchema["json"]`: el de Anthropic lanzaba `KeyError` y Bedrock mandaba el schema desnudo, que **botocore rechaza antes de salir del proceso** (`Unknown parameter in toolConfig.tools[0].toolSpec.inputSchema`). O sea: un agente al que le dieras este tool fallaba en su **primera** llamada, usara el tool o no — incluido `examples/example_metadata_tool.py`. Ahora lo construye Strands desde la firma y el docstring. Lo fija un test que valida la petición contra el propio modelo de servicio de botocore, sin credenciales ni llamada a AWS
+- **El `inputSchema` del tool de metadata estaba mal formado, y solo funcionaba porque el SDK lo reparaba** (#47). Estaba escrito a mano y se asignaba tal cual a `ToolSpec.inputSchema`, que es una unión etiquetada cuyo único miembro es `json`. **No rompía nada en producción**: `ToolRegistry.validate_tool_spec()` tiene una rama de compatibilidad (`if "json" not in tool_spec["inputSchema"]`) que lo envuelve con `normalize_schema()` antes de que llegue a ningún proveedor — verificado en strands 1.25, 1.30, 1.40, 1.45, 1.50.2 y 1.56. Lo que sí costaba: esa normalización rellena las descripciones que faltan con literales (`{"description": "Property action"}`), así que **el modelo recibía sus tres parámetros descritos como «Property action», «Property metadata» y «Property keys»**, que es justo el hueco de documentación que esta issue venía a tapar. Y la corrección del spec dependía de una rama que existe por compatibilidad hacia atrás y que se puede retirar sin considerarlo breaking. Ahora lo construye Strands desde la firma y el docstring. Un test valida la petición contra el propio modelo de servicio de botocore, sin credenciales ni llamada a AWS: fuera del registro de tools —pasando el `tool_spec` directamente a un proveedor— el schema desnudo sí es rechazado
 - **`get` no encontraba lo que `set` acababa de escribir** (#47). Una clave con punto es una ruta en las tres acciones, pero `get` filtraba las claves de primer nivel: el agente que guardaba `user.name` recibía «No metadata found for keys». Ahora se resuelve la ruta sobre el documento que la lectura ya trajo, sin round-trip adicional. `None` y `False` son valores almacenados, no ausencias, y se devuelven como tales
 
 ### Changed
@@ -18,6 +42,7 @@
 - Sin cambios de esquema ni migración: lo que cambia es el spec del tool y el texto de dos respuestas. `update_metadata()`, `get_metadata()` y `delete_metadata()` se comportan igual
 - **DocumentDB**: no se introduce ningún operador ni patrón de consulta nuevo. La resolución de rutas ocurre en Python, sobre el documento ya leído
 - Premisa corregida de la issue: proponía documentarlo en el docstring, que era justo lo que no llegaba al modelo
+- **Corrección de un diagnóstico propio**: la primera redacción de esta entrada decía que un agente con este tool fallaba en su primera llamada. **Es falso**, y lo desmontó un equipo consumidor que lo registra en un `Agent` en producción, señalando la rama de compatibilidad del registro de tools. El error estaba en cómo se comprobó: el probe pasaba el `tool_spec` directamente a `format_request()`, saltándose el registro por el que pasa todo `Agent`. Un repro que falla convence mucho, y aun así describía un mundo que no existía: había un dato a mano que lo contradecía —ese agente llevaba meses sirviendo— y no se miró hasta que lo puso encima de la mesa quien lo tenía. Ningún consumidor estuvo roto en ningún momento
 
 ## [2026-09-17] PR #103 - Feat: strands-agents 1.56 y el BidiAgent por el camino unificado (#69) (@iguinea)
 

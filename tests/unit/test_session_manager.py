@@ -668,10 +668,13 @@ class TestMetadataToolSpec:
         """`ToolSpec.inputSchema` is a tagged union whose only member is `json`.
 
         A hand-written schema was assigned to `inputSchema` verbatim, without
-        that wrapper. Every provider reads `inputSchema["json"]`: the Anthropic
-        one raised `KeyError`, and Bedrock sent the bare schema, which botocore
-        rejects before the request leaves the process -- so an agent holding
-        this tool failed on its *first* call, whether or not it used it (#47).
+        that wrapper. No agent ever broke over it: `validate_tool_spec()` wraps
+        a bare schema before it reaches a provider, in every strands from 1.25
+        to 1.56. What that repair costs is the point -- `normalize_schema()`
+        invents the descriptions it does not find, so the model was handed
+        `"Property action"` instead of what the docstring says -- and it is a
+        backwards-compatibility branch, which is not something to depend on
+        (#47).
         """
         spec = manager.get_metadata_tool().tool_spec
 
@@ -679,10 +682,11 @@ class TestMetadataToolSpec:
         assert spec["inputSchema"]["json"]["required"] == ["action"]
 
     def test_botocore_accepts_the_request_that_carries_it(self, manager):
-        """The regression, checked against the API contract itself.
+        """The spec checked against the API contract itself, off the registry.
 
-        No AWS call and no credentials: botocore validates the parameters
-        against the service model it ships.
+        A `tool_spec` handed straight to a provider gets no repair: this is the
+        path where a bare schema is really rejected, and botocore says so
+        without credentials or an AWS call, against the service model it ships.
         """
         import botocore.session
         from botocore.validate import validate_parameters
@@ -708,14 +712,22 @@ class TestMetadataToolSpec:
         assert "dot notation" in spec["description"].lower()
         assert "replace" in spec["description"].lower()
 
-    def test_every_parameter_carries_its_description(self, manager):
+    def test_every_parameter_carries_its_own_description(self, manager):
+        """Its own, not the one `normalize_schema()` invents.
+
+        That is what the model actually read before: the repair the tool
+        registry applies to a schema with no descriptions fills them with
+        `"Property <name>"`, which is well-formed and says nothing.
+        """
         properties = manager.get_metadata_tool().tool_spec["inputSchema"]["json"][
             "properties"
         ]
 
         assert set(properties) == {"action", "metadata", "keys"}
         for name, schema in properties.items():
-            assert schema.get("description"), f"{name} has no description"
+            description = schema.get("description")
+            assert description, f"{name} has no description"
+            assert description != f"Property {name}", f"{name} has the placeholder"
 
 
 class TestMetadataToolPaths:
@@ -760,7 +772,6 @@ class TestMetadataToolPaths:
         result = stored(action="get", keys=["user.name", "user.surname"])
 
         assert "Ana" in result
-        assert "surname" not in result
 
     def test_a_dict_value_warns_that_it_replaced_the_subdocument(
         self, stored, fake_repo
@@ -784,6 +795,59 @@ class TestMetadataToolPaths:
             "name": "Eva",
             "zip": "28001",
         }
+
+
+class TestMetadataToolNamesWhatIsMissing:
+    """An absence the model cannot see is an absence it cannot act on (#107).
+
+    Of the three shapes a batched read can take, only the mixed one was silent:
+    nothing found says so, everything found is self-evident, and some found
+    carried what existed and no word about the rest. That is the shape a model
+    produces whenever it groups its reads, and the one where it most needs to
+    know -- it can neither retry under another name nor conclude that the data
+    does not live in metadata at all.
+    """
+
+    @pytest.fixture
+    def stored(self, manager_fake):
+        manager_fake.update_metadata(
+            {"account": "A-21", "session_id": "abc", "cleared": None}
+        )
+        return manager_fake.get_metadata_tool()
+
+    def test_a_mixed_request_names_what_was_not_found(self, stored):
+        result = stored(action="get", keys=["account", "absent", "also_absent"])
+
+        assert "A-21" in result
+        assert "Not found: ['absent', 'also_absent']" in result
+
+    def test_everything_found_says_nothing_extra(self, stored):
+        result = stored(action="get", keys=["account", "session_id"])
+
+        assert "A-21" in result
+        assert "Not found" not in result
+
+    def test_nothing_found_keeps_its_own_reply(self, stored):
+        """Already unambiguous, and the only case that was."""
+        result = stored(action="get", keys=["absent"])
+
+        assert result == "No metadata found for keys: ['absent']"
+
+    def test_a_stored_null_counts_as_found(self, stored):
+        """`None` is a value someone wrote, not a key that is not there."""
+        result = stored(action="get", keys=["cleared", "absent"])
+
+        assert "Not found: ['absent']" in result
+        assert "cleared" in result.split("Not found")[0]
+
+    def test_a_dotted_path_that_is_missing_is_named_too(self, manager_fake):
+        manager_fake.update_metadata({"user": {"name": "Ana"}})
+        tool = manager_fake.get_metadata_tool()
+
+        result = tool(action="get", keys=["user.name", "user.surname"])
+
+        assert "Ana" in result
+        assert "Not found: ['user.surname']" in result
 
 
 # ---------------------------------------------------------------------------
