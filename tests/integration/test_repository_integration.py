@@ -714,6 +714,10 @@ class TestMetadataLifecycle:
         assert result["metadata"]["status"] == "active"
         assert result["metadata"]["priority"] == "high"
 
+    def test_update_missing_session_raises(self, repo, unique_session_id):
+        with pytest.raises(ValueError, match=f"Session {unique_session_id} not found"):
+            repo.update_metadata(unique_session_id, {"status": "active"})
+
     def test_delete_preserves_other_fields(self, repo, unique_session_id):
         session = Session(session_id=unique_session_id, session_type="default")
         repo.create_session(session)
@@ -725,6 +729,10 @@ class TestMetadataLifecycle:
         assert result["metadata"]["a"] == "1"
         assert result["metadata"]["c"] == "3"
         assert "b" not in result["metadata"]
+
+    def test_delete_from_missing_session_raises(self, repo, unique_session_id):
+        with pytest.raises(ValueError, match=f"Session {unique_session_id} not found"):
+            repo.delete_metadata(unique_session_id, ["status"])
 
 
 # ---------------------------------------------------------------------------
@@ -742,6 +750,10 @@ class TestFeedbackLifecycle:
 
         feedbacks = repo.get_feedbacks(unique_session_id)
         assert len(feedbacks) == 2
+
+    def test_add_to_missing_session_raises(self, repo, unique_session_id):
+        with pytest.raises(ValueError, match=f"Session {unique_session_id} not found"):
+            repo.add_feedback(unique_session_id, {"rating": "up"})
 
     def test_created_at_auto_added(self, repo, unique_session_id):
         session = Session(session_id=unique_session_id, session_type="default")

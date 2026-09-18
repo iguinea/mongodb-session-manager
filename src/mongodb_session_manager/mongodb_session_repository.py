@@ -1163,14 +1163,17 @@ class MongoDBSessionRepository(SessionRepository):
             ValueError: If any key has an empty segment, a segment starting with
                 `$` or a NUL byte. The whole batch is checked first, so nothing
                 is written.
+            ValueError: If the session does not exist.
         """
         # Dot notation preserves the existing values of every other key.
         set_operations = self._prefixed("metadata", metadata, "metadata key")
         try:
-            self.collection.update_one(
+            result = self.collection.update_one(
                 {"_id": session_id},
                 {"$set": set_operations},
             )
+            if result.matched_count == 0:
+                raise ValueError(f"Session {session_id} not found")
         except PyMongoError as e:
             logger.error(f"Failed to update metadata for session {session_id}: {e}")
             raise
@@ -1184,15 +1187,18 @@ class MongoDBSessionRepository(SessionRepository):
 
         Raises:
             ValueError: Under the same rule as update_metadata(), before any write.
+            ValueError: If the session does not exist.
         """
         unset_operations = self._prefixed(
             "metadata", dict.fromkeys(metadata_keys, ""), "metadata key"
         )
         try:
-            self.collection.update_one(
+            result = self.collection.update_one(
                 {"_id": session_id},
                 {"$unset": unset_operations},
             )
+            if result.matched_count == 0:
+                raise ValueError(f"Session {session_id} not found")
         except PyMongoError as e:
             logger.error(
                 f"Failed to delete metadata keys {metadata_keys} for session {session_id}: {e}"
@@ -1200,18 +1206,24 @@ class MongoDBSessionRepository(SessionRepository):
             raise
 
     def add_feedback(self, session_id: str, feedback: dict[str, Any]) -> None:
-        """Add feedback to the session."""
+        """Add feedback to the session.
+
+        Raises:
+            ValueError: If the session does not exist.
+        """
         try:
             now = datetime.now(UTC)
             feedback_doc = {**feedback, "created_at": now}
 
-            self.collection.update_one(
+            result = self.collection.update_one(
                 {"_id": session_id},
                 {
                     _PUSH: {"feedbacks": feedback_doc},
                     "$set": {"updated_at": now},
                 },
             )
+            if result.matched_count == 0:
+                raise ValueError(f"Session {session_id} not found")
             logger.info(f"Added feedback to session {session_id}")
         except PyMongoError as e:
             logger.error(f"Failed to add feedback to session {session_id}: {e}")

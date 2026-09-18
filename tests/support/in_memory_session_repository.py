@@ -563,7 +563,7 @@ class InMemorySessionRepository(SessionRepository):
         validate_field_paths(metadata, "metadata key")
         session = self._sessions.get(session_id)
         if session is None:
-            return
+            raise ValueError(f"Session {session_id} not found")
         for key, value in metadata.items():
             _set_dotted(session["metadata"], key, copy.deepcopy(value))
 
@@ -579,7 +579,7 @@ class InMemorySessionRepository(SessionRepository):
         validate_field_paths(metadata_keys, "metadata key")
         session = self._sessions.get(session_id)
         if session is None:
-            return
+            raise ValueError(f"Session {session_id} not found")
         for key in metadata_keys:
             _unset_dotted(session["metadata"], key)
 
@@ -587,7 +587,7 @@ class InMemorySessionRepository(SessionRepository):
         """Append feedback to the session."""
         session = self._sessions.get(session_id)
         if session is None:
-            return
+            raise ValueError(f"Session {session_id} not found")
         now = datetime.now(UTC)
         session["feedbacks"].append({**copy.deepcopy(feedback), "created_at": now})
         session["updated_at"] = now

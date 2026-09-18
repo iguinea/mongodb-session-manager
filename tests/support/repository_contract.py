@@ -117,6 +117,19 @@ METADATA_CALLS = [
     ),
 ]
 
+MISSING_SESSION_CALLS = [
+    pytest.param(
+        lambda s, sid: s.update_metadata(sid, {"status": "active"}),
+        id="update_metadata",
+    ),
+    pytest.param(
+        lambda s, sid: s.delete_metadata(sid, ["status"]), id="delete_metadata"
+    ),
+    pytest.param(
+        lambda s, sid: s.add_feedback(sid, {"rating": "up"}), id="add_feedback"
+    ),
+]
+
 
 class SessionRepositoryContract:
     """Shared behaviour of the repository, independent of where it stores."""
@@ -677,6 +690,11 @@ class SessionRepositoryContract:
         store.delete_metadata(populated, ["user.name"])
 
         assert store.get_metadata(populated)["metadata"] == {"user": {"role": "admin"}}
+
+    @pytest.mark.parametrize("call", MISSING_SESSION_CALLS)
+    def test_session_writes_without_session_raise(self, store, call):
+        with pytest.raises(ValueError, match="not found"):
+            call(store, "nope")
 
     # -- Names inside paths (#79) ------------------------------------------
     #
