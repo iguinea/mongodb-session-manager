@@ -10,6 +10,10 @@
 - Cambia el **texto** de una respuesta del tool, que es contrato con el modelo y no con el código: ningún consumidor parsea ese string. Sin cambios de esquema ni migración
 - **DocumentDB**: sin operadores ni patrones de consulta nuevos. Se resuelve sobre el documento que la lectura ya trajo, sin round-trips adicionales
 
+## [2026-09-18] PR #106 - Docs: regla de procedencia anonimizada para los repos consumidores (@iguinea)
+
+- Docs: regla de procedencia anonimizada para los repos consumidores
+
 ## [2026-09-18] PR #105 - Docs: corregir el alcance del inputSchema mal formado (#47) (@iguinea)
 
 - Docs: corregir el alcance del inputSchema mal formado (#47)

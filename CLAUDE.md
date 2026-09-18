@@ -338,6 +338,7 @@ Guias de workflow en `.claude/rules/workflow-*.md`. Ver detalle en cada fichero:
 | Project Documentation | `workflow-docs.md` |
 | Persistence Agnostic | `workflow-persistence.md` |
 | Issue-Driven Dev | `workflow-issue-driven.md` |
+| Procedencia anonimizada | `workflow-consumer-privacy.md` |
 
 ## Coding Rules
 
