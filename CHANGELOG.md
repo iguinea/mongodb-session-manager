@@ -1,5 +1,10 @@
 # Changelog
 
+## [2026-09-18] PR #105 - Docs: corregir el alcance del inputSchema mal formado (#47) (@iguinea)
+
+- Docs: corregir el alcance del inputSchema mal formado (#47)
+- Docs: retirar de la nota la identificación del consumidor (#47)
+
 ## [2026-09-18] PR #104 - Fix: el tool de metadata rompía la petición y no leía lo que escribía (#47) (@iguinea)
 
 - Fix: el tool de metadata rompía la petición y no leía lo que escribía…
