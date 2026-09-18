@@ -14,6 +14,25 @@
 - Feat: el tool de metadata nombra las claves que no encontró (#107)
 - Merge remote-tracking branch 'origin/main' into feature/issue-107-nam…
 
+## [1.0.0] - Sin publicar
+
+### Changed
+- **Breaking: las dependencias de runtime son solo las que importa `src/`** (#111): `pymongo`, `strands-agents` y `boto3`. `fastapi`, `uvicorn`, `uvloop` y `strands-agents-tools` las usaban solo los ejemplos y los tests, y se instalaban en cada consumidor; pasan al grupo `examples` (PEP 735), que no se publica con el paquete. `pydantic-settings` no lo importaba nadie y desaparece. Una instalación limpia baja de **83 a 51 paquetes**. **Quien importe alguno de esos paquetes sin declararlo tiene que declararlo**: se detectó un consumidor que importa `fastapi` en dos tests y solo lo recibía a través de esta librería
+- **El extra `dev` pasa a ser un grupo**, que incluye `examples` porque los tests ejercitan el ejemplo de FastAPI. `uv sync` a secas ya instala pytest y ruff —antes hacía falta `--extra dev`—; con pip, `pip install -e . --group dev` (pip 25.1 o posterior). El CI sincroniza con `uv sync --locked`
+- **`tests/unit/test_runtime_dependencies.py`** compara lo declarado con lo que importa `src/`, en los dos sentidos. El segundo es el que importa: la suite corre con el grupo `dev`, que instala también lo de los ejemplos, así que un import sin declarar pasaría todos los tests y fallaría en una instalación limpia
+
+### Security
+- **`uv lock --upgrade`**: `pip-audit` sobre el lock marcaba 13 paquetes con avisos conocidos (`aiohttp`, `starlette`, `cryptography`, `pyjwt`, `urllib3`, `python-multipart`, `mcp`, `requests`, `idna`, `click`, `pygments`, `python-dotenv`, `soupsieve`); ahora ninguno. Suben de versión mayor `mcp` 1.26 → 2.1 (strands 1.56 admite `<2.2` y trae su capa de compatibilidad), `starlette` 0.50 → 1.6, `cryptography` 46 → 50, `wrapt` 1 → 2 y `rich` 14 → 15. `pymongo` no se mueve (4.18.1) y `strands-agents` ya estaba en su última versión, 1.56.0
+- El lock solo decide qué versiones usan el CI y el desarrollo: cada consumidor resuelve las suyas. Lo que sí cambia para ellos es que la librería deja de arrastrar `fastapi` y, con él, `python-multipart`; `starlette` sigue llegando por `strands-agents` → `mcp`
+
+### Measured
+- Harness de #60, perfil smoke, **la misma librería con los dos locks**: base, un worktree de `main`; head, esta rama. MongoDB 8.2.7 local, 3 pasadas por lado intercaladas con 100 repeticiones: **comandos por operación, reparto por comando y bytes idénticos** en los 7 escenarios, y la mejor p50 del head entre −0,4 % y −7,5 %, con rangos solapados — ruido, sin regresión
+- DocumentDB 5.0 dev, calentamiento descartado y 2 pasadas por lado intercaladas con 30 repeticiones: **comandos y bytes idénticos**, y de −0,8 % a +0,4 % en cinco escenarios. `turn.supervisor` sale +3,4 % (h10) y +1,6 % (h100) en la mejor p50, pero con rangos solapados y la p95 bajando (610 → 597 ms, 609 → 599 ms). Si el lock nuevo costara CPU en ese turno, se vería antes en MongoDB local, donde el mismo escenario sale un 1,8 % y un 2,5 % más rápido
+- Tablas y ficheros en `artifacts/issue-111-benchmark-dependencies.md`
+
+### Notes
+- **Sin cambios de código, de esquema ni de comportamiento**: MongoDB, DocumentDB, la forma de los documentos y quien los lea en bruto no se enteran. 1022 tests en verde con el lock nuevo, 161 de integración contra MongoDB 8.2.7
+
 ## [0.24.0] - 2026-09-18
 
 ### Changed

@@ -10,24 +10,28 @@ This guide will help you install MongoDB Session Manager and all its dependencie
 - **Package Manager**: UV (recommended) or pip
 
 ### Python Dependencies
-The library has the following core dependencies:
+Installing the library brings only what its code imports:
 
 - `pymongo>=4.16.0` - MongoDB Python driver
 - `strands-agents>=1.56.0` - Core Strands Agents SDK
-- `strands-agents-tools>=0.2.19` - Strands tools
-- `fastapi>=0.128.0` - For FastAPI integration
-- `uvloop>=0.22.0` - High-performance event loop
-- `boto3>=1.42.0` - AWS SDK (for hooks)
+- `boto3>=1.42.88` - AWS SDK (for hooks)
+
+FastAPI, uvicorn, uvloop and `strands-agents-tools` are used by the examples
+and the tests, not by the library, so they are not installed with it. If your
+application uses them, declare them yourself. Before 1.0.0 they came in as
+dependencies of this package.
 
 ### Optional Dependencies
 For AWS integrations (SNS/SQS hooks):
 - `python-helpers` - Contains custom_aws.sns and custom_aws.sqs modules
 
-For development:
-- `pytest>=7.4.0`
-- `pytest-cov>=4.1.0`
-- `pytest-mock>=3.11.0`
-- `pytest-asyncio>=0.21.0`
+In a clone of the repository, two dependency groups
+([PEP 735](https://peps.python.org/pep-0735/)) cover the rest. Neither is
+published with the package:
+
+- `examples`: `fastapi`, `uvicorn`, `uvloop`, `strands-agents-tools`
+- `dev`: `pytest`, `pytest-cov`, `pytest-mock`, `pytest-asyncio`, `ruff`,
+  and the `examples` group, because the tests exercise the FastAPI example
 
 ## Installation Methods
 
@@ -50,7 +54,8 @@ powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
 git clone https://github.com/iguinea/mongodb-session-manager.git
 cd mongodb-session-manager
 
-# Install all dependencies
+# Install the library, the examples' stack and the dev tools
+# (`uv sync` installs the `dev` group by default)
 uv sync
 
 # Install with AWS integrations
@@ -81,8 +86,11 @@ source venv/bin/activate
 # On Windows:
 venv\Scripts\activate
 
-# Install dependencies
+# Install the library
 pip install -e .
+
+# To run the examples too (pip >= 25.1)
+pip install --group examples
 
 # Optional: Install AWS integration dependencies
 pip install python-helpers
@@ -93,12 +101,11 @@ pip install python-helpers
 For contributing to the project or running tests:
 
 ```bash
-# Using UV
+# Using UV: the `dev` group is installed by default
 uv sync
-uv add --dev pytest pytest-cov pytest-mock pytest-asyncio
 
-# Using pip
-pip install -e ".[dev]"
+# Using pip (>= 25.1)
+pip install -e . --group dev
 ```
 
 ## MongoDB Setup

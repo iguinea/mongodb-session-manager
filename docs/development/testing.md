@@ -31,11 +31,9 @@ The project uses **pytest** as its testing framework, along with several pytest 
 Tests are run using UV:
 
 ```bash
-# Install all dependencies including test dependencies
+# Install the library and the `dev` group (pytest, ruff and the examples'
+# stack, which the tests exercise). `uv sync` installs `dev` by default.
 uv sync
-
-# Or install test dependencies separately
-uv add --dev pytest pytest-cov pytest-mock pytest-asyncio
 ```
 
 ## Running Tests

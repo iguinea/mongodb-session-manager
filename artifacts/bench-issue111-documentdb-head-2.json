@@ -1,0 +1,927 @@
+{
+  "schema_version": 1,
+  "run": {
+    "run_id": "20260918-0ecb02f3",
+    "finished_at": "2026-09-18T05:19:35.308491+00:00",
+    "ping_before": {
+      "n": 20,
+      "min_ms": 46.083749999525025,
+      "p50_ms": 47.43066697847098,
+      "p95_ms": 48.35362499579787,
+      "p99_ms": 91.83829199173488,
+      "max_ms": 91.83829199173488,
+      "saturated": [
+        "p99"
+      ]
+    },
+    "ping_after": {
+      "n": 20,
+      "min_ms": 46.85354098910466,
+      "p50_ms": 47.68370799138211,
+      "p95_ms": 53.248624986736104,
+      "p99_ms": 92.3323749739211,
+      "max_ms": 92.3323749739211,
+      "saturated": [
+        "p99"
+      ]
+    }
+  },
+  "environment": {
+    "server_version": "5.0.0",
+    "engine_hint": "documentdb-or-compatible",
+    "topology": "Single",
+    "set_name": "rs0",
+    "max_wire_version": 13,
+    "read_preference": "Primary()",
+    "uri_options": {
+      "directConnection": true,
+      "tls": true,
+      "retryWrites": false
+    },
+    "pool": {
+      "max_pool_size": 100,
+      "min_pool_size": 0,
+      "wait_queue_timeout": null,
+      "max_idle_time_seconds": null
+    },
+    "pymongo_version": "4.18.1",
+    "python_version": "3.12.13",
+    "package_version": "0.24.0",
+    "strands_version": "1.56.0",
+    "label": "DocumentDB 5.0 dev eu-west-1 \u00b7 t\u00fanel SSH bastion",
+    "notes": [
+      "Bytes are re-encoded from the decoded reply: they exclude the OP_MSG header and do not reflect a negotiated compressor.",
+      "Latency includes everything between this process and the server, tunnels and virtualised Docker networking included.",
+      "lock de #111: mcp 2.1.1, starlette 1.6, cryptography 50"
+    ]
+  },
+  "config": {
+    "profile": "smoke",
+    "warmups": 5,
+    "repetitions": 30,
+    "volume_repetitions": 3,
+    "baseline_seconds": 1.0,
+    "execution_mode": "direct",
+    "database_name": "benchmark_mongodb_session_manager",
+    "collection_name": "sessions",
+    "synthetic_messages_planned": 1014
+  },
+  "cleanup": {
+    "registered": 44,
+    "deleted": 44,
+    "leftovers": 0,
+    "kept": false,
+    "describe": "44/44 synthetic sessions deleted"
+  },
+  "results": [
+    {
+      "scenario": "create/h0/c1",
+      "operation": "create",
+      "history": 0,
+      "concurrency": 1,
+      "execution_mode": "direct",
+      "latency": {
+        "n": 30,
+        "min_ms": 152.9261670075357,
+        "p50_ms": 156.91950000473298,
+        "p95_ms": 209.90849999361672,
+        "p99_ms": 334.16875000693835,
+        "max_ms": 334.16875000693835,
+        "saturated": [
+          "p99"
+        ]
+      },
+      "warmup": {
+        "n": 5,
+        "min_ms": 154.5082920056302,
+        "p50_ms": 155.92054100125097,
+        "p95_ms": 181.17666701436974,
+        "p99_ms": 181.17666701436974,
+        "max_ms": 181.17666701436974,
+        "saturated": [
+          "p95",
+          "p99"
+        ]
+      },
+      "commands": {
+        "total": 180,
+        "per_operation": 6.0,
+        "by_name": {
+          "find": 30,
+          "insert": 30,
+          "update": 120
+        }
+      },
+      "server_ms": {
+        "find": {
+          "n": 30,
+          "min_ms": 47.0,
+          "p50_ms": 47.496,
+          "p95_ms": 66.462,
+          "p99_ms": 93.193,
+          "max_ms": 93.193,
+          "saturated": [
+            "p99"
+          ]
+        },
+        "insert": {
+          "n": 30,
+          "min_ms": 49.4,
+          "p50_ms": 50.475,
+          "p95_ms": 68.669,
+          "p99_ms": 92.655,
+          "max_ms": 92.655,
+          "saturated": [
+            "p99"
+          ]
+        },
+        "update": {
+          "n": 120,
+          "min_ms": 49.015,
+          "p50_ms": 50.855,
+          "p95_ms": 93.602,
+          "p99_ms": 105.756,
+          "max_ms": 186.917,
+          "saturated": []
+        }
+      },
+      "bytes": {
+        "request": 17896,
+        "reply": 446,
+        "repetitions": 3
+      },
+      "pool": {
+        "wait": {
+          "n": 180,
+          "min_ms": 0.004375004209578037,
+          "p50_ms": 0.007333001121878624,
+          "p95_ms": 0.011999974958598614,
+          "p99_ms": 0.017000013031065464,
+          "max_ms": 0.0372079957742244,
+          "saturated": []
+        },
+        "timeouts": 0,
+        "reasons": {}
+      },
+      "loop_lag": {
+        "lag": {
+          "n": 30,
+          "min_ms": 281.3211250177119,
+          "p50_ms": 288.7805830105208,
+          "p95_ms": 375.83720800466835,
+          "p99_ms": 551.5264170244336,
+          "max_ms": 551.5264170244336,
+          "saturated": [
+            "p99"
+          ]
+        },
+        "baseline": {
+          "n": 48,
+          "min_ms": 0.10104200919158757,
+          "p50_ms": 1.063083007466048,
+          "p95_ms": 1.0933750309050083,
+          "p99_ms": 1.11087501863949,
+          "max_ms": 1.11087501863949,
+          "saturated": [
+            "p99"
+          ]
+        },
+        "interval_ms": 20.0,
+        "note": "Heartbeat drift on the loop that ran the turns. The baseline is the machine's own jitter, shown for scale and never subtracted."
+      },
+      "throughput": {
+        "operations": 30,
+        "elapsed_seconds": 9.920990040991455,
+        "operations_per_second": 3.0238917563717207
+      },
+      "errors": 0,
+      "checks": [],
+      "passed": true
+    },
+    {
+      "scenario": "restore/h10/c1",
+      "operation": "restore",
+      "history": 10,
+      "concurrency": 1,
+      "execution_mode": "direct",
+      "latency": {
+        "n": 30,
+        "min_ms": 144.3829580093734,
+        "p50_ms": 147.29341701604426,
+        "p95_ms": 192.65083299251273,
+        "p99_ms": 192.86929199006408,
+        "max_ms": 192.86929199006408,
+        "saturated": [
+          "p99"
+        ]
+      },
+      "warmup": {
+        "n": 5,
+        "min_ms": 146.00825001252815,
+        "p50_ms": 147.10016699973494,
+        "p95_ms": 171.48949997499585,
+        "p99_ms": 171.48949997499585,
+        "max_ms": 171.48949997499585,
+        "saturated": [
+          "p95",
+          "p99"
+        ]
+      },
+      "commands": {
+        "total": 90,
+        "per_operation": 3.0,
+        "by_name": {
+          "find": 60,
+          "aggregate": 30
+        }
+      },
+      "server_ms": {
+        "find": {
+          "n": 60,
+          "min_ms": 45.75,
+          "p50_ms": 47.369,
+          "p95_ms": 58.287,
+          "p99_ms": 93.398,
+          "max_ms": 93.398,
+          "saturated": [
+            "p99"
+          ]
+        },
+        "aggregate": {
+          "n": 30,
+          "min_ms": 49.244,
+          "p50_ms": 50.793,
+          "p95_ms": 56.46,
+          "p99_ms": 72.564,
+          "max_ms": 72.564,
+          "saturated": [
+            "p99"
+          ]
+        }
+      },
+      "bytes": {
+        "request": 1340,
+        "reply": 8553,
+        "repetitions": 3
+      },
+      "pool": {
+        "wait": {
+          "n": 90,
+          "min_ms": 0.0050419766921550035,
+          "p50_ms": 0.007041002390906215,
+          "p95_ms": 0.010208023013547063,
+          "p99_ms": 0.04791698302142322,
+          "max_ms": 0.04791698302142322,
+          "saturated": [
+            "p99"
+          ]
+        },
+        "timeouts": 0,
+        "reasons": {}
+      },
+      "loop_lag": {
+        "lag": {
+          "n": 30,
+          "min_ms": 124.49091699090786,
+          "p50_ms": 127.43162500555627,
+          "p95_ms": 172.77870801626705,
+          "p99_ms": 173.00999999861233,
+          "max_ms": 173.00999999861233,
+          "saturated": [
+            "p99"
+          ]
+        },
+        "baseline": {
+          "n": 48,
+          "min_ms": 0.13670799671672285,
+          "p50_ms": 1.0581250244285911,
+          "p95_ms": 1.0966249974444509,
+          "p99_ms": 1.1310419940855354,
+          "max_ms": 1.1310419940855354,
+          "saturated": [
+            "p99"
+          ]
+        },
+        "interval_ms": 20.0,
+        "note": "Heartbeat drift on the loop that ran the turns. The baseline is the machine's own jitter, shown for scale and never subtracted."
+      },
+      "throughput": {
+        "operations": 30,
+        "elapsed_seconds": 4.569891542021651,
+        "operations_per_second": 6.564707219884797
+      },
+      "errors": 0,
+      "checks": [],
+      "passed": true
+    },
+    {
+      "scenario": "turn.simple/h10/c1",
+      "operation": "turn.simple",
+      "history": 10,
+      "concurrency": 1,
+      "execution_mode": "direct",
+      "latency": {
+        "n": 30,
+        "min_ms": 104.09599999547936,
+        "p50_ms": 162.23729201010428,
+        "p95_ms": 195.96712500788271,
+        "p99_ms": 242.49149998649955,
+        "max_ms": 242.49149998649955,
+        "saturated": [
+          "p99"
+        ]
+      },
+      "warmup": {
+        "n": 5,
+        "min_ms": 103.14141699927859,
+        "p50_ms": 105.71629198966548,
+        "p95_ms": 157.4092500086408,
+        "p99_ms": 157.4092500086408,
+        "max_ms": 157.4092500086408,
+        "saturated": [
+          "p95",
+          "p99"
+        ]
+      },
+      "commands": {
+        "total": 170,
+        "per_operation": 5.666666666666667,
+        "by_name": {
+          "find": 60,
+          "aggregate": 30,
+          "update": 80
+        }
+      },
+      "server_ms": {
+        "find": {
+          "n": 60,
+          "min_ms": 47.01,
+          "p50_ms": 49.033,
+          "p95_ms": 95.828,
+          "p99_ms": 114.491,
+          "max_ms": 114.491,
+          "saturated": [
+            "p99"
+          ]
+        },
+        "aggregate": {
+          "n": 30,
+          "min_ms": 51.158,
+          "p50_ms": 99.372,
+          "p95_ms": 117.098,
+          "p99_ms": 171.618,
+          "max_ms": 171.618,
+          "saturated": [
+            "p99"
+          ]
+        },
+        "update": {
+          "n": 80,
+          "min_ms": 51.184,
+          "p50_ms": 53.46,
+          "p95_ms": 65.616,
+          "p99_ms": 162.46,
+          "max_ms": 162.46,
+          "saturated": [
+            "p99"
+          ]
+        }
+      },
+      "bytes": {
+        "request": 3881,
+        "reply": 37089,
+        "repetitions": 3
+      },
+      "pool": {
+        "wait": {
+          "n": 170,
+          "min_ms": 0.004917004844173789,
+          "p50_ms": 0.00825000461190939,
+          "p95_ms": 0.01624997821636498,
+          "p99_ms": 0.01937500201165676,
+          "max_ms": 0.033666990930214524,
+          "saturated": []
+        },
+        "timeouts": 0,
+        "reasons": {}
+      },
+      "loop_lag": {
+        "lag": {
+          "n": 30,
+          "min_ms": 234.5742080360651,
+          "p50_ms": 340.12758400058374,
+          "p95_ms": 404.05154202017,
+          "p99_ms": 420.1917910249904,
+          "max_ms": 420.1917910249904,
+          "saturated": [
+            "p99"
+          ]
+        },
+        "baseline": {
+          "n": 48,
+          "min_ms": 0.11324998922646046,
+          "p50_ms": 1.0529170103836805,
+          "p95_ms": 1.1092500062659383,
+          "p99_ms": 1.1544580047484487,
+          "max_ms": 1.1544580047484487,
+          "saturated": [
+            "p99"
+          ]
+        },
+        "interval_ms": 20.0,
+        "note": "Heartbeat drift on the loop that ran the turns. The baseline is the machine's own jitter, shown for scale and never subtracted."
+      },
+      "throughput": {
+        "operations": 30,
+        "elapsed_seconds": 10.758918042003643,
+        "operations_per_second": 2.788384471642752
+      },
+      "errors": 0,
+      "checks": [],
+      "passed": true
+    },
+    {
+      "scenario": "turn.supervisor/h10/c1",
+      "operation": "turn.supervisor",
+      "history": 10,
+      "concurrency": 1,
+      "execution_mode": "direct",
+      "latency": {
+        "n": 30,
+        "min_ms": 391.2688329874072,
+        "p50_ms": 537.3610829992685,
+        "p95_ms": 603.0119170027319,
+        "p99_ms": 672.5462079921272,
+        "max_ms": 672.5462079921272,
+        "saturated": [
+          "p99"
+        ]
+      },
+      "warmup": {
+        "n": 5,
+        "min_ms": 368.30804200144485,
+        "p50_ms": 371.21866599773057,
+        "p95_ms": 500.7130419835448,
+        "p99_ms": 500.7130419835448,
+        "max_ms": 500.7130419835448,
+        "saturated": [
+          "p95",
+          "p99"
+        ]
+      },
+      "commands": {
+        "total": 343,
+        "per_operation": 11.433333333333334,
+        "by_name": {
+          "find": 120,
+          "aggregate": 60,
+          "update": 163
+        }
+      },
+      "server_ms": {
+        "find": {
+          "n": 120,
+          "min_ms": 46.684,
+          "p50_ms": 48.905,
+          "p95_ms": 95.787,
+          "p99_ms": 105.901,
+          "max_ms": 113.502,
+          "saturated": []
+        },
+        "aggregate": {
+          "n": 60,
+          "min_ms": 50.721,
+          "p50_ms": 99.685,
+          "p95_ms": 118.775,
+          "p99_ms": 157.576,
+          "max_ms": 157.576,
+          "saturated": [
+            "p99"
+          ]
+        },
+        "update": {
+          "n": 163,
+          "min_ms": 52.246,
+          "p50_ms": 55.789,
+          "p95_ms": 68.255,
+          "p99_ms": 93.699,
+          "max_ms": 97.742,
+          "saturated": []
+        }
+      },
+      "bytes": {
+        "request": 8952,
+        "reply": 74775,
+        "repetitions": 3
+      },
+      "pool": {
+        "wait": {
+          "n": 343,
+          "min_ms": 0.004958012141287327,
+          "p50_ms": 0.0077500008046627045,
+          "p95_ms": 0.013124983524903655,
+          "p99_ms": 0.02116698306053877,
+          "max_ms": 0.0425000034738332,
+          "saturated": []
+        },
+        "timeouts": 0,
+        "reasons": {}
+      },
+      "loop_lag": {
+        "lag": {
+          "n": 553,
+          "min_ms": 0.06562500493600965,
+          "p50_ms": 1.065542019205168,
+          "p95_ms": 228.01129199797288,
+          "p99_ms": 284.4501250074245,
+          "max_ms": 321.8233330117073,
+          "saturated": []
+        },
+        "baseline": {
+          "n": 48,
+          "min_ms": 0.06837499677203596,
+          "p50_ms": 1.0610420140437782,
+          "p95_ms": 1.1403750104364008,
+          "p99_ms": 1.14170802407898,
+          "max_ms": 1.14170802407898,
+          "saturated": [
+            "p99"
+          ]
+        },
+        "interval_ms": 20.0,
+        "note": "Heartbeat drift on the loop that ran the turns. The baseline is the machine's own jitter, shown for scale and never subtracted."
+      },
+      "throughput": {
+        "operations": 30,
+        "elapsed_seconds": 22.22058687498793,
+        "operations_per_second": 1.3500993546560545
+      },
+      "errors": 0,
+      "checks": [],
+      "passed": true
+    },
+    {
+      "scenario": "restore/h100/c1",
+      "operation": "restore",
+      "history": 100,
+      "concurrency": 1,
+      "execution_mode": "direct",
+      "latency": {
+        "n": 30,
+        "min_ms": 192.71029200172052,
+        "p50_ms": 194.86766701447777,
+        "p95_ms": 351.0772919980809,
+        "p99_ms": 475.811790995067,
+        "max_ms": 475.811790995067,
+        "saturated": [
+          "p99"
+        ]
+      },
+      "warmup": {
+        "n": 5,
+        "min_ms": 193.6214169836603,
+        "p50_ms": 212.34745800029486,
+        "p95_ms": 221.3102079986129,
+        "p99_ms": 221.3102079986129,
+        "max_ms": 221.3102079986129,
+        "saturated": [
+          "p95",
+          "p99"
+        ]
+      },
+      "commands": {
+        "total": 90,
+        "per_operation": 3.0,
+        "by_name": {
+          "find": 60,
+          "aggregate": 30
+        }
+      },
+      "server_ms": {
+        "find": {
+          "n": 60,
+          "min_ms": 45.754,
+          "p50_ms": 47.271,
+          "p95_ms": 68.426,
+          "p99_ms": 135.976,
+          "max_ms": 135.976,
+          "saturated": [
+            "p99"
+          ]
+        },
+        "aggregate": {
+          "n": 30,
+          "min_ms": 97.376,
+          "p50_ms": 98.85,
+          "p95_ms": 253.684,
+          "p99_ms": 255.996,
+          "max_ms": 255.996,
+          "saturated": [
+            "p99"
+          ]
+        }
+      },
+      "bytes": {
+        "request": 1343,
+        "reply": 76191,
+        "repetitions": 3
+      },
+      "pool": {
+        "wait": {
+          "n": 90,
+          "min_ms": 0.0050000089686363935,
+          "p50_ms": 0.007041991921141744,
+          "p95_ms": 0.0112500274553895,
+          "p99_ms": 0.04495901521295309,
+          "max_ms": 0.04495901521295309,
+          "saturated": [
+            "p99"
+          ]
+        },
+        "timeouts": 0,
+        "reasons": {}
+      },
+      "loop_lag": {
+        "lag": {
+          "n": 30,
+          "min_ms": 172.82170802354813,
+          "p50_ms": 174.98404200887308,
+          "p95_ms": 331.2162499933038,
+          "p99_ms": 455.9775830130093,
+          "max_ms": 455.9775830130093,
+          "saturated": [
+            "p99"
+          ]
+        },
+        "baseline": {
+          "n": 48,
+          "min_ms": 0.07999999797903001,
+          "p50_ms": 1.0759170108940452,
+          "p95_ms": 1.127124996855855,
+          "p99_ms": 1.1599580175243318,
+          "max_ms": 1.1599580175243318,
+          "saturated": [
+            "p99"
+          ]
+        },
+        "interval_ms": 20.0,
+        "note": "Heartbeat drift on the loop that ran the turns. The baseline is the machine's own jitter, shown for scale and never subtracted."
+      },
+      "throughput": {
+        "operations": 30,
+        "elapsed_seconds": 6.428897958016023,
+        "operations_per_second": 4.666429642516536
+      },
+      "errors": 0,
+      "checks": [],
+      "passed": true
+    },
+    {
+      "scenario": "turn.simple/h100/c1",
+      "operation": "turn.simple",
+      "history": 100,
+      "concurrency": 1,
+      "execution_mode": "direct",
+      "latency": {
+        "n": 30,
+        "min_ms": 162.2212920046877,
+        "p50_ms": 170.46562500763685,
+        "p95_ms": 188.61129198921844,
+        "p99_ms": 267.1084590256214,
+        "max_ms": 267.1084590256214,
+        "saturated": [
+          "p99"
+        ]
+      },
+      "warmup": {
+        "n": 5,
+        "min_ms": 166.36750000179745,
+        "p50_ms": 173.20087499683723,
+        "p95_ms": 226.51066700927913,
+        "p99_ms": 226.51066700927913,
+        "max_ms": 226.51066700927913,
+        "saturated": [
+          "p95",
+          "p99"
+        ]
+      },
+      "commands": {
+        "total": 180,
+        "per_operation": 6.0,
+        "by_name": {
+          "find": 60,
+          "aggregate": 30,
+          "update": 90
+        }
+      },
+      "server_ms": {
+        "find": {
+          "n": 60,
+          "min_ms": 46.487,
+          "p50_ms": 48.858,
+          "p95_ms": 94.564,
+          "p99_ms": 95.624,
+          "max_ms": 95.624,
+          "saturated": [
+            "p99"
+          ]
+        },
+        "aggregate": {
+          "n": 30,
+          "min_ms": 57.009,
+          "p50_ms": 100.943,
+          "p95_ms": 127.223,
+          "p99_ms": 143.044,
+          "max_ms": 143.044,
+          "saturated": [
+            "p99"
+          ]
+        },
+        "update": {
+          "n": 90,
+          "min_ms": 52.852,
+          "p50_ms": 55.771,
+          "p95_ms": 71.249,
+          "p99_ms": 102.765,
+          "max_ms": 102.765,
+          "saturated": [
+            "p99"
+          ]
+        }
+      },
+      "bytes": {
+        "request": 3887,
+        "reply": 37092,
+        "repetitions": 3
+      },
+      "pool": {
+        "wait": {
+          "n": 180,
+          "min_ms": 0.0046670029405504465,
+          "p50_ms": 0.007415976142510772,
+          "p95_ms": 0.012042000889778137,
+          "p99_ms": 0.017583020962774754,
+          "max_ms": 0.05208401125855744,
+          "saturated": []
+        },
+        "timeouts": 0,
+        "reasons": {}
+      },
+      "loop_lag": {
+        "lag": {
+          "n": 30,
+          "min_ms": 302.190165995853,
+          "p50_ms": 350.78033301397227,
+          "p95_ms": 413.0336670204997,
+          "p99_ms": 445.2761250140611,
+          "max_ms": 445.2761250140611,
+          "saturated": [
+            "p99"
+          ]
+        },
+        "baseline": {
+          "n": 48,
+          "min_ms": 0.27129199588671327,
+          "p50_ms": 1.0650000185705721,
+          "p95_ms": 1.1186670162715018,
+          "p99_ms": 1.13179101026617,
+          "max_ms": 1.13179101026617,
+          "saturated": [
+            "p99"
+          ]
+        },
+        "interval_ms": 20.0,
+        "note": "Heartbeat drift on the loop that ran the turns. The baseline is the machine's own jitter, shown for scale and never subtracted."
+      },
+      "throughput": {
+        "operations": 30,
+        "elapsed_seconds": 11.485700124991126,
+        "operations_per_second": 2.611943518769447
+      },
+      "errors": 0,
+      "checks": [],
+      "passed": true
+    },
+    {
+      "scenario": "turn.supervisor/h100/c1",
+      "operation": "turn.supervisor",
+      "history": 100,
+      "concurrency": 1,
+      "execution_mode": "direct",
+      "latency": {
+        "n": 30,
+        "min_ms": 434.6664999902714,
+        "p50_ms": 550.1008749997709,
+        "p95_ms": 599.3954580044374,
+        "p99_ms": 638.5486250219401,
+        "max_ms": 638.5486250219401,
+        "saturated": [
+          "p99"
+        ]
+      },
+      "warmup": {
+        "n": 5,
+        "min_ms": 426.63291600183584,
+        "p50_ms": 472.39704098319635,
+        "p95_ms": 627.0305410143919,
+        "p99_ms": 627.0305410143919,
+        "max_ms": 627.0305410143919,
+        "saturated": [
+          "p95",
+          "p99"
+        ]
+      },
+      "commands": {
+        "total": 345,
+        "per_operation": 11.5,
+        "by_name": {
+          "find": 120,
+          "aggregate": 60,
+          "update": 165
+        }
+      },
+      "server_ms": {
+        "find": {
+          "n": 120,
+          "min_ms": 45.98,
+          "p50_ms": 49.126,
+          "p95_ms": 95.55,
+          "p99_ms": 98.001,
+          "max_ms": 100.693,
+          "saturated": []
+        },
+        "aggregate": {
+          "n": 60,
+          "min_ms": 50.554,
+          "p50_ms": 100.368,
+          "p95_ms": 114.606,
+          "p99_ms": 186.883,
+          "max_ms": 186.883,
+          "saturated": [
+            "p99"
+          ]
+        },
+        "update": {
+          "n": 165,
+          "min_ms": 53.387,
+          "p50_ms": 57.243,
+          "p95_ms": 68.179,
+          "p99_ms": 92.577,
+          "max_ms": 132.998,
+          "saturated": []
+        }
+      },
+      "bytes": {
+        "request": 8964,
+        "reply": 74781,
+        "repetitions": 3
+      },
+      "pool": {
+        "wait": {
+          "n": 345,
+          "min_ms": 0.004875008016824722,
+          "p50_ms": 0.00866700429469347,
+          "p95_ms": 0.014375022146850824,
+          "p99_ms": 0.01925000105984509,
+          "max_ms": 0.030125025659799576,
+          "saturated": []
+        },
+        "timeouts": 0,
+        "reasons": {}
+      },
+      "loop_lag": {
+        "lag": {
+          "n": 538,
+          "min_ms": 0.07591702160425484,
+          "p50_ms": 1.0699580307118595,
+          "p95_ms": 199.20937501592562,
+          "p99_ms": 283.21833300287835,
+          "max_ms": 382.6726670085918,
+          "saturated": []
+        },
+        "baseline": {
+          "n": 48,
+          "min_ms": 0.47991701285354793,
+          "p50_ms": 1.065916003426537,
+          "p95_ms": 1.116583007387817,
+          "p99_ms": 1.1345410312060267,
+          "max_ms": 1.1345410312060267,
+          "saturated": [
+            "p99"
+          ]
+        },
+        "interval_ms": 20.0,
+        "note": "Heartbeat drift on the loop that ran the turns. The baseline is the machine's own jitter, shown for scale and never subtracted."
+      },
+      "throughput": {
+        "operations": 30,
+        "elapsed_seconds": 22.23244654200971,
+        "operations_per_second": 1.349379158218731
+      },
+      "errors": 0,
+      "checks": [],
+      "passed": true
+    }
+  ],
+  "failed_checks": []
+}
