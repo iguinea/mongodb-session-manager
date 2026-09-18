@@ -39,8 +39,8 @@ def __init__(
     collection_name: str = "collection_name",
     client: Optional[MongoClient] = None,
     metadata_fields: Optional[List[str]] = None,
-    metadata_hook: Optional[Callable[[Dict[str, Any]], None]] = None,
-    feedback_hook: Optional[Callable[[Dict[str, Any]], None]] = None,
+    metadata_hook: Optional[Callable[..., Any]] = None,
+    feedback_hook: Optional[Callable[..., Any]] = None,
     application_name: Optional[str] = None,
     session_repository: Optional[Any] = None,
     **kwargs: Any,
@@ -74,27 +74,21 @@ Initialize MongoDB Session Manager with connection details and configuration.
     !!! warning "Not a declared extension point"
         The expected contract is not published as a `Protocol`; it is the union of the Strands `SessionRepository` interface and the custom methods this repository adds, and it is only written down as executable cases in `tests/support/repository_contract.py`. Substituting another store is possible but unsupported: the contract can change in a minor release.
 
-- **kwargs** (`Any`): Additional keyword arguments. MongoDB client options (e.g., `maxPoolSize`, `minPoolSize`) are passed to `MongoClient`. Other arguments are passed to the parent `RepositorySessionManager` class.
+- **kwargs** (`Any`): MongoDB client options, passed to `MongoClient`. See below.
 
-#### Supported MongoDB Client Options
+#### MongoDB Client Options
 
-The following MongoDB client options can be passed via `kwargs`:
-- `maxPoolSize`: Maximum number of connections in the pool (default: 100)
-- `minPoolSize`: Minimum number of connections to maintain (default: 10)
-- `maxIdleTimeMS`: Close idle connections after this many milliseconds
-- `waitQueueTimeoutMS`: Timeout waiting for connection from pool
-- `serverSelectionTimeoutMS`: Timeout for server selection
-- `connectTimeoutMS`: Initial connection timeout
-- `socketTimeoutMS`: Socket operation timeout
-- `compressors`: List of compression algorithms
-- `retryWrites`: Enable automatic retry for write operations
-- `retryReads`: Enable automatic retry for read operations
-- `w`: Write concern
-- `journal`: Journal write concern
-- `fsync`: Fsync write concern
-- `authSource`: Authentication database
-- `authMechanism`: Authentication mechanism
-- `tlsAllowInvalidCertificates`: Allow invalid TLS certificates
+Any keyword option `MongoClient` accepts can be passed via `kwargs`: `maxPoolSize`, `readPreference`, `appname`, `tls`, `tlsCAFile`, `retryWrites` and the rest of [pymongo's options](https://pymongo.readthedocs.io/en/stable/api/pymongo/mongo_client.html). As in pymongo, the case of the name does not matter. pymongo validates the values, so an invalid one raises when the manager is built.
+
+They apply when the manager creates its own client, from `connection_string`. Nothing passed here is dropped silently ([issue #111](https://github.com/iguinea/mongodb-session-manager/issues/111)). Each of these cases logs a `WARNING` that names the argument:
+
+| Case | What happens |
+|---|---|
+| `client=` was given, as the factory does | The options are ignored. Configure them where that client is created: `initialize_global_factory()` or `MongoDBConnectionPool.initialize()` |
+| `session_repository=` was injected | The options are ignored: there is no client to apply them to |
+| The name is not a `MongoClient` option (a typo such as `metadata_hooks=`) | The argument is ignored |
+
+Before 1.0.0 only sixteen option names reached the client; any other, `tls` and `readPreference` included, was dropped without a warning.
 
 #### Example
 

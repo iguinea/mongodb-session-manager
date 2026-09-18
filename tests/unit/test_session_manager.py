@@ -1,5 +1,6 @@
 """Unit tests for MongoDBSessionManager."""
 
+import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -214,6 +215,67 @@ class TestSessionManagerInit:
         )
         call_kwargs = mock_repo_cls.call_args[1]
         assert call_kwargs.get("maxPoolSize") == 50
+
+    @pytest.mark.parametrize(
+        "option",
+        [
+            {"appname": "support-bot"},
+            {"readPreference": "secondaryPreferred"},
+            {"tlsCAFile": "/etc/ssl/ca.pem"},
+            {"maxpoolsize": 5},  # pymongo does not care about case
+        ],
+    )
+    @patch("mongodb_session_manager.mongodb_session_manager.MongoDBSessionRepository")
+    def test_any_mongo_client_option_reaches_the_repository(
+        self, mock_repo_cls, option
+    ):
+        """Every MongoClient option goes to the client, not a fixed list (#111).
+
+        Only sixteen names used to be recognised. `appname`, `tls`,
+        `readPreference` and the rest fell through to the Strands parent, which
+        ignores what it does not know, so they never took effect.
+        """
+        mock_repo_cls.return_value = MagicMock(
+            read_session=MagicMock(return_value=None)
+        )
+        MongoDBSessionManager(
+            session_id="s1",
+            connection_string="mongodb://localhost:27017/",
+            **option,
+        )
+        call_kwargs = mock_repo_cls.call_args[1]
+        assert {name: call_kwargs.get(name) for name in option} == option
+
+    @patch("mongodb_session_manager.mongodb_session_manager.MongoDBSessionRepository")
+    def test_an_unknown_kwarg_is_logged(self, mock_repo_cls, caplog):
+        """Neither pymongo nor the manager knows it: it does nothing, and says so."""
+        mock_repo_cls.return_value = MagicMock(
+            read_session=MagicMock(return_value=None)
+        )
+        with caplog.at_level(logging.WARNING):
+            MongoDBSessionManager(
+                session_id="s1",
+                connection_string="mongodb://localhost:27017/",
+                metadata_hooks=MagicMock(),
+            )
+
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warnings) == 1
+        assert "metadata_hooks" in warnings[0].getMessage()
+        assert "metadata_hooks" not in mock_repo_cls.call_args[1]
+
+    def test_client_options_with_an_injected_repository_are_logged(
+        self, fake_repo, caplog
+    ):
+        """The repository was built elsewhere: there is no client to give them to."""
+        with caplog.at_level(logging.WARNING):
+            MongoDBSessionManager(
+                session_id="s1", session_repository=fake_repo, maxPoolSize=5
+            )
+
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warnings) == 1
+        assert "maxPoolSize" in warnings[0].getMessage()
 
     @patch("mongodb_session_manager.mongodb_session_manager.MongoDBSessionRepository")
     def test_create_factory_function(self, mock_repo_cls):
