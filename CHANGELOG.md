@@ -1,5 +1,9 @@
 # Changelog
 
+## [2026-09-18] PR #110 - Docs: entrada de v0.24.0 en el CHANGELOG (#53) (@iguinea)
+
+- Docs: entrada de v0.24.0 en el CHANGELOG (#53)
+
 ## [2026-09-18] PR #109 - Perf: agrupar los mensajes de cada invocación en una escritura (#53) (@iguinea)
 
 - Update: agrupar los mensajes de cada invocación en una escritura (#53)
