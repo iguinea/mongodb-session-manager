@@ -1,5 +1,9 @@
 # Changelog
 
+## [2026-09-18] PR #114 - Docs: procedencia anonimizada en todo el árbol (#111) (@iguinea)
+
+- Docs: procedencia anonimizada en todo el árbol (#111)
+
 ## [2026-09-18] PR #113 - Update: metadataHook y feedbackHook dejan de aceptarse (#111) (@iguinea)
 
 - Update: metadataHook y feedbackHook dejan de aceptarse (#111)
