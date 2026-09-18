@@ -138,8 +138,8 @@ class MongoDBSessionManager(RepositorySessionManager):
         collection_name: str = "collection_name",
         client: MongoClient | None = None,
         metadata_fields: list[str] | None = None,
-        metadata_hook: Callable[[dict[str, Any]], None] | None = None,
-        feedback_hook: Callable[[dict[str, Any]], None] | None = None,
+        metadata_hook: Callable[..., Any] | None = None,
+        feedback_hook: Callable[..., Any] | None = None,
         application_name: str | None = None,
         session_repository: Any | None = None,
         **kwargs: Any,
@@ -153,8 +153,11 @@ class MongoDBSessionManager(RepositorySessionManager):
             collection_name: Name of the collection for sessions
             client: Optional pre-configured MongoClient to use
             metadata_fields: List of fields to be indexed in the metadata
-            metadata_hook: Hook to be called when metadata is updated, deleted or retrieved
-            feedback_hook: Hook to be called when feedback is added
+            metadata_hook: Hook to be called when metadata is updated, deleted or
+                retrieved, as `hook(original_func, action, session_id, **kwargs)`;
+                what it returns is what the wrapped method returns
+            feedback_hook: Hook to be called when feedback is added, with the
+                same shape and action "add"
             application_name: Application name for session categorization (immutable after creation)
             session_repository: Repository to store sessions in. Defaults to a
                 MongoDB one built from the arguments above; pass an in-memory
