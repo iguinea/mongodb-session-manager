@@ -193,6 +193,13 @@ for t in threads:
     t.join()
 ```
 
+The global factory functions are thread-safe too (#124): `initialize_global_factory()`, `get_global_factory()` and `close_global_factory()` serialize their transitions with an internal lock, so a factory being closed or replaced is never handed out mid-transition.
+
+Two lifecycle rules to keep in mind:
+
+- **Re-initializing replaces and invalidates.** A second `initialize_global_factory()` closes the previous factory, and with it the shared pool client that every factory and manager created from it still holds. Their subsequent operations fail permanently — pymongo raises `InvalidOperation` on a closed client, and closed clients cannot be reopened. Initialize once at startup, as the documented patterns do.
+- **A failed re-initialization leaves no global.** If building the new factory raises (for example, the bounded startup ping against an unreachable MongoDB), the previous factory is already closed and cannot be restored: the global is left empty and the next `get_global_factory()` raises `RuntimeError` instead of serving a dead client. Fix the cause and call `initialize_global_factory()` again.
+
 ### Default Configuration
 
 The pool initializes with optimized defaults for high concurrency:

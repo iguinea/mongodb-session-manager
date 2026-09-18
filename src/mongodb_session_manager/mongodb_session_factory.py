@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Any
 
 from pymongo import MongoClient
@@ -143,6 +144,13 @@ class MongoDBSessionManagerFactory:
 # Global factory instance for FastAPI integration
 _global_factory: MongoDBSessionManagerFactory | None = None
 
+# Serializes every lifecycle transition of _global_factory (#124): without it,
+# two concurrent initialize_global_factory() calls can both see None, build
+# two factories and orphan one while its managers are still alive, and close
+# and get interleave the same way. Replacing the previous factory stays the
+# sequential contract; only the interleavings are gone.
+_factory_lock = threading.Lock()
+
 
 def initialize_global_factory(
     connection_string: str,
@@ -154,7 +162,19 @@ def initialize_global_factory(
 ) -> MongoDBSessionManagerFactory:
     """Initialize the global factory instance.
 
-    This should be called once during FastAPI startup.
+    Thread-safe (#124): the close-and-replace transition is serialized by an
+    internal lock, so concurrent calls cannot see an empty global at the same
+    time and orphan one of the two factories. The sequential contract is
+    unchanged: a second call closes the previous factory -- which invalidates
+    every factory and manager created from it, because the pool singleton
+    closes the client they hold -- and installs the new one as the global.
+
+    If building the new factory raises (for example the bounded startup ping
+    of #122 against an unreachable MongoDB), the previous factory is already
+    closed and cannot be restored: the global is left empty and the error
+    propagates, so the next `get_global_factory()` raises `RuntimeError`
+    instead of handing out a client that answers `InvalidOperation` to
+    everything. Re-call this function once the server is reachable.
 
     Args:
         connection_string: MongoDB connection string
@@ -169,18 +189,29 @@ def initialize_global_factory(
     """
     global _global_factory
 
-    if _global_factory is not None:
-        logger.warning("Global factory already initialized, closing existing one")
-        _global_factory.close()
+    with _factory_lock:
+        if _global_factory is not None:
+            logger.warning("Global factory already initialized, closing existing one")
+            _global_factory.close()
+            _global_factory = None
 
-    _global_factory = MongoDBSessionManagerFactory(
-        connection_string=connection_string,
-        database_name=database_name,
-        collection_name=collection_name,
-        metadata_fields=metadata_fields,
-        application_name=application_name,
-        **client_kwargs,
-    )
+        try:
+            new_factory = MongoDBSessionManagerFactory(
+                connection_string=connection_string,
+                database_name=database_name,
+                collection_name=collection_name,
+                metadata_fields=metadata_fields,
+                application_name=application_name,
+                **client_kwargs,
+            )
+        except Exception:
+            logger.error(
+                "Global factory initialization failed; the previous factory "
+                "was closed and the global is left uninitialized"
+            )
+            raise
+
+        _global_factory = new_factory
 
     logger.info("Global session manager factory initialized")
     return _global_factory
@@ -189,28 +220,39 @@ def initialize_global_factory(
 def get_global_factory() -> MongoDBSessionManagerFactory:
     """Get the global factory instance.
 
+    Thread-safe (#124): the read takes the lifecycle lock, so a factory being
+    closed by `close_global_factory()` or replaced by
+    `initialize_global_factory()` is never handed out half-transitioned.
+
     Returns:
         The global factory instance
 
     Raises:
         RuntimeError: If factory not initialized
     """
-    if _global_factory is None:
+    with _factory_lock:
+        factory = _global_factory
+    if factory is None:
         raise RuntimeError(
             "Global factory not initialized. "
             "Call initialize_global_factory() during startup."
         )
-    return _global_factory
+    return factory
 
 
 def close_global_factory() -> None:
     """Close the global factory and clean up resources.
 
+    Thread-safe (#124): the close-and-clear transition is serialized by the
+    lifecycle lock, so a concurrent `get_global_factory()` cannot observe the
+    factory between its close and its removal from the global.
+
     This should be called during FastAPI shutdown.
     """
     global _global_factory
 
-    if _global_factory is not None:
-        _global_factory.close()
-        _global_factory = None
-        logger.info("Global factory closed")
+    with _factory_lock:
+        if _global_factory is not None:
+            _global_factory.close()
+            _global_factory = None
+            logger.info("Global factory closed")

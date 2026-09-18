@@ -648,6 +648,21 @@ asyncio.run(run_benchmark(1000))
 
 ### Multi-Tenant Applications
 
+!!! warning "One pool client per connection string + options"
+
+    `MongoDBConnectionPool` is a **singleton keyed on the connection string and
+    the client options** — `database_name` is not part of the key. The example
+    below works because every tenant passes identical options: they all share
+    one pool client, and per-tenant isolation comes from the separate
+    `database_name` each repository selects on that shared client.
+
+    If a tenant passes **different** client options (a different `maxPoolSize`,
+    for example), `MongoDBConnectionPool.initialize()` closes the previous
+    client — and every factory and manager created with it dies permanently,
+    because pymongo raises `InvalidOperation` on a closed client. If you truly
+    need per-tenant pool sizing, build one `MongoClient` per tenant yourself
+    and inject it with `client=`, which bypasses the singleton entirely.
+
 ```python
 from mongodb_session_manager import MongoDBSessionManagerFactory
 
@@ -705,6 +720,15 @@ else:  # development
 ```
 
 ### Lazy Initialization
+
+!!! note "The snippet below is not thread-safe"
+
+    The `if cls._factory is None` check-then-set races if two requests hit
+    `get_factory()` before the first construction finishes, and a failed
+    construction can leave the class attribute pointing at a closed factory.
+    Prefer `initialize_global_factory()`, whose lifecycle transitions are
+    serialized and exception-safe since #124, or guard the check yourself
+    with a `threading.Lock`.
 
 ```python
 from mongodb_session_manager import MongoDBSessionManagerFactory

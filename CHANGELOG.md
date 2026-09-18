@@ -1,5 +1,12 @@
 # Changelog
 
+## [2026-09-18] Fix: initialize_global_factory() y close_global_factory() thread-safe con lock y exception-safety (#124) (@iguinea)
+
+- Fix: el ciclo de vida de la fábrica global se serializa con un lock: initialize/get/close ya no pueden dejar fábricas huérfanas ni servir una fábrica a medio cerrar (#124)
+- Fix: si la construcción del nuevo factory falla (p. ej. el ping acotado de #122), el global queda vacío y get_global_factory() lanza RuntimeError en vez de entregar el cliente cerrado de la fábrica anterior (#124)
+- Update: el recreado del cliente del pool por cambio de parámetros sube de INFO a WARNING, nombrando qué deja de funcionar (#124)
+- Docs: Thread Safety de connection-pooling.md documenta el lock y la invalidación de fábricas/managers previos; avisos en los patrones Multi-Tenant y Lazy Initialization de factory-pattern.md (#124)
+
 ## [2026-09-18] PR #130 - Fix: initialize() acota su ping de arranque con initialize_timeout_ms (#122) (@iguinea)
 
 - Fix: initialize() acota su ping de arranque con initialize_timeout_ms…

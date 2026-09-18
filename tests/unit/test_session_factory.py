@@ -1,5 +1,6 @@
 """Unit tests for MongoDBSessionManagerFactory and global factory functions."""
 
+import threading
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -257,3 +258,55 @@ class TestGlobalFactory:
         )
         get_global_factory().create_session_manager(session_id="s1")
         assert mock_mgr_cls.call_args[1]["application_name"] == "global-app"
+
+    @patch("mongodb_session_manager.mongodb_session_factory.MongoDBConnectionPool")
+    def test_initialize_is_serialized_under_concurrency(self, mock_pool):
+        """Concurrent initialize_global_factory() calls cannot orphan a factory (#124)."""
+        mock_pool.initialize.return_value = MagicMock()
+        threads = 8
+        barrier = threading.Barrier(threads)
+        results: list = []
+        errors: list[Exception] = []
+
+        def worker():
+            try:
+                barrier.wait(timeout=5)
+                results.append(
+                    initialize_global_factory(connection_string="mongodb://localhost/")
+                )
+            except Exception as e:  # pragma: no cover - only on regression
+                errors.append(e)
+
+        with patch.object(factory_module.logger, "warning") as mock_warning:
+            workers = [threading.Thread(target=worker) for _ in range(threads)]
+            for t in workers:
+                t.start()
+            for t in workers:
+                t.join(timeout=10)
+
+        assert errors == []
+        assert len(results) == threads
+        assert all(factory is not None for factory in results)
+        # Serialized: the first call sees an empty global, every other one
+        # closes the factory the previous call installed. Without the lock
+        # several threads see None at once and this count falls short.
+        assert mock_warning.call_count == threads - 1
+        assert get_global_factory() is not None
+
+    @patch("mongodb_session_manager.mongodb_session_factory.MongoDBConnectionPool")
+    def test_failed_init_leaves_no_closed_factory(self, mock_pool):
+        """A failed re-initialization must not leave a closed factory in the global (#124)."""
+        mock_pool.initialize.return_value = MagicMock()
+        first = initialize_global_factory(connection_string="mongodb://localhost/")
+        assert factory_module._global_factory is first
+
+        mock_pool.initialize.side_effect = RuntimeError("ping failed")
+        with pytest.raises(RuntimeError, match="ping failed"):
+            initialize_global_factory(connection_string="mongodb://localhost/")
+
+        # The previous factory was already closed, so the global is emptied:
+        # the next get raises "not initialized" instead of serving a client
+        # that answers InvalidOperation to every operation.
+        assert factory_module._global_factory is None
+        with pytest.raises(RuntimeError, match="Global factory not initialized"):
+            get_global_factory()

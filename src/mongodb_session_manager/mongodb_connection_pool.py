@@ -157,7 +157,14 @@ class MongoDBConnectionPool:
 
             # Close existing client if connection parameters changed
             if instance._client is not None:
-                logger.info("Connection parameters changed, recreating MongoDB client")
+                # WARNING is contract (#124): the closed client may still be
+                # held by factories and managers created before this call, and
+                # they stop working the moment it closes.
+                logger.warning(
+                    "Connection parameters changed, recreating MongoDB client: "
+                    "the previous client is closed, and every factory and "
+                    "manager still holding it stops working"
+                )
                 try:
                     instance._client.close()
                 except Exception as e:
