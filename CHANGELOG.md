@@ -1,5 +1,10 @@
 # Changelog
 
+## [2026-09-18] PR #109 - Perf: agrupar los mensajes de cada invocación en una escritura (#53) (@iguinea)
+
+- Update: agrupar los mensajes de cada invocación en una escritura (#53)
+- Merge remote-tracking branch 'origin/main' into perf-batch-append_mes…
+
 ## [2026-09-18] PR #108 - Feat: el tool de metadata nombra las claves que no encontró (#107) (@iguinea)
 
 - Feat: el tool de metadata nombra las claves que no encontró (#107)
