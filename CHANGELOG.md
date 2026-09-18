@@ -1,5 +1,10 @@
 # Changelog
 
+## [2026-09-18] PR #108 - Feat: el tool de metadata nombra las claves que no encontró (#107) (@iguinea)
+
+- Feat: el tool de metadata nombra las claves que no encontró (#107)
+- Merge remote-tracking branch 'origin/main' into feature/issue-107-nam…
+
 ## [0.23.0] - 2026-09-18
 
 ### Changed
