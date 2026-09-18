@@ -1,6 +1,6 @@
 # MongoDB Session Manager
 
-[![Version](https://img.shields.io/badge/version-0.24.0-blue.svg)](https://github.com/iguinea/mongodb-session-manager)
+[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/iguinea/mongodb-session-manager)
 [![Python](https://img.shields.io/badge/python-3.12+-green.svg)](https://python.org)
 
 A MongoDB session manager for [Strands Agents](https://strandsagents.com) that provides persistent storage for agent conversations and state, with connection pooling optimized for stateless environments.
@@ -450,6 +450,22 @@ uv run python -m benchmarks
 ```
 
 See `examples/README.md` for detailed descriptions of each example.
+
+## Versioning
+
+Since 1.0.0 the project follows [semantic versioning](https://semver.org). Two things are covered:
+
+- **The public API**: the names `mongodb_session_manager` exports in `__all__`, with their signatures.
+- **The shape of the document** stored in MongoDB.
+
+Breaking either one means a new major version. Not covered:
+
+- Names starting with `_`.
+- Log messages.
+- The wording of the metadata tool's replies, which is a contract with the model and not with code.
+- Replacing the repository with another implementation.
+
+Upgrading from 0.x: see the `[1.0.0]` entry of `CHANGELOG.md`.
 
 ## License
 

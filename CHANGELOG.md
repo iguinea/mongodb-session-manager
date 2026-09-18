@@ -40,7 +40,15 @@
 - Feat: el tool de metadata nombra las claves que no encontró (#107)
 - Merge remote-tracking branch 'origin/main' into feature/issue-107-nam…
 
-## [1.0.0] - Sin publicar
+## [1.0.0] - 2026-09-18
+
+Primera versión estable. Desde aquí rige semver sobre la API pública —lo que exporta `mongodb_session_manager` en `__all__`, con sus firmas— y sobre la forma del documento que se guarda en MongoDB: romper cualquiera de las dos exige una 2.0.0. El único cambio de esquema en estudio, separar los mensajes en otra colección, está aplazado a esa versión (#63). No entran en el contrato los nombres con `_`, los textos de log, el texto de las respuestas del tool de metadata (es contrato con el modelo, no con el código) ni reemplazar el repositorio por otro, que sigue sin ser un punto de extensión declarado.
+
+**Para actualizar desde 0.24**:
+1. Si tu código o tus tests importan `fastapi`, `uvicorn`, `uvloop`, `strands_tools` o `pydantic_settings`, decláralos: la librería ya no los instala
+2. `metadataHook=` / `feedbackHook=` → `metadata_hook=` / `feedback_hook=`: los nombres viejos lanzan `TypeError`
+3. Revisa los kwargs que pasas al manager y los `WARNING` que deja al construirse. Una opción de `MongoClient` que antes se ignoraba ahora se aplica, y pymongo valida su valor
+4. Nada más: sin migración, y managers 0.24 y 1.0 conviven sobre la misma colección
 
 ### Changed
 - **Breaking: las dependencias de runtime son solo las que importa `src/`** (#111): `pymongo`, `strands-agents` y `boto3`. `fastapi`, `uvicorn`, `uvloop` y `strands-agents-tools` las usaban solo los ejemplos y los tests, y se instalaban en cada consumidor; pasan al grupo `examples` (PEP 735), que no se publica con el paquete. `pydantic-settings` no lo importaba nadie y desaparece. Una instalación limpia baja de **83 a 51 paquetes**. **Quien importe alguno de esos paquetes sin declararlo tiene que declararlo**: se detectó un consumidor que importa `fastapi` en dos tests y solo lo recibía a través de esta librería
@@ -48,18 +56,25 @@
 - **`tests/unit/test_runtime_dependencies.py`** compara lo declarado con lo que importa `src/`, en los dos sentidos. El segundo es el que importa: la suite corre con el grupo `dev`, que instala también lo de los ejemplos, así que un import sin declarar pasaría todos los tests y fallaría en una instalación limpia
 - **Breaking: `metadataHook=` y `feedbackHook=` ya no se aceptan** (#111). Estaban obsoletos en favor de `metadata_hook=` y `feedback_hook=`, y ahora lanzan `TypeError` con el nombre nuevo, antes de construir el repositorio. Tenía que ser un error y no un simple borrado: el `RepositorySessionManager` de Strands acepta `**kwargs` y los ignora, así que el nombre viejo se habría tragado sin aviso y el hook no se habría llamado nunca. Ninguno de los consumidores conocidos los usaba
 - **Breaking: cualquier opción de `MongoClient` llega al cliente, y nada se descarta en silencio** (#111). El manager solo reconocía una lista fija de 16 nombres; el resto —`tls`, `tlsCAFile`, `appname`, `readPreference`, `directConnection`…— acababa en el `RepositorySessionManager` de Strands, que lo ignora. Ahora se pregunta a pymongo (`pymongo.common.VALIDATORS`), sin distinguir mayúsculas, como hace él. Tres casos que antes callaban dejan un `WARNING` con el nombre: un kwarg que no es opción de `MongoClient` (una errata como `metadata_hooks=`), opciones de cliente con `client=` prestado —el camino de la factory, donde un `maxPoolSize` pasado a `create_session_manager()` no hacía nada— y opciones con `session_repository=` inyectado. Es breaking para quien pasara una opción que hasta ahora se ignoraba: ahora se aplica, y pymongo valida su valor al construir el manager
+- **La anotación de `metadata_hook` y `feedback_hook` describe el hook real** (#111): `Callable[..., Any]`. Decía `Callable[[dict[str, Any]], None]`, y un type checker marcaba como error el uso correcto, incluso con lo que devuelven las factorías de la propia librería
+
+### Documentation
+- **La documentación vuelve a coincidir con la API** (#111, PR #115). Los ejemplos llamaban a métodos que no existen (`get_session()`, `redact_message()`, `check_session_exists()`, `manager.list_messages()`) y seis guías hacían `append_message` a mano sobre agentes con `session_manager=`, duplicando mensajes. Métricas y diagramas describen ya el `$push` por invocación de #53. Fuera `python-helpers`, que los hooks ya no usan, y `sync_agent()` figura como opcional
+- **Procedencia anonimizada** (#111, PRs #114 y #117). Se aplica en retrospectiva la regla de #106: nombres de repos consumidores, rutas de su código, endpoints, issues privadas y nombres que dejaban ver su dominio de negocio desaparecen del árbol y de los textos de GitHub. El historial de git conserva lo anterior
 
 ### Security
 - **`uv lock --upgrade`**: `pip-audit` sobre el lock marcaba 13 paquetes con avisos conocidos (`aiohttp`, `starlette`, `cryptography`, `pyjwt`, `urllib3`, `python-multipart`, `mcp`, `requests`, `idna`, `click`, `pygments`, `python-dotenv`, `soupsieve`); ahora ninguno. Suben de versión mayor `mcp` 1.26 → 2.1 (strands 1.56 admite `<2.2` y trae su capa de compatibilidad), `starlette` 0.50 → 1.6, `cryptography` 46 → 50, `wrapt` 1 → 2 y `rich` 14 → 15. `pymongo` no se mueve (4.18.1) y `strands-agents` ya estaba en su última versión, 1.56.0
 - El lock solo decide qué versiones usan el CI y el desarrollo: cada consumidor resuelve las suyas. Lo que sí cambia para ellos es que la librería deja de arrastrar `fastapi` y, con él, `python-multipart`; `starlette` sigue llegando por `strands-agents` → `mcp`
 
 ### Measured
-- Harness de #60, perfil smoke, **la misma librería con los dos locks**: base, un worktree de `main`; head, esta rama. MongoDB 8.2.7 local, 3 pasadas por lado intercaladas con 100 repeticiones: **comandos por operación, reparto por comando y bytes idénticos** en los 7 escenarios, y la mejor p50 del head entre −0,4 % y −7,5 %, con rangos solapados — ruido, sin regresión
+- Separación de dependencias y lock nuevo (PR #112), con el harness de #60, perfil smoke, y **la misma librería con los dos locks**: base, un worktree de `main`; head, la rama del PR. MongoDB 8.2.7 local, 3 pasadas por lado intercaladas con 100 repeticiones: **comandos por operación, reparto por comando y bytes idénticos** en los 7 escenarios, y la mejor p50 del head entre −0,4 % y −7,5 %, con rangos solapados — ruido, sin regresión
 - DocumentDB 5.0 dev, calentamiento descartado y 2 pasadas por lado intercaladas con 30 repeticiones: **comandos y bytes idénticos**, y de −0,8 % a +0,4 % en cinco escenarios. `turn.supervisor` sale +3,4 % (h10) y +1,6 % (h100) en la mejor p50, pero con rangos solapados y la p95 bajando (610 → 597 ms, 609 → 599 ms). Si el lock nuevo costara CPU en ese turno, se vería antes en MongoDB local, donde el mismo escenario sale un 1,8 % y un 2,5 % más rápido
 - Tablas y ficheros en `artifacts/issue-111-benchmark-dependencies.md`
 
 ### Notes
-- **Sin cambios de código, de esquema ni de comportamiento**: MongoDB, DocumentDB, la forma de los documentos y quien los lea en bruto no se enteran. 1022 tests en verde con el lock nuevo, 161 de integración contra MongoDB 8.2.7
+- **Sin cambios de esquema ni migración**. Ningún cambio de 1.0.0 toca la forma del documento, así que MongoDB, DocumentDB y quien lea la colección en bruto no se enteran. El único comportamiento que cambia es el de los kwargs del constructor
+- Versiones anteriores sin etiquetar que ahora tienen tag, sobre el commit del bot de su PR: v0.10.0, v0.10.2, v0.11.0, v0.12.0 y v0.16.0; v0.24.0 tiene además su release
+- 1030 tests en verde, 161 de integración contra MongoDB 8.2.7
 
 ## [0.24.0] - 2026-09-18
 
