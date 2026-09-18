@@ -1,5 +1,9 @@
 # Changelog
 
+## [2026-09-18] PR #126 - Fix: los eventos delete de los hooks SQS y WebSocket publican las claves borradas (#120) (@iguinea)
+
+- Fix: los deletes de los hooks SQS y WebSocket publican las claves bor…
+
 ## [2026-09-18] PR #118 - Release: 1.0.0 (#111) (@iguinea)
 
 - Release: 1.0.0 (#111)
