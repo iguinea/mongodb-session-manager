@@ -1,5 +1,9 @@
 # Changelog
 
+## [2026-09-18] PR #131 - Fix: initialize_global_factory() y close_global_factory() thread-safe con lock y exception-safety (#124) (@iguinea)
+
+- Fix: initialize_global_factory() y close_global_factory() thread-safe…
+
 ## [2026-09-18] Fix: initialize_global_factory() y close_global_factory() thread-safe con lock y exception-safety (#124) (@iguinea)
 
 - Fix: el ciclo de vida de la fábrica global se serializa con un lock: initialize/get/close ya no pueden dejar fábricas huérfanas ni servir una fábrica a medio cerrar (#124)
