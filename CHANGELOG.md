@@ -44,6 +44,14 @@
 - Feat: el tool de metadata nombra las claves que no encontró (#107)
 - Merge remote-tracking branch 'origin/main' into feature/issue-107-nam…
 
+## [1.0.1] - 2026-09-18
+
+Fix de los hooks de metadata: los eventos `delete` vuelven a decir qué claves se borraron (#120). Sin cambios de API ni de esquema: el payload publicado por los hooks recupera el formato que ya documentaba `docs/examples/aws-patterns.md`.
+
+### Fixed
+- **Los deletes propagados por los hooks SQS y WebSocket publicaban `"metadata": {}`** cuando hay `metadata_fields` configurada (#120): el filtro de Nones se comía las claves borradas, que el wrapper construía como `{clave: null}`. La selección ahora es **por presencia** sobre las claves del evento, y en `delete` viajan como `null` — igual que en el camino sin filtro. Proyectar la configuración entera sin filtrar, el primer fix propuesto en el issue, habría publicado como borradas claves configuradas que no se borraron; el test discrimina exactamente ese caso
+- **Un delete de WebSocket no enviaba nada, con o sin `metadata_fields`** (#120): `_build_delete_metadata()` leía `connection_id` de la forma plana, pero `get_metadata()` devuelve el documento proyectado `{"_id", "metadata"}` — el routing id salía siempre `None` y el evento se perdía con un `WARNING`. Ahora se lee de su sitio y **antes** de ejecutar el borrado: borrar la propia `connection_id` sigue entregando el evento a la conexión que acaba de desvincularse. El test lo ocultaba mockeando la forma plana que nadie devuelve
+
 ## [1.0.0] - 2026-09-18
 
 Primera versión estable. Desde aquí rige semver sobre la API pública —lo que exporta `mongodb_session_manager` en `__all__`, con sus firmas— y sobre la forma del documento que se guarda en MongoDB: romper cualquiera de las dos exige una 2.0.0. El único cambio de esquema en estudio, separar los mensajes en otra colección, está aplazado a esa versión (#63). No entran en el contrato los nombres con `_`, los textos de log, el texto de las respuestas del tool de metadata (es contrato con el modelo, no con el código) ni reemplazar el repositorio por otro, que sigue sin ser un punto de extensión declarado.

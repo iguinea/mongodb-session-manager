@@ -139,6 +139,6 @@ __all__.extend(
     ]
 )
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 __author__ = "Iñaki Guinea Beristain"
 __author_email__ = "iguinea@gmail.com"
