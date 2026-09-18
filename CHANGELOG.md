@@ -10,6 +10,28 @@
 - Feat: el tool de metadata nombra las claves que no encontró (#107)
 - Merge remote-tracking branch 'origin/main' into feature/issue-107-nam…
 
+## [0.24.0] - 2026-09-18
+
+### Changed
+- **Los mensajes de una invocación viajan en una sola escritura** (#53). `append_message()` hacía un `$push` por mensaje: 6 de las 8 escrituras del turno de referencia, y 2N+2 para un agente que llama a N herramientas. Ahora lo que produce el event loop —el `toolUse`, su `toolResult`, la respuesta— espera a la escritura que cierra la invocación y sale en un solo `$push: {$each: [...]}`, en orden. Las métricas viajan **dentro** de ese push, en el documento del último mensaje: el event loop solo las tiene acumuladas al cerrar (#66), que es justo cuando se vuelca el lote, así que dejan de costar una escritura propia. **Turno de referencia: 8 → 4 escrituras, 14 → 10 comandos**; un agente con N tools pasa de 2N+2 a 2
+- **La pregunta del usuario no espera**: se escribe al llegar, porque es lo único de un turno que nada puede volver a producir. Tampoco espera un mensaje añadido fuera de una invocación, que no tendría quién lo volcara: el manager acota esa ventana con sus propios callbacks en `BeforeInvocationEvent` y `AfterInvocationEvent`
+- **`create_messages()`** en el repositorio: añade un lote en un `$push` con `$each`, con `fields_on_last` para escribir campos en el último mensaje del lote y `agent_set_operations` para que la configuración del agente viaje en el mismo round-trip. `create_message()` pasa a ser ese método con una lista de uno. Nuevo también `field_names.apply_fields()`: escribir por ruta, lo que `$set` hace con notación de punto
+- **`get_message_count()`** cuenta los mensajes de una invocación en vuelo, que este manager ya ha añadido aunque la escritura que los almacena no haya ocurrido
+- **`sync_agent()`** ejecuta su escritura en un `finally`: lo que escribe `super()` —el estado del agente— y lo que escribe esta clase son round-trips distintos, y el primero fallando ya no se lleva por delante los mensajes del turno
+
+### Measured
+- Harness de #60 contra los dos motores, historial de 100, 30 repeticiones, base v0.22.0. **Comandos por operación idénticos en MongoDB 8.2.7 y DocumentDB 5.0**, así que `$each` no necesita adaptación por motor: `turn.simple` 7,0 → 6,0, `turn.tool` 9,0 → 6,0, `turn.supervisor` 15,5 → 11,5
+- Latencia p50: en MongoDB local 4,33 → 3,40 ms, 12,97 → 5,46 ms y 16,35 → 11,30 ms; en DocumentDB 262,0 → 168,0 ms, 357,5 → 173,9 ms y 864,4 → 547,5 ms
+- Con concurrencia 16 en DocumentDB, `turn.supervisor` baja de 5.624 a 3.804 ms p50 (−32 %), el throughput sube de 1,5 a 2,2 op/s y el lag del event loop p99 baja de 5.761 a 4.605 ms
+- Los bytes no cambian (74.781 B contra 75.029 B en `turn.supervisor`): el lote no transfiere menos, hace menos viajes
+- Tablas completas, los cinco invariantes y los dos bordes conocidos en `artifacts/issue-53-append-message-batching.md`
+
+### Notes
+- **Durabilidad**: lo que hace viable el lote es que `AfterInvocationEvent` sale de un `finally` del SDK (`strands/agent/agent.py`), así que una invocación que revienta —el modelo caído, una herramienta que lanza— también vuelca. La ventana que añade el batching es el proceso muriendo de golpe, y aun así la pregunta del usuario ya está escrita. `close()` queda como red para el caso en que el cierre no llegue a ocurrir
+- **Un lote que falla no se reintenta**. Una escritura que lanza puede haberse aplicado igualmente —un update que llega al servidor y pierde el ack—, y empujarlo otra vez duplicaría los mensajes del turno. Se pierde el lote, que es lo que ya hacía un `create_message` fallido, de uno en uno
+- **Único cambio observable desde fuera**: quien lea la colección en vivo verá el turno aparecer al cerrar la invocación, no mensaje a mensaje. El `updated_at` de la raíz sigue avanzando con el turno —el volcado es lo último que ocurre—, así que «Fin» y «Duración» no cambian. Sin cambios de esquema ni migración: la forma del documento y el orden del array son los mismos
+- **DocumentDB**: `$push` con `$each` sobre un array embebido no introduce operadores nuevos ni límites nuevos. El comando lleva solo los mensajes del turno, y el documento donde aterrizan ya estaba acotado a 16 MiB por BSON: un turno que no cupiera en el comando tampoco cabría en el documento
+
 ## [0.23.0] - 2026-09-18
 
 ### Changed
