@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import warnings
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, ClassVar
@@ -51,6 +50,8 @@ _MONGO_CLIENT_OPTIONS = frozenset(
         "tlsAllowInvalidCertificates",
     }
 )
+
+_REMOVED_HOOK_NAMES = {"metadataHook": "metadata_hook", "feedbackHook": "feedback_hook"}
 
 
 class MongoDBSessionManager(RepositorySessionManager):
@@ -137,8 +138,8 @@ class MongoDBSessionManager(RepositorySessionManager):
         collection_name: str = "collection_name",
         client: MongoClient | None = None,
         metadata_fields: list[str] | None = None,
-        metadata_hook: Callable[[dict[str, Any]], None] | None = None,
-        feedback_hook: Callable[[dict[str, Any]], None] | None = None,
+        metadata_hook: Callable[..., Any] | None = None,
+        feedback_hook: Callable[..., Any] | None = None,
         application_name: str | None = None,
         session_repository: Any | None = None,
         **kwargs: Any,
@@ -152,8 +153,11 @@ class MongoDBSessionManager(RepositorySessionManager):
             collection_name: Name of the collection for sessions
             client: Optional pre-configured MongoClient to use
             metadata_fields: List of fields to be indexed in the metadata
-            metadata_hook: Hook to be called when metadata is updated, deleted or retrieved
-            feedback_hook: Hook to be called when feedback is added
+            metadata_hook: Hook to be called when metadata is updated, deleted or
+                retrieved, as `hook(original_func, action, session_id, **kwargs)`;
+                what it returns is what the wrapped method returns
+            feedback_hook: Hook to be called when feedback is added, with the
+                same shape and action "add"
             application_name: Application name for session categorization (immutable after creation)
             session_repository: Repository to store sessions in. Defaults to a
                 MongoDB one built from the arguments above; pass an in-memory
@@ -164,21 +168,14 @@ class MongoDBSessionManager(RepositorySessionManager):
                 cases in tests/support/repository_contract.py
             **kwargs: Additional arguments passed to parent class and MongoClient
         """
-        # Support deprecated camelCase parameter names (metadataHook, feedbackHook)
-        if "metadataHook" in kwargs:
-            warnings.warn(
-                "metadataHook is deprecated, use metadata_hook instead",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            metadata_hook = metadata_hook or kwargs.pop("metadataHook")
-        if "feedbackHook" in kwargs:
-            warnings.warn(
-                "feedbackHook is deprecated, use feedback_hook instead",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            feedback_hook = feedback_hook or kwargs.pop("feedbackHook")
+        # The camelCase names were removed in 1.0.0 (#111). They must fail here:
+        # the Strands parent ignores unknown kwargs, so the hook would silently
+        # never run.
+        for removed, replacement in _REMOVED_HOOK_NAMES.items():
+            if removed in kwargs:
+                raise TypeError(
+                    f"{removed} was removed in 1.0.0, use {replacement} instead"
+                )
         # Extract MongoDB client kwargs
         mongo_kwargs = {}
         parent_kwargs = {}
