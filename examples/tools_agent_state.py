@@ -119,7 +119,7 @@ async def get_state(keys: str | list[str] | None = None, agent: Agent = None) ->
     Usage examples:
     - Get all state: get_state()
     - Get single value: get_state("case_type")
-    - Get multiple values: get_state(["case_type", "customer_phone", "customer_cups"])
+    - Get multiple values: get_state(["case_type", "customer_phone", "customer_id"])
 
     Args:
         keys: Can be:

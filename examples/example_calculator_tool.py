@@ -78,7 +78,7 @@ async def main():
         model="eu.anthropic.claude-sonnet-4-20250514-v1:0",
         system_prompt="""Eres un asistente de cálculo para Itzulbira.
 Ayudas a los clientes con cálculos de:
-- Facturas y consumo
+- Presupuestos y pedidos
 - IVA y descuentos
 - Promedios y totales
 

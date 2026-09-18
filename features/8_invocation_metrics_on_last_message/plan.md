@@ -44,8 +44,8 @@ mismo `finally`.
 ```
  1. $push supervisor             msg=4 user
  2. $push supervisor             msg=5 assistant(tool_use)          ← sync sin métricas (latencyMs=0)
- 3. $push info_suministro_agent  msg=2 user
- 4. $push info_suministro_agent  msg=3 assistant
+ 3. $push lookup_agent           msg=2 user
+ 4. $push lookup_agent           msg=3 assistant
  5. métricas sub-agente          cycles=1 tokens=1280               ← AfterInvocation del sub-agente
  6. $push supervisor             msg=6 user(toolResult)
  7. métricas supervisor msg=6    cycles=1 tokens=1280               ← snapshot del ciclo 1
@@ -55,7 +55,7 @@ mismo `finally`.
 ```
 
 Con el mecanismo final desaparecen la 7 y la 9, y quedan **8**. `msg=7` se queda con
-`cycles=2 tokens=2560 tools=[info_suministro_agent]` y ningún otro mensaje lleva métricas. Lo midieron
+`cycles=2 tokens=2560 tools=[lookup_agent]` y ningún otro mensaje lleva métricas. Lo midieron
 el autor, Codex y OpenCode, cada uno con su propia sonda.
 
 ### 2.3 Casos (doble in-memory)

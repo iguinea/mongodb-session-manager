@@ -124,12 +124,10 @@ def run_turn(factory, session_id: str, prompt: str) -> None:
     """Un turno completo: supervisor + sub-agente, con una llamada a tool."""
     supervisor_manager = factory.create_session_manager(session_id)
 
-    @tool(name="info_suministro_agent", description="Consulta datos de suministro")
-    def info_suministro_agent(query: str) -> str:
+    @tool(name="lookup_agent", description="Consulta datos de referencia")
+    def lookup_agent(query: str) -> str:
         sub_manager = factory.create_session_manager(session_id)
-        sub_agent = scripted_agent(
-            sub_manager, "info_suministro_agent", "sub", "Datos del suministro: OK"
-        )
+        sub_agent = scripted_agent(sub_manager, "lookup_agent", "sub", "Datos: OK")
         result = str(sub_agent(query))
         sub_manager.close()
         return result
@@ -138,15 +136,13 @@ def run_turn(factory, session_id: str, prompt: str) -> None:
         agent_id="supervisor",
         model=ScriptedModel(
             [
-                list(
-                    tool_stream("info_suministro_agent", "tu-1", '{"query": "consumo"}')
-                ),
-                list(text_stream("Tu consumo del ultimo mes es de 312 kWh.")),
+                list(tool_stream("lookup_agent", "tu-1", '{"query": "estado"}')),
+                list(text_stream("Tu pedido está en camino.")),
             ],
             "supervisor",
         ),
         system_prompt=SYSTEM_PROMPT,
-        tools=[info_suministro_agent],
+        tools=[lookup_agent],
         session_manager=supervisor_manager,
     )
     supervisor(prompt)
@@ -267,10 +263,10 @@ class TestTurnOperationBudget:
         run_turn(factory, unique_session_id, "hola")
 
         idle_manager = factory.create_session_manager(unique_session_id)
-        idle = scripted_agent(idle_manager, "info_suministro_agent", "sub", "ok")
+        idle = scripted_agent(idle_manager, "lookup_agent", "sub", "ok")
 
         busy_manager = factory.create_session_manager(unique_session_id)
-        busy = scripted_agent(busy_manager, "info_suministro_agent", "sub", "ok")
+        busy = scripted_agent(busy_manager, "lookup_agent", "sub", "ok")
         busy.state.set("contrato", "ES-001")
         busy("guarda el contrato")
 
@@ -279,7 +275,7 @@ class TestTurnOperationBudget:
         busy_manager.close()
 
         agents = collection.find_one({"_id": unique_session_id})["agents"]
-        state = agents["info_suministro_agent"]["agent_data"]["state"]
+        state = agents["lookup_agent"]["agent_data"]["state"]
         assert state == {"contrato": "ES-001"}
 
     def test_state_set_in_one_turn_is_restored_in_the_next(
@@ -349,7 +345,7 @@ class TestTurnOperationBudget:
             agents = collection.find_one({"_id": unique_session_id})["agents"]
             for agent_id, model_id in (
                 ("supervisor", "supervisor"),
-                ("info_suministro_agent", "sub"),
+                ("lookup_agent", "sub"),
             ):
                 agent_data = agents[agent_id]["agent_data"]
                 assert agent_data.get("model") == model_id, (
@@ -387,7 +383,7 @@ class TestTurnOperationBudget:
 
         supervisor_metrics = agents["supervisor"]["messages"][-1]["event_loop_metrics"]
         assert supervisor_metrics["cycle_metrics"]["cycle_count"] == 2
-        assert "info_suministro_agent" in supervisor_metrics["tool_usage"]
+        assert "lookup_agent" in supervisor_metrics["tool_usage"]
 
     def test_each_message_carries_the_sdk_attribution(
         self, turn_factory, unique_session_id
