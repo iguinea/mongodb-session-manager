@@ -1,5 +1,10 @@
 # Changelog
 
+## [2026-09-18] PR #116 - Update: toda opción de MongoClient llega al cliente y nada se descarta en silencio (#111) (@iguinea)
+
+- Update: toda opción de MongoClient llega al cliente y nada se descart…
+- Docs: la firma de la referencia muestra la anotación real de los hook…
+
 ## [2026-09-18] PR #115 - Docs: la documentación vuelve a coincidir con la API (#111) (@iguinea)
 
 - Docs: la documentación vuelve a coincidir con la API (#111)
