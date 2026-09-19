@@ -1,5 +1,9 @@
 # Changelog
 
+## [2026-09-19] PR #138 - Add: delete_session() para eliminar sesiones completas (#132) (@iguinea)
+
+- Add: delete_session() para eliminar sesiones completas (#132)
+
 ## [2026-09-19] Add: delete_session() para eliminar sesiones completas (#132) (@iguinea)
 
 - Add: `delete_session(session_id)` en `MongoDBSessionRepository`: un `delete_one` atómico borra sesión, agentes, mensajes, metadata, feedbacks y guardrail events (comparten documento); sesión inexistente lanza `ValueError` como toda escritura sobre sesión inexistente, y el éxito loguea `INFO` (#132)
