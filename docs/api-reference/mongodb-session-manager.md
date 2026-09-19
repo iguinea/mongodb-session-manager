@@ -1022,6 +1022,30 @@ finally:
     manager.close()  # Always clean up
 ```
 
+### `delete_session`
+
+```python
+def delete_session(self) -> None
+```
+
+Delete this session and everything embedded in it.
+
+Session, agents, messages, metadata, feedbacks and guardrail events share one document, so the repository removes it all in a single atomic write. The manager drops the message batches still pending — a later `close()` would otherwise try to write them into a session that is gone — and is spent afterwards: any further sync fails in the repository. Deleting the session is not a metadata operation, so no hook runs.
+
+#### Behavior
+
+- Deletes the whole session document atomically, embedded data included
+- Drops the pending message batches of every agent
+- Raises `ValueError` if the session does not exist, the same way every other write on a missing session does (`FileSessionManager` and `S3SessionManager` raise `SessionException` here, but `delete_session` is not part of the `SessionRepository` contract in strands 1.56.0)
+
+#### Example
+
+```python
+manager = get_global_factory().create_session_manager(session_id)
+# ... use the agent ...
+manager.delete_session()  # Session and all its data are gone
+```
+
 ---
 
 ## Hook System

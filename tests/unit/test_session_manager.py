@@ -1111,6 +1111,31 @@ class TestClose:
         mock_repo.close.assert_called_once()
 
 
+class TestDeleteSession:
+    def test_delegates_to_repository(self, manager, mock_repo):
+        manager.delete_session()
+        mock_repo.delete_session.assert_called_once_with("test-session")
+
+    def test_drops_the_pending_batches(self, fake_repo, agent_in_session):
+        """close() would try to write a pending batch into the deleted session
+        and log it as lost: the delete takes the batch with the session."""
+        pending = SessionMessage(
+            message_id=6, message={"role": "assistant", "content": [{"text": "x"}]}
+        )
+        agent_in_session._pending_messages["a1"] = [pending]
+
+        agent_in_session.delete_session()
+
+        assert agent_in_session._pending_messages == {}
+        assert fake_repo.read_session("test-session") is None
+
+    def test_a_missing_session_raises(self, fake_repo, manager_fake):
+        fake_repo.delete_session("test-session")
+
+        with pytest.raises(ValueError, match="not found"):
+            manager_fake.delete_session()
+
+
 # ---------------------------------------------------------------------------
 # Migrated from test_cache_metrics.py
 # ---------------------------------------------------------------------------

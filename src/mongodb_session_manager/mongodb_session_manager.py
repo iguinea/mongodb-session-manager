@@ -857,6 +857,22 @@ class MongoDBSessionManager(RepositorySessionManager):
                 )
         self.session_repository.close()
 
+    def delete_session(self) -> None:
+        """Delete this session and everything embedded in it.
+
+        Session, agents, messages, metadata, feedbacks and guardrail events
+        share one document, so the repository removes it all in one atomic
+        write (#132). A session that does not exist raises ValueError, the
+        same way every other write on a missing session does.
+
+        The manager is spent afterwards: the batches still pending are dropped
+        here, so a later close() does not try to write them into a session
+        that is gone, and any further sync fails in the repository. Deleting
+        the session is not a metadata operation, so no hook runs.
+        """
+        self._pending_messages.clear()
+        self.session_repository.delete_session(self.session_id)
+
     # CUSTOM METHODS
     def update_metadata(self, metadata: dict[str, Any]) -> None:
         """Update the metadata for the session."""

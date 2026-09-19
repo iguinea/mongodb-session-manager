@@ -1,5 +1,13 @@
 # Changelog
 
+## [2026-09-19] Add: delete_session() para eliminar sesiones completas (#132) (@iguinea)
+
+- Add: `delete_session(session_id)` en `MongoDBSessionRepository`: un `delete_one` atómico borra sesión, agentes, mensajes, metadata, feedbacks y guardrail events (comparten documento); sesión inexistente lanza `ValueError` como toda escritura sobre sesión inexistente, y el éxito loguea `INFO` (#132)
+- Add: `MongoDBSessionManager.delete_session()` sin argumentos: descarta los batches de mensajes pendientes (un `close()` posterior ya no intenta escribirlos en una sesión borrada) y delega en el repositorio; el manager no debe reutilizarse después. Sin hooks de metadata/feedback: borrar la sesión no es una operación de metadata (#132)
+- Fix: el repositorio olvida su caché de contenido persistido de la sesión borrada (`LastPersistedAgents.forget_session()`): la caché se consulta antes que el store, así que sin ello el siguiente sync del mismo contenido sería un no-op silencioso en vez de `not found` (#132)
+- Test: casos de contrato compartidos por el doble en memoria y MongoDB (`delete_session` en `MISSING_SESSION_CALLS`, borrado completo, caché obsoleta tras el delete) (#132)
+- Docs: README, api-reference del manager y del repositorio, CLAUDE.md (#132)
+
 ## [2026-09-18] PR #131 - Fix: initialize_global_factory() y close_global_factory() thread-safe con lock y exception-safety (#124) (@iguinea)
 
 - Fix: initialize_global_factory() y close_global_factory() thread-safe…
