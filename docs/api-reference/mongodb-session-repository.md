@@ -286,6 +286,42 @@ else:
     print("Session not found")
 ```
 
+### `delete_session`
+
+```python
+def delete_session(self, session_id: str, **kwargs: Any) -> None
+```
+
+Delete a session and everything embedded in it.
+
+Session, agents, messages, metadata, feedbacks and guardrail events share one
+document, so a single `delete_one` removes them all atomically. The repository
+also forgets what it held in memory about the session — the agents whose content
+it had cached to skip redundant writes: a cache that survived the delete would
+make `update_agent()` silently skip the next sync of the same content instead of
+reporting the session as gone.
+
+#### Parameters
+
+- **session_id** (`str`): ID of the session to delete.
+
+- **kwargs** (`Any`): Additional keyword arguments (reserved for future use).
+
+#### Raises
+
+- `ValueError`: If the session does not exist, like every other write on a missing session. One round-trip: the delete's `deleted_count` says so, no read first.
+- `PyMongoError`: If the database operation fails.
+
+#### Example
+
+```python
+repo.delete_session("user-123")
+
+# A session that does not exist raises, like every other write on one
+repo.delete_session("user-123")
+# ValueError: Session user-123 not found
+```
+
 ---
 
 ## Agent Operations

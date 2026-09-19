@@ -499,6 +499,40 @@ class MongoDBSessionRepository(SessionRepository):
             logger.error(f"Failed to read session {session_id}: {e}")
             raise
 
+    def delete_session(self, session_id: str, **kwargs: Any) -> None:
+        """Delete a Session and everything embedded in it.
+
+        Session, agents, messages, metadata, feedbacks and guardrail events
+        share one document, so a single delete_one removes them all atomically
+        (#132).
+
+        Raises:
+            ValueError: If the session does not exist, like every other write
+                on a missing session. One round-trip: the delete's
+                deleted_count says so, no read first.
+
+        The knowledge this repository holds in memory about the session dies
+        with the document: update_agent() consults the persisted-content cache
+        before the store, so a cache that survived the delete would turn the
+        next sync of the very same content into a silent no-op instead of
+        `not found`.
+        """
+        try:
+            result = self.collection.delete_one({"_id": session_id})
+            if result.deleted_count == 0:
+                raise ValueError(f"Session {session_id} not found")
+        except PyMongoError as e:
+            logger.error(f"Failed to delete session {session_id}: {e}")
+            raise
+
+        self._persisted_agents.forget_session(session_id)
+        self._last_read_agent_config = {
+            key: config
+            for key, config in self._last_read_agent_config.items()
+            if key[0] != session_id
+        }
+        logger.info(f"Deleted session: {session_id}")
+
     def create_agent(
         self, session_id: str, session_agent: SessionAgent, **kwargs: Any
     ) -> None:

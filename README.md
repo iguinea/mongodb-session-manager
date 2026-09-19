@@ -167,6 +167,7 @@ Main class extending `RepositorySessionManager` from Strands SDK.
 | `list_agents()` | List all agents in the session with their configurations |
 | `get_message_count(agent_id)` | Get message count for a specific agent |
 | `get_session_viewer_password()` | Get the auto-generated Session Viewer password |
+| `delete_session()` | Delete the session and everything embedded in it, in one atomic write. Raises `ValueError` if it does not exist |
 | `redact_latest_message(msg, agent)` | Redact latest message and record guardrail event |
 | `close()` | Close database connections |
 

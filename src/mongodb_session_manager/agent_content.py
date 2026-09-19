@@ -83,3 +83,17 @@ class LastPersistedAgents:
     def forget(self, session_id: str, agent_id: str) -> None:
         """Stop assuming anything about an agent, e.g. when a read no longer finds it."""
         self._content.pop((session_id, agent_id), None)
+
+    def forget_session(self, session_id: str) -> None:
+        """Stop assuming anything about every agent of a session (#132).
+
+        delete_session() calls it: the knowledge dies with the document, and a
+        cache that survived it would make update_agent() skip the write that
+        should say `not found`. Only this session's entries go; a repository
+        shared across sessions keeps the rest.
+        """
+        self._content = {
+            key: content
+            for key, content in self._content.items()
+            if key[0] != session_id
+        }

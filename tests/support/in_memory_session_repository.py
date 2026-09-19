@@ -205,6 +205,18 @@ class InMemorySessionRepository(SessionRepository):
             updated_at=doc.get("updated_at"),
         )
 
+    def delete_session(self, session_id: str, **kwargs: Any) -> None:
+        """Delete a session and everything embedded in it (#132)."""
+        if self._sessions.pop(session_id, None) is None:
+            raise ValueError(f"Session {session_id} not found")
+
+        self._persisted_agents.forget_session(session_id)
+        self._last_read_agent_config = {
+            key: config
+            for key, config in self._last_read_agent_config.items()
+            if key[0] != session_id
+        }
+
     # -- Agent -------------------------------------------------------------
 
     def create_agent(

@@ -128,6 +128,7 @@ MISSING_SESSION_CALLS = [
     pytest.param(
         lambda s, sid: s.add_feedback(sid, {"rating": "up"}), id="add_feedback"
     ),
+    pytest.param(lambda s, sid: s.delete_session(sid), id="delete_session"),
 ]
 
 
@@ -690,6 +691,30 @@ class SessionRepositoryContract:
         store.delete_metadata(populated, ["user.name"])
 
         assert store.get_metadata(populated)["metadata"] == {"user": {"role": "admin"}}
+
+    # -- Delete session (#132) ---------------------------------------------
+
+    def test_delete_session_removes_the_whole_document(self, store, populated):
+        """Session, agents, messages and metadata live in one document: one
+        delete takes them all, and nothing of the session survives."""
+        store.update_metadata(populated, {"status": "archived"})
+
+        store.delete_session(populated)
+
+        assert store.read_session(populated) is None
+        assert store.read_agent(populated, "a1") is None
+
+    def test_delete_session_forgets_what_it_persisted(self, store, populated):
+        """The `unchanged` cache is checked before the store, so deleting the
+        session without forgetting its agents would turn the next sync of the
+        very same content into a silent no-op instead of `not found`."""
+        read = store.read_agent(populated, "a1")
+        store.update_agent(populated, _resynced(read))
+
+        store.delete_session(populated)
+
+        with pytest.raises(ValueError, match="not found"):
+            store.update_agent(populated, _resynced(read))
 
     @pytest.mark.parametrize("call", MISSING_SESSION_CALLS)
     def test_session_writes_without_session_raise(self, store, call):
