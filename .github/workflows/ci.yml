@@ -55,7 +55,7 @@ jobs:
       # setup-uv dejo de publicar alias de major en v8 (releases inmutables):
       # `@v10` no resuelve, hay que fijar la version exacta.
       - name: Install uv
-        uses: astral-sh/setup-uv@v10.1.0
+        uses: astral-sh/setup-uv@v10.3.2
 
       # ruff y pytest viven en el grupo `dev` (PEP 735), que `uv sync` instala
       # por defecto. Con `--no-dev` el paso siguiente moriría con
@@ -93,7 +93,7 @@ jobs:
           python-version-file: .tool-versions
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v10.1.0
+        uses: astral-sh/setup-uv@v10.3.2
 
       # `dev` incluye el grupo `examples`: los tests ejercitan el ejemplo de FastAPI.
       - name: Install dependencies
@@ -117,7 +117,7 @@ jobs:
           python-version-file: .tool-versions
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v10.1.0
+        uses: astral-sh/setup-uv@v10.3.2
 
       - name: Build package
         run: uv build
