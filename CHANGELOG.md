@@ -1,5 +1,9 @@
 # Changelog
 
+## [2026-11-09] PR #148 - Chore: subir python a 3.12.15 en .tool-versions (@iguinea)
+
+- Chore: subir python a 3.12.15 en .tool-versions
+
 ## [2026-09-19] PR #138 - Add: delete_session() para eliminar sesiones completas (#132) (@iguinea)
 
 - Add: delete_session() para eliminar sesiones completas (#132)
